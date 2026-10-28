@@ -1,8 +1,8 @@
 "use strict";
 
-// Bounded light addition: decode sRGB, add each channel's light, and clip
-// each channel independently. This does not model an exact film stock or
-// recover a JPEG's original RAW data.
+// Bounded light-addition approximation: decode sRGB, add each channel's light,
+// then clip each channel independently. This does not model an exact film stock
+// or recover a JPEG's original RAW data.
 const ExposureMath = (() => {
   const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
   const srgbToLinear = (value) => value <= 0.04045
@@ -11,6 +11,7 @@ const ExposureMath = (() => {
   const linearToSrgb = (value) => value <= 0.0031308
     ? value * 12.92
     : 1.055 * value ** (1 / 2.4) - 0.055;
+
   // A symmetric display-space contrast curve keeps both black and white fixed.
   function contrastCurve(value, amount) {
     if (amount === 0 || value <= 0 || value >= 1) return value;
@@ -54,7 +55,8 @@ const ExposureMath = (() => {
         let green = linearTable[base[index + 1]] * baseGain + linearTable[participant[index + 1]] * participantGain;
         let blue = linearTable[base[index + 2]] * baseGain + linearTable[participant[index + 2]] * participantGain;
         if (settings.monochrome) red = green = blue = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-        // Preserve channels independently, including an already-white base.
+        // A saturated channel must not darken the other channels. In particular,
+        // an already-white base stays white when a coloured exposure is added.
         output[index] = encode[Math.round(clamp(red) * 65535)];
         output[index + 1] = encode[Math.round(clamp(green) * 65535)];
         output[index + 2] = encode[Math.round(clamp(blue) * 65535)];
