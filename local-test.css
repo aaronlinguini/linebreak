@@ -1,0 +1,55 @@
+.local-test .site-header,
+.local-test .workspace,
+.local-test .site-footer { width: min(1440px, calc(100% - 72px)); }
+
+.local-test .site-header { padding-block: 32px 25px; }
+.comparison-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.comparison-panel { min-width: 0; }
+.comparison-panel h2 { margin: 0 0 12px; font-size: 12px; font-weight: 400; color: var(--muted); }
+.local-test .image-stage { height: min(49svh, 560px); min-height: 250px; padding: 12px; }
+.local-test .image-stage canvas { max-height: min(calc(49svh - 26px), 534px); }
+.comparison-panel > .save-button { margin-top: 8px; font-size: 12px; }
+
+.test-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 20px 28px;
+  padding-top: 28px;
+}
+.test-controls label { font-size: 12px; }
+.renderer-control { display: grid; gap: 7px; }
+.renderer-control > label { color: var(--muted); }
+.renderer-control select {
+  max-width: 100%;
+  min-height: 34px;
+  padding: 5px 7px;
+  border: 1px solid #454545;
+  border-radius: 0;
+  background: #101010;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 12px;
+}
+.exposure-control { display: grid; gap: 11px; width: 200px; }
+.exposure-control label { display: flex; justify-content: space-between; gap: 12px; }
+.exposure-control output { color: var(--muted); font-variant-numeric: tabular-nums; }
+.exposure-control input { width: 100%; margin: 0; accent-color: #d0d0d0; cursor: pointer; }
+.monochrome-control { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.monochrome-control input { accent-color: #d0d0d0; }
+.test-controls .save-button { font-size: 12px; }
+.test-controls select:focus-visible { outline: 1px solid var(--foreground); outline-offset: 4px; }
+.test-controls input:disabled,
+.test-controls select:disabled { opacity: .5; cursor: wait; }
+
+@media (max-width: 780px) {
+  .local-test .site-header,
+  .local-test .workspace,
+  .local-test .site-footer { width: calc(100% - 32px); }
+  .comparison-grid { grid-template-columns: 1fr; gap: 24px; }
+  .local-test .image-stage { height: 46svh; min-height: 210px; }
+  .local-test .image-stage canvas { max-height: calc(46svh - 26px); }
+  .test-controls { gap: 22px; }
+  .exposure-control { width: min(240px, 100%); }
+}

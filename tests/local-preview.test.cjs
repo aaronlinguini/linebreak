@@ -10,7 +10,7 @@ const root = path.resolve(__dirname, "..");
 const sharedSource = fs.readFileSync(path.join(root, "scripts.js"), "utf8");
 const localSource = fs.readFileSync(path.join(root, "local-test.js"), "utf8");
 
-function processorHarness(imageSize = { width: 4, height: 6 }) {
+function processorHarness(imageSize = { width: 4, height: 6 }, processorOptions = {}) {
   const canvases = [];
   const decoded = [];
   function canvas() {
@@ -70,7 +70,7 @@ function processorHarness(imageSize = { width: 4, height: 6 }) {
   });
   // No GoogleDriveStorage, archive workflow, or endpoint config is supplied.
   vm.runInContext(sharedSource, sandbox);
-  const processor = sandbox.createExposureProcessor();
+  const processor = sandbox.createExposureProcessor(processorOptions);
   return { processor, canvas, canvases, decoded };
 }
 
@@ -79,6 +79,24 @@ test("the shared processor loads on a non-archive page without a Google connecti
   assert.equal(typeof processor.loadPhoto, "function");
   assert.equal(typeof processor.releasePhoto, "function");
   assert.equal(typeof processor.develop, "function");
+});
+
+test("an experimental mixer can use the shared preparation path without changing the default renderer", async () => {
+  let receivedSettings;
+  const settings = { baseExposure: -1, participantExposure: -0.5, monochrome: true };
+  const { processor, canvas } = processorHarness(undefined, {
+    mixerFactory(actualSettings) {
+      receivedSettings = actualSettings;
+      return (base, participant, output, start, end) => {
+        for (let index = start; index < end; index += 4) output.set([40,40,40,255], index);
+      };
+    }
+  });
+  const photo = { width: 1, height: 1, blob: { colour: [128,128,128,255] } };
+  const output = canvas();
+  await processor.develop(photo, photo, output, settings);
+  assert.equal(receivedSettings, settings);
+  assert.deepEqual(Array.from(output.written.data), [40,40,40,255]);
 });
 
 test("the shared browser develop path uses the actual two-way light treatment and JPEG settings", async () => {
@@ -158,29 +176,37 @@ test("the local test page keeps CSS and JavaScript external and loads no archive
     assert.ok(fs.existsSync(path.join(root, reference[1])));
     return reference[1];
   });
-  assert.deepEqual(references, ["project-config.js", "scripts.js", "local-test.js"]);
+  assert.deepEqual(references, ["project-config.js", "scripts.js", "film-renderer.js", "local-test.js"]);
+  assert.match(html, /<link\b[^>]*href="local-test\.css"/);
+  const publicHtml = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  assert.doesNotMatch(publicHtml, /film-renderer\.js|local-test\.js|test-base-exposure/);
   assert.match(html, /Nothing is uploaded or automatically saved/);
 });
 
 test("a failed local selection clears the previous result, reports the error, and allows another try", async () => {
   const listeners = new Map();
   const elements = new Map();
-  for (const id of ["test-workspace", "test-canvas", "test-empty", "test-busy", "test-base", "test-participant", "test-download", "test-status", "test-error"]) {
+  const html = fs.readFileSync(path.join(root, "local-test.html"), "utf8");
+  for (const [, id] of html.matchAll(/\bid="([^"]+)"/g)) {
     elements.set(id, {
       hidden: true, disabled: false, value: "", textContent: "", files: [],
       addEventListener(type, handler) { listeners.set(`${id}:${type}`, handler); },
       setAttribute() {}
     });
   }
+  elements.get("test-renderer").value = "film";
+  elements.get("test-base-exposure").value = "-1";
+  elements.get("test-participant-exposure").value = "-1";
   const revoked = [];
   const released = [];
   let developments = 0;
   const sandbox = vm.createContext({
-    Error,
+    Error, Blob, Date,
     document: { getElementById(id) { return elements.get(id); } },
     window: { addEventListener() {} },
     URL: { createObjectURL() { return "blob:local-result"; }, revokeObjectURL(url) { revoked.push(url); } },
     PROJECT_SETTINGS: { baseExposure: 0, participantExposure: 0, contrast: 0, monochrome: false },
+    FilmExposureMath: { version: "assumed-film-v1" },
     createExposureProcessor() {
       return {
         async loadPhoto(file) {
@@ -200,12 +226,12 @@ test("a failed local selection clears the previous result, reports the error, an
   await select("test-base", { name: "base.jpg" });
   assert.equal(developments, 0);
   await select("test-participant", { name: "second.jpg" });
-  assert.equal(developments, 1);
+  assert.equal(developments, 2);
   assert.equal(elements.get("test-canvas").hidden, false);
   assert.equal(elements.get("test-download").disabled, false);
   assert.match(elements.get("test-status").textContent, /^Ready\./);
   await select("test-base", { name: "bad.raw", invalid: true });
-  assert.deepEqual(revoked, ["blob:local-result"]);
+  assert.deepEqual(revoked, ["blob:local-result", "blob:local-result", "blob:local-result"]);
   assert.equal(elements.get("test-canvas").hidden, true);
   assert.equal(elements.get("test-download").disabled, true);
   assert.equal(elements.get("test-error").textContent, "Unsupported photograph.");
@@ -214,7 +240,7 @@ test("a failed local selection clears the previous result, reports the error, an
   assert.equal(elements.get("test-participant").disabled, false);
   assert.equal(elements.get("test-base").value, "");
   await select("test-base", { name: "replacement.jpg" });
-  assert.equal(developments, 2);
+  assert.equal(developments, 4);
   assert.equal(elements.get("test-error").hidden, true);
   assert.equal(elements.get("test-canvas").hidden, false);
   assert.equal(released.length, 1);

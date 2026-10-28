@@ -27,11 +27,11 @@ The website therefore reads the light values from both photographs at each match
 | White | Any tone | White, at the current project settings |
 | Any tone | White | White, at the current project settings |
 
-The mixer calculates continuous light contributions per colour channel. It does not need to label whole objects or pick a winning photograph. A numerical check using the actual project settings gives the same result when the two aligned inputs are swapped. Swapping full photographs can still alter the centre crop when their aspect ratios differ, because the base photograph currently defines the frame.
+The mixer calculates continuous light contributions per colour channel. It does not need to label whole objects or pick a winning photograph. A numerical check using the actual project settings gives the same result when the two aligned inputs are swapped. The base photograph defines the output frame; both full photographs fit inside it with black padding where needed. Swapping photographs with different aspect ratios can therefore change framing even though the pixel calculation is symmetric. Portraits rotate clockwise before fitting.
 
 ## The current restored baseline
 
-The inverse-Reinhard response experiment was rolled back after reviewing the artist's actual analogue double exposures and website results. Its mathematical checks passed, but it did not produce the intended photographic appearance. The website and local test page again use the previous linear-addition treatment:
+The inverse-Reinhard response experiment was rolled back after reviewing the artist's actual analogue double exposures and website results. Its mathematical checks passed, but it did not produce the intended photographic appearance. The main website still uses the previous linear-addition treatment, which is also the fixed reference on the local comparison page:
 
 ```text
 A = inverse_sRGB(base channel)
@@ -40,7 +40,7 @@ light = min(1, 2^baseEV * A + 2^participantEV * B)
 result = sRGB(light)
 ```
 
-Each RGB channel is processed independently. An optional display-space contrast curve preserves the black and white endpoints. Monochrome uses linear luminance of the combined light values. Defaults remain zero EV for each photograph, neutral contrast, and colour.
+Each RGB channel is processed independently. An optional display-space contrast curve preserves the black and white endpoints. Monochrome uses linear luminance of the combined light values. The main settings remain zero EV for each photograph and neutral contrast. Black and white or colour is selected by the artist's `forceBlackAndWhite` option.
 
 | Inputs, in 8-bit sRGB | Restored result |
 | --- | --- |
@@ -55,6 +55,14 @@ This is a reproducible baseline, not a calibrated film simulation. It preserves 
 The analogue references are `skull face` and `skull two face`. `Car_puddle (2)` and `Car_puddle (9)` are the single-exposure photographs used as website inputs. The two `double-exposure-test (2)` exports are website results. Comparisons must use these roles.
 
 The final values in a scanned photograph reflect the film, development, scanning and digitization response, as described by [Debevec and Malik](https://www.pauldebevec.com/Research/HDR/debevec-siggraph97.pdf). Inverse sRGB alone does not recover that full response. A future model needs visual validation against the artist's examples before replacing this baseline.
+
+## The separate film-curve experiment
+
+`film-renderer.js` adapts the supplied `film.js` mathematics to browser RGBA pixels. It estimates each pixel's exposure using an assumed inverse response, scales each photograph by its own EV, adds those estimates, and applies the forward response. The supplied toe, shoulder, softness, and pure-white endpoint are preserved so the first comparison tests that actual proposal. Lookup tables are reused across exposure adjustments. The public renderer and Google archive flow are unchanged.
+
+This model accepts both digital photographs and film scans. Neither source is guaranteed to match its assumed response. Its normalized density-shaped curve is used directly as positive brightness; it does not separately reconstruct the negative's transmission and the print or scan. It is not calibrated to a stock, developer, scanner, or capture duration. Colour is an approximation applying the same response separately to RGB channels. A technical caveat is the large exposure jump assigned to pure white compared with almost-white, which deserves review on real clipped highlights.
+
+The fixed reference uses the current addition at zero EV. The adjustable result starts with the experimental curve at minus one EV per photograph. Match EV settings when judging the effect of the curve itself, because exposure reduction and the response curve are different changes. [FILM-EXPERIMENT.md](FILM-EXPERIMENT.md) covers the controls, full proposal, visual comparisons, result records, and exact Git fallback.
 
 ## Camera modes
 

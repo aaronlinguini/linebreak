@@ -75,7 +75,7 @@ const PROJECT_SETTINGS = Object.freeze({
 });
 
 // Shared by the archive page and the separate browser-only test page.
-function createExposureProcessor() {
+function createExposureProcessor({ mixerFactory = ExposureMath.createMixer } = {}) {
   const MAX_BYTES = 30 * 1024 * 1024;
   const SOURCE_EDGE = 2400;
   const nextFrame = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -197,7 +197,7 @@ function createExposureProcessor() {
   }
   async function processPixels(pair, settings) {
     const result = new ImageData(pair.width, pair.height);
-    const mix = ExposureMath.createMixer(settings);
+    const mix = mixerFactory(settings);
     // Yield between chunks so mobile browsers can paint and respond to controls.
     const chunk = 65536 * 4;
     for (let start = 0; start < result.data.length; start += chunk) {

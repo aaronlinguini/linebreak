@@ -4,7 +4,7 @@ Participants add a photograph to create a double exposure. The Google connection
 
 ## Try it
 
-To test the exposure effect without Google, right-click `local-test.html` in VS Code and choose **Open with Live Server**. Choose your base photo and a second photo from your computer; the result develops automatically. Changing either photo makes another exposure. Use **Download image** to keep a copy. This separate page uses the same photo preparation, crop, mixer, project settings, and JPEG export as the main website, but has no archive connection. Nothing is uploaded or automatically saved there.
+To test without Google, right-click `local-test.html` in VS Code and choose **Open with Live Server**. Choose your base photo and a second photo. The page shows the current treatment at zero EV beside an adjustable experiment. Try the current addition or experimental film curve, adjust each photograph's exposure separately, and compare black and white with colour. Both results use the same full-frame preparation and JPEG export. Download the results and settings to keep a record; nothing is uploaded or automatically archived there. See [FILM-EXPERIMENT.md](FILM-EXPERIMENT.md) for a useful comparison sequence and how to return to the saved version.
 
 There is no frontend installation or build. To test automatic archiving on the main `index.html` page, first deploy and connect the Google archive: follow [GOOGLE-SETUP.md](GOOGLE-SETUP.md).
 
@@ -25,10 +25,11 @@ python3 -m http.server 8000 --bind 127.0.0.1
 ## Files
 
 - `index.html`: structure and content; links the stylesheet and deferred script.
-- `styles.css`: all page styling and responsive layouts.
+- `styles.css`: shared page styling and responsive layouts.
 - `scripts.js`: photo loading, pairing, light processing, and downloads.
-- `local-test.html` and `local-test.js`: browser-only exposure testing without Google.
-- `project-config.js`: the public Google deployment URL and connection timeouts.
+- `local-test.html`, `local-test.js`, and `local-test.css`: browser-only comparison controls and layout without Google.
+- `film-renderer.js`: experimental assumed film-response model, loaded only by the local comparison page.
+- `project-config.js`: the public Google deployment URL, artist colour option, and connection timeouts.
 - `archive-workflow.js`: original → develop → result archive workflow and retries.
 - `drive-storage.js`: website-side Google connection.
 - `drive-bridge.js`: external script running inside Google's hidden bridge frame.
@@ -39,11 +40,11 @@ There are no inline styles, executable script bodies, or inline event handlers i
 
 ## Exposure treatment
 
-The current blend is the restored linear-addition baseline. It works pixel by pixel on the aligned photographs: decode sRGB, scale each channel by `2 ** exposureEV`, add the two photographs, and clip each channel independently at white. At neutral settings, white stays white and black reveals the other photograph. This treatment is symmetric.
+The main website's blend remains the restored linear-addition treatment. It works pixel by pixel on the aligned photographs: decode sRGB, scale each channel by `2 ** exposureEV`, add the two photographs, and clip each channel independently at white. At neutral settings, white stays white and black reveals the other photograph. This treatment is symmetric. The local page can compare it with the supplied film-inspired model without replacing the public renderer.
 
 The later inverse-Reinhard response was removed after review of the artist's analogue examples and website outputs. Numerical boundary checks did not establish a convincing analogue match. This rollback restores the earlier behaviour; it does not claim to finish the film simulation.
 
-`PROJECT_SETTINGS` in `scripts.js` defines the artist's treatment. Google selects a random eligible source. The participant interface has no exposure sliders, contrast controls, colour options, pairing selector, or separate develop button. The restored settings use colour, neutral contrast, and zero exposure adjustment per photograph.
+`PROJECT_SETTINGS` in `scripts.js` defines the artist's treatment. Google selects a random eligible source. The participant interface has no exposure sliders, contrast controls, colour options, pairing selector, or separate develop button. The main treatment uses neutral contrast and zero exposure adjustment per photograph; the colour option comes from `project-config.js`.
 
 A rendered JPEG does not retain its original scene exposure or a measured film/development/scan response. See [EXPOSURE-NOTES.md](EXPOSURE-NOTES.md) for the current model and limitations.
 
@@ -56,9 +57,9 @@ JPEG, PNG, WebP, and AVIF are accepted, up to 30 MB per file. HEIC and RAW need 
 In `project-config.js`, change `forceBlackAndWhite`:
 
 - `true`: make every finished double exposure black and white.
-- `false`: preserve the photographs' existing colours, including photographs that are already black and white. This is the default.
+- `false`: preserve the photographs' existing colours, including photographs that are already black and white.
 
-Reload the page and select the photographs again after changing the option. It applies to both the main site and the local test page. The archived original uploads retain their original colours and orientation.
+The saved artist setting is currently `true`. Reload after changing the configuration. It controls the main site and the initial colour choice on the local test page; the local comparison also has its own temporary colour toggle. The archived original uploads retain their original colours and orientation.
 
 ## Checks
 
@@ -74,6 +75,8 @@ The checks cover exposure maths, exact original bytes, duplicate and self-pairin
 ## Version history
 
 Git history starts with the current restored project. The `baseline` tag names this first saved version. Later work should be saved in small commits so it can be undone directly.
+
+The exact state before the film comparison experiment is commit `54a56dd` on `main`, including portrait rotation and the artist's enabled black-and-white setting. The experiment is on `codex/film-comparison`. [The experiment guide](FILM-EXPERIMENT.md#return-to-the-saved-version) explains switching between those saved versions. The older `baseline` tag predates the rotation and colour-option changes.
 
 In VS Code, open **Source Control** to see changed files and saved history. To save a version manually, stage the intended files, enter a short description, and commit. Saving a file alone does not create a Git version.
 
