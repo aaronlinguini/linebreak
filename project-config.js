@@ -6,7 +6,7 @@ const EXPOSURE_CONFIG = Object.freeze({
   googleScriptUrl: "",
   // Artist option: true makes all double exposures black and white.
   // false preserves each photograph's colours, including existing B&W photos.
-  forceBlackAndWhite: false,
+  forceBlackAndWhite: true,
   connectionTimeoutMs: 30000,
   requestTimeoutMs: 120000
 });
