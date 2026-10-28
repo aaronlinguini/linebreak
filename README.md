@@ -47,9 +47,18 @@ The later inverse-Reinhard response was removed after review of the artist's ana
 
 A rendered JPEG does not retain its original scene exposure or a measured film/development/scan response. See [EXPOSURE-NOTES.md](EXPOSURE-NOTES.md) for the current model and limitations.
 
-The base image defines the frame. The participant image is cropped at the centre to cover it; there are no positioning controls yet. Results use up to 2,400 pixels on the longest edge, and are smaller if either source would otherwise be enlarged. The archive and optional download contain the same JPEG bytes. Resizing is only for working images and results; the participant original is uploaded unchanged.
+Portrait photographs are rotated 90 degrees clockwise into landscape orientation before processing, for both the base and participant image. Each full photograph is fitted into the base frame without cropping or stretching; different proportions leave black padding, which contributes no exposure. Results use up to 2,400 pixels on the longest edge, and are smaller if either source would otherwise be enlarged. The archive and optional download contain the same JPEG bytes. Rotation and resizing affect working images and results; the participant original is uploaded unchanged.
 
 JPEG, PNG, WebP, and AVIF are accepted, up to 30 MB per file. HEIC and RAW need to be exported to a supported format first. Transparent image regions contribute black (no light).
+
+## Artist colour option
+
+In `project-config.js`, change `forceBlackAndWhite`:
+
+- `true`: make every finished double exposure black and white.
+- `false`: preserve the photographs' existing colours, including photographs that are already black and white. This is the default.
+
+Reload the page and select the photographs again after changing the option. It applies to both the main site and the local test page. The archived original uploads retain their original colours and orientation.
 
 ## Checks
 

@@ -10,17 +10,22 @@ const root = path.resolve(__dirname, "..");
 const sharedSource = fs.readFileSync(path.join(root, "scripts.js"), "utf8");
 const localSource = fs.readFileSync(path.join(root, "local-test.js"), "utf8");
 
-function processorHarness() {
+function processorHarness(imageSize = { width: 4, height: 6 }) {
   const canvases = [];
   const decoded = [];
   function canvas() {
-    const element = { width: 1, height: 1, draws: [], written: null };
+    const element = { width: 1, height: 1, draws: [], operations: [], fills: [], written: null };
     let current;
     const context = {
       drawImage(source, ...coordinates) {
         current = source;
         element.draws.push({ source, coordinates });
       },
+      fillRect(...coordinates) { element.fills.push(coordinates); },
+      save() { element.operations.push(["save"]); },
+      restore() { element.operations.push(["restore"]); },
+      translate(...coordinates) { element.operations.push(["translate", ...coordinates]); },
+      rotate(angle) { element.operations.push(["rotate", angle]); },
       clearRect() { current = null; },
       getImageData(x, y, width, height) {
         const data = new Uint8ClampedArray(width * height * 4);
@@ -33,8 +38,9 @@ function processorHarness() {
     element.getContext = () => context;
     element.toBlob = (callback, type, quality) => {
       element.encoding = { type, quality };
-      callback({ type, pixels: element.written.data });
+      callback({ type, pixels: element.written?.data, width: element.width, height: element.height });
     };
+    element.toDataURL = () => "data:image/jpeg;base64,test";
     canvases.push(element);
     return element;
   }
@@ -44,6 +50,11 @@ function processorHarness() {
   };
   const sandbox = vm.createContext({
     document, setTimeout,
+    URL: { createObjectURL() { return "blob:test-photo"; }, revokeObjectURL() {} },
+    Image: class {
+      constructor() { this.naturalWidth = imageSize.width; this.naturalHeight = imageSize.height; }
+      async decode() {}
+    },
     ImageData: class {
       constructor(width, height) {
         this.width = width;
@@ -87,21 +98,45 @@ test("the shared browser develop path uses the actual two-way light treatment an
   assert.equal(canvases[1].height, 1);
 });
 
-test("local and archive processing share the same centered crop without enlarging the smaller source", async () => {
+test("local and archive processing preserve the full smaller photograph without enlargement", async () => {
   const { processor, canvas, canvases, decoded } = processorHarness();
   const output = canvas();
   const result = await processor.develop(
-    { width: 200, height: 400, blob: { colour: [0,0,0,255] } },
+    { width: 400, height: 200, blob: { colour: [0,0,0,255] } },
     { width: 150, height: 100, blob: { colour: [80,100,120,255] } },
     output
   );
-  assert.equal(result.width, 50);
+  assert.equal(result.width, 200);
   assert.equal(result.height, 100);
   const scratch = canvases[1];
-  assert.deepEqual(scratch.draws[0].coordinates, [0,0,50,100]);
-  assert.deepEqual(scratch.draws[1].coordinates, [50,0,50,100,0,0,50,100]);
+  assert.deepEqual(scratch.draws[0].coordinates, [0,0,200,100]);
+  assert.deepEqual(scratch.draws[1].coordinates, [25,0,150,100]);
+  assert.deepEqual(scratch.fills, [[0,0,200,100], [0,0,200,100]]);
   assert.deepEqual(Array.from(output.written.data.slice(0,4)), [80,100,120,255]);
   assert.ok(decoded.every((bitmap) => bitmap.closed));
+});
+
+test("portrait preparation rotates the full frame clockwise before making working copies", async () => {
+  const { processor, canvases } = processorHarness({ width: 4, height: 6 });
+  const photo = await processor.loadPhoto({ name: "portrait.jpg", type: "image/jpeg", size: 100 });
+  assert.equal(photo.width, 6);
+  assert.equal(photo.height, 4);
+  assert.equal(photo.originalWidth, 4);
+  assert.equal(photo.originalHeight, 6);
+  assert.deepEqual(canvases[0].operations, [["save"], ["translate",6,0], ["rotate",Math.PI/2], ["restore"]]);
+  assert.deepEqual(canvases[0].draws[0].coordinates, [0,0,4,6]);
+  assert.equal(photo.blob.width, 6);
+  assert.equal(photo.blob.height, 4);
+});
+
+test("landscape and square preparation retain their orientation", async () => {
+  for (const size of [{ width: 6, height: 4 }, { width: 4, height: 4 }]) {
+    const { processor, canvases } = processorHarness(size);
+    const photo = await processor.loadPhoto({ name: "photo.jpg", type: "image/jpeg", size: 100 });
+    assert.equal(photo.width, size.width);
+    assert.equal(photo.height, size.height);
+    assert.deepEqual(canvases[0].operations, []);
+  }
 });
 
 test("local photo validation rejects unsupported or oversized files before decoding", async () => {
@@ -123,7 +158,7 @@ test("the local test page keeps CSS and JavaScript external and loads no archive
     assert.ok(fs.existsSync(path.join(root, reference[1])));
     return reference[1];
   });
-  assert.deepEqual(references, ["scripts.js", "local-test.js"]);
+  assert.deepEqual(references, ["project-config.js", "scripts.js", "local-test.js"]);
   assert.match(html, /Nothing is uploaded or automatically saved/);
 });
 

@@ -70,7 +70,8 @@ const ExposureMath = (() => {
 
 // Exposure treatment is the artist's decision. Pairing is selected by Google.
 const PROJECT_SETTINGS = Object.freeze({
-  baseExposure: 0, participantExposure: 0, contrast: 0, monochrome: false
+  baseExposure: 0, participantExposure: 0, contrast: 0,
+  monochrome: typeof EXPOSURE_CONFIG !== "undefined" && EXPOSURE_CONFIG.forceBlackAndWhite === true
 });
 
 // Shared by the archive page and the separate browser-only test page.
@@ -98,7 +99,14 @@ function createExposureProcessor() {
       if (!image.naturalWidth || image.naturalWidth * image.naturalHeight > 80000000) {
         throw new Error("This photograph is too large to process safely. Export a smaller version and try again.");
       }
-      const dimensions = ExposureMath.outputSize(image.naturalWidth, image.naturalHeight, SOURCE_EDGE);
+      // naturalWidth/Height reflect the browser's decoded EXIF orientation.
+      // Turn portraits sideways before fitting either photograph to the frame.
+      const portrait = image.naturalHeight > image.naturalWidth;
+      const dimensions = ExposureMath.outputSize(
+        portrait ? image.naturalHeight : image.naturalWidth,
+        portrait ? image.naturalWidth : image.naturalHeight,
+        SOURCE_EDGE
+      );
       const source = document.createElement("canvas");
       source.width = dimensions.width;
       source.height = dimensions.height;
@@ -106,7 +114,13 @@ function createExposureProcessor() {
       // Transparent PNG areas contribute no light, rather than becoming white.
       sourceContext.fillStyle = "#000";
       sourceContext.fillRect(0, 0, source.width, source.height);
-      sourceContext.drawImage(image, 0, 0, source.width, source.height);
+      if (portrait) {
+        sourceContext.save();
+        sourceContext.translate(source.width, 0);
+        sourceContext.rotate(Math.PI / 2);
+        sourceContext.drawImage(image, 0, 0, source.height, source.width);
+        sourceContext.restore();
+      } else sourceContext.drawImage(image, 0, 0, source.width, source.height);
       const thumbnail = document.createElement("canvas");
       const thumbnailSize = ExposureMath.outputSize(source.width, source.height, 320);
       thumbnail.width = thumbnailSize.width;
@@ -146,28 +160,34 @@ function createExposureProcessor() {
   async function alignPhotos(basePhoto, participantPhoto, maxEdge) {
     const base = { ...basePhoto };
     const participant = { ...participantPhoto };
-    // Do not upscale either photograph. Participant framing is a centered crop
-    // to the base aspect ratio; every pixel must represent overlapping exposure.
+    // Preserve both full frames. If aspect ratios differ, black padding adds no
+    // exposure. Reduce the output when needed instead of enlarging either photo.
     const baseSize = ExposureMath.outputSize(base.width, base.height, maxEdge);
-    const crop = ExposureMath.coverCrop(participant.width, participant.height, baseSize.width, baseSize.height);
-    const scale = Math.min(1, crop.width / baseSize.width, crop.height / baseSize.height);
-    const width = Math.max(1, Math.round(baseSize.width * scale));
-    const height = Math.max(1, Math.round(baseSize.height * scale));
+    const participantFitScale = Math.min(baseSize.width / participant.width, baseSize.height / participant.height);
+    const scale = Math.min(1, 1 / participantFitScale);
+    const width = Math.max(1, Math.floor(baseSize.width * scale));
+    const height = Math.max(1, Math.floor(baseSize.height * scale));
     const scratch = document.createElement("canvas");
     scratch.width = width;
     scratch.height = height;
     const scratchContext = context(scratch);
+    function drawFullPhoto(photo, image) {
+      const fit = Math.min(width / photo.width, height / photo.height, 1);
+      const drawWidth = photo.width * fit;
+      const drawHeight = photo.height * fit;
+      scratchContext.fillStyle = "#000";
+      scratchContext.fillRect(0, 0, width, height);
+      scratchContext.drawImage(image, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
+    }
     let source;
     try {
       source = await decodeSource(base);
-      scratchContext.drawImage(source, 0, 0, width, height);
+      drawFullPhoto(base, source);
       source.close?.();
       source = null;
       const basePixels = scratchContext.getImageData(0, 0, width, height);
-      scratchContext.clearRect(0, 0, width, height);
       source = await decodeSource(participant);
-      const participantCrop = ExposureMath.coverCrop(participant.width, participant.height, width, height);
-      scratchContext.drawImage(source, participantCrop.x, participantCrop.y, participantCrop.width, participantCrop.height, 0, 0, width, height);
+      drawFullPhoto(participant, source);
       const participantPixels = scratchContext.getImageData(0, 0, width, height);
       return { width, height, base: basePixels.data, participant: participantPixels.data };
     } finally {

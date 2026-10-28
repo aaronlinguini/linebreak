@@ -44,6 +44,17 @@ test("the math module loads without a document or browser", () => {
   assert.ok(Object.isFrozen(math));
 });
 
+test("the artist's black-and-white option controls the actual shared mixer settings", () => {
+  for (const forceBlackAndWhite of [false, true]) {
+    const configured = vm.createContext({ EXPOSURE_CONFIG: { forceBlackAndWhite } });
+    vm.runInContext(`${source}\nglobalThis.math = ExposureMath; globalThis.settings = PROJECT_SETTINGS;`, configured);
+    const output = new Uint8ClampedArray(4);
+    configured.math.createMixer(configured.settings)([255, 0, 0, 255], [0, 0, 0, 255], output);
+    assert.equal(configured.settings.monochrome, forceBlackAndWhite);
+    assert.deepEqual(Array.from(output), forceBlackAndWhite ? [127, 127, 127, 255] : [255, 0, 0, 255]);
+  }
+});
+
 test("sRGB transfer matches reference values and round trips", () => {
   close(math.srgbToLinear(0), 0);
   close(math.srgbToLinear(1), 1);

@@ -140,6 +140,8 @@ To change server code later, update **Manage deployments → Edit → New versio
 
 ## Artist settings
 
+Set `forceBlackAndWhite` in `project-config.js` to `true` to make all results black and white, or `false` to preserve the input colours. Reload after changing it; publish the updated configuration when using the hosted site. The local test page reads the same option. The archived original files remain untouched.
+
 The default is to include completed participant originals as future bases. To stop that, set Script Property `INCLUDE_PARTICIPANT_PHOTOS` to `false`; originals are still archived, but the pool uses artist images only. This is an artist setting, not a visitor control.
 
 For a local HTTP preview, add an exact additional origin such as `http://127.0.0.1:8000` to Script Property `ALLOWED_ORIGINS`. Multiple origins are comma-separated. `SITE_URL` must still identify the published HTTPS site so Google can load the external bridge script. Opening `index.html` through `file://` cannot connect to this archive.
