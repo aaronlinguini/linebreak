@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#050505">
+    <title>Double exposure</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="project-config.js" defer></script>
+    <script src="drive-storage.js" defer></script>
+    <script src="archive-workflow.js" defer></script>
+    <script src="scripts.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#workspace">Skip to photograph</a>
+
+    <header class="site-header">
+      <h1>double exposure</h1>
+    </header>
+
+    <main id="workspace" class="workspace" aria-busy="false">
+      <div class="image-stage">
+        <p id="result-empty" class="empty-state">[placeholder if you want to add text]</p>
+        <img id="participant-preview" hidden alt="Your selected photograph">
+        <canvas id="canvas" width="1" height="1" hidden aria-label="Your double exposure"></canvas>
+        <p id="busy-indicator" class="busy-indicator" hidden>Developing…</p>
+      </div>
+
+      <div class="actions">
+        <div class="file-picker">
+          <input id="participant-input" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="archive-note" disabled>
+          <label id="upload-label" class="upload-label" for="participant-input">Add a photograph</label>
+        </div>
+        <button id="download-button" class="save-button" type="button" hidden disabled>Download image</button>
+        <button id="retry-button" class="save-button" type="button" hidden>Retry</button>
+      </div>
+
+      <div class="feedback">
+        <p id="status" class="status" role="status" aria-live="polite">Choose a photograph.</p>
+        <p id="error" class="error" role="alert" hidden></p>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <p id="archive-note" class="privacy-note">Your photograph joins the collection. Originals and double exposures are saved.</p>
+    </footer>
+  </body>
+</html>

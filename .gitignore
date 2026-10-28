@@ -1,0 +1,22 @@
+# macOS metadata
+.DS_Store
+._*
+.Spotlight-V100/
+.Trashes/
+.fseventsd/
+
+# Local dependencies and logs
+node_modules/
+*.log
+
+# Local secrets and Google account/deployment configuration
+.env
+.env.*
+!.env.example
+.clasprc.json
+.clasp.json
+secrets/
+
+# Private working photographs and incoming uploads
+private-photos/
+uploads/

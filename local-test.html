@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#050505">
+    <title>Double exposure · local test</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="scripts.js" defer></script>
+    <script src="local-test.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <h1>double exposure · local test</h1>
+    </header>
+
+    <main id="test-workspace" class="workspace" aria-busy="false">
+      <div class="image-stage">
+        <p id="test-empty" class="empty-state">Choose two photographs.</p>
+        <canvas id="test-canvas" width="1" height="1" hidden aria-label="Test double exposure"></canvas>
+        <p id="test-busy" class="busy-indicator" hidden>Developing…</p>
+      </div>
+
+      <div class="actions">
+        <div class="file-picker">
+          <input id="test-base" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="test-note">
+          <label class="upload-label" for="test-base">Choose your base photo</label>
+        </div>
+        <div class="file-picker">
+          <input id="test-participant" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="test-note">
+          <label class="upload-label" for="test-participant">Choose a second photo</label>
+        </div>
+        <button id="test-download" class="save-button" type="button" hidden disabled>Download image</button>
+      </div>
+
+      <div class="feedback">
+        <p id="test-status" class="status" role="status" aria-live="polite">Choose a base photo and a second photo.</p>
+        <p id="test-error" class="error" role="alert" hidden></p>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <p id="test-note" class="privacy-note">Local test. Nothing is uploaded or automatically saved. Download a copy to keep it.</p>
+    </footer>
+  </body>
+</html>
