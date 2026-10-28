@@ -148,6 +148,9 @@ test("an in-flight render disables controls and saves its own settings snapshot"
   h.elements.get("test-base-exposure").value = "-2";
   const pending = h.fire("test-base-exposure");
   assert.equal(h.elements.get("test-base").disabled, true);
+  assert.equal(h.elements.get("test-participant").disabled, true);
+  assert.equal(h.elements.get("test-base-camera").disabled, true);
+  assert.equal(h.elements.get("test-participant-camera").disabled, true);
   assert.equal(h.elements.get("test-renderer").disabled, true);
   assert.equal(h.elements.get("test-settings-download").disabled, true);
   h.elements.get("test-base-exposure").value = "2";
@@ -156,10 +159,68 @@ test("an in-flight render disables controls and saves its own settings snapshot"
   resume();
   await pending;
   assert.equal(h.elements.get("test-base").disabled, false);
+  assert.equal(h.elements.get("test-base-camera").disabled, false);
+  assert.equal(h.elements.get("test-participant-camera").disabled, false);
   const recipe = await h.recipe();
   assert.equal(recipe.trial.settings.baseExposure, -2);
   await h.fire("test-download", "click");
   assert.match(h.downloads.at(-1).filename, /base-minus2EV/);
+});
+
+test("separate native-camera inputs leave the existing photo-library choices available", () => {
+  for (const id of ["test-base", "test-participant"]) {
+    const tag = html.match(new RegExp(`<input\\b[^>]*id="${id}"[^>]*>`))[0];
+    assert.match(tag, /accept="image\/jpeg,image\/png,image\/webp,image\/avif"/);
+    assert.doesNotMatch(tag, /\bcapture\b/);
+  }
+  for (const id of ["test-base-camera", "test-participant-camera"]) {
+    const tag = html.match(new RegExp(`<input\\b[^>]*id="${id}"[^>]*>`))[0];
+    assert.match(tag, /accept="image\/jpeg"/);
+    assert.match(tag, /capture="environment"/);
+    assert.match(html, new RegExp(`<label\\b[^>]*for="${id}"[^>]*>Take (?:base|second) photo<\\/label>`));
+  }
+});
+
+test("camera captures replace the selected roles through the same comparison pipeline", async () => {
+  const h = harness();
+  await h.pair();
+  h.elements.get("test-monochrome").checked = false;
+  await h.fire("test-monochrome");
+  h.elements.get("test-base-exposure").value = "-0.5";
+  await h.fire("test-base-exposure");
+  h.elements.get("test-base-camera").value = "camera-base.jpg";
+  await h.select("test-base-camera", "camera-base.jpg");
+  assert.equal(h.elements.get("test-base-camera").value, "", "capturing again must trigger a new selection");
+  let recipe = await h.recipe();
+  assert.equal(recipe.sources.base.name, "camera-base.jpg");
+  assert.equal(recipe.sources.participant.name, "second.jpg");
+  assert.equal(recipe.sources.base.originalWidth, 400);
+  assert.equal(recipe.sources.base.workingWidth, 600);
+  assert.equal(recipe.trial.settings.baseExposure, -0.5);
+  assert.equal(recipe.trial.settings.monochrome, false);
+
+  h.elements.get("test-participant-camera").value = "camera-second.jpg";
+  await h.select("test-participant-camera", "camera-second.jpg");
+  recipe = await h.recipe();
+  assert.equal(recipe.sources.base.name, "camera-base.jpg");
+  assert.equal(recipe.sources.participant.name, "camera-second.jpg");
+  assert.equal(h.elements.get("test-participant-camera").value, "");
+  assert.deepEqual(h.renders.slice(-2).map((settings) => settings.renderer), ["linear", "film"]);
+});
+
+test("cancelling a camera choice preserves the completed comparison", async () => {
+  const h = harness();
+  await h.pair();
+  h.elements.get("test-base-camera").files = [];
+  await h.fire("test-base-camera");
+  h.elements.get("test-participant-camera").files = [];
+  await h.fire("test-participant-camera");
+  assert.equal(h.renders.length, 2);
+  assert.equal(h.revoked.length, 0);
+  assert.equal(h.elements.get("test-canvas").hidden, false);
+  const recipe = await h.recipe();
+  assert.equal(recipe.sources.base.name, "base.jpg");
+  assert.equal(recipe.sources.participant.name, "second.jpg");
 });
 
 test("leaving the page releases all result URLs", async () => {

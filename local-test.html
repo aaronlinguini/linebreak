@@ -39,13 +39,25 @@
       </div>
 
       <div class="actions">
-        <div class="file-picker">
-          <input id="test-base" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="test-note">
-          <label class="upload-label" for="test-base">Choose your base photo</label>
+        <div class="photo-picker-group" role="group" aria-label="Base photograph">
+          <div class="file-picker">
+            <input id="test-base" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="test-note">
+            <label class="upload-label" for="test-base">Choose your base photo</label>
+          </div>
+          <div class="file-picker">
+            <input id="test-base-camera" class="file-input" type="file" accept="image/jpeg" capture="environment" aria-describedby="test-note">
+            <label class="upload-label" for="test-base-camera">Take base photo</label>
+          </div>
         </div>
-        <div class="file-picker">
-          <input id="test-participant" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="test-note">
-          <label class="upload-label" for="test-participant">Choose a second photo</label>
+        <div class="photo-picker-group" role="group" aria-label="Second photograph">
+          <div class="file-picker">
+            <input id="test-participant" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="test-note">
+            <label class="upload-label" for="test-participant">Choose a second photo</label>
+          </div>
+          <div class="file-picker">
+            <input id="test-participant-camera" class="file-input" type="file" accept="image/jpeg" capture="environment" aria-describedby="test-note">
+            <label class="upload-label" for="test-participant-camera">Take second photo</label>
+          </div>
         </div>
       </div>
 

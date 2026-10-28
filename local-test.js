@@ -8,6 +8,7 @@ function initializeLocalExposureTest() {
     referenceCanvas: byId("test-reference-canvas"), referenceEmpty: byId("test-reference-empty"),
     empty: byId("test-empty"), busy: byId("test-busy"),
     base: byId("test-base"), participant: byId("test-participant"),
+    baseCamera: byId("test-base-camera"), participantCamera: byId("test-participant-camera"),
     download: byId("test-download"), referenceDownload: byId("test-reference-download"),
     settingsDownload: byId("test-settings-download"),
     renderer: byId("test-renderer"), baseExposure: byId("test-base-exposure"),
@@ -28,7 +29,7 @@ function initializeLocalExposureTest() {
     resultUrl: null, referenceUrl: null, settingsUrl: null,
     referenceRecord: null, completed: null
   };
-  const controls = [ui.base, ui.participant, ui.renderer, ui.baseExposure, ui.participantExposure, ui.monochrome, ui.reset];
+  const controls = [ui.base, ui.participant, ui.baseCamera, ui.participantCamera, ui.renderer, ui.baseExposure, ui.participantExposure, ui.monochrome, ui.reset];
   ui.monochrome.checked = PROJECT_SETTINGS.monochrome;
 
   function evLabel(value) {
@@ -204,6 +205,8 @@ function initializeLocalExposureTest() {
 
   ui.base.addEventListener("change", () => choosePhoto("base", ui.base));
   ui.participant.addEventListener("change", () => choosePhoto("participant", ui.participant));
+  ui.baseCamera.addEventListener("change", () => choosePhoto("base", ui.baseCamera));
+  ui.participantCamera.addEventListener("change", () => choosePhoto("participant", ui.participantCamera));
   for (const slider of [ui.baseExposure, ui.participantExposure]) {
     slider.addEventListener("input", updateReadouts);
     slider.addEventListener("change", () => changeSettings());

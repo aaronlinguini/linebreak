@@ -31,6 +31,10 @@
           <input id="participant-input" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="archive-note" disabled>
           <label id="upload-label" class="upload-label" for="participant-input">Add a photograph</label>
         </div>
+        <div class="file-picker">
+          <input id="participant-camera-input" class="file-input" type="file" accept="image/jpeg" capture="environment" aria-describedby="archive-note" disabled>
+          <label id="camera-label" class="upload-label" for="participant-camera-input">Take a photo</label>
+        </div>
         <button id="download-button" class="save-button" type="button" hidden disabled>Download image</button>
         <button id="retry-button" class="save-button" type="button" hidden>Retry</button>
       </div>

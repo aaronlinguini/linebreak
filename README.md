@@ -8,6 +8,16 @@ To test without Google, right-click `local-test.html` in VS Code and choose **Op
 
 There is no frontend installation or build. To test automatic archiving on the main `index.html` page, first deploy and connect the Google archive: follow [GOOGLE-SETUP.md](GOOGLE-SETUP.md).
 
+## Phones and tablets
+
+The same pages adapt to phones, tablets, and desktop screens. Participants can choose an existing photograph or use **Take a photo**, which asks a supported mobile browser to open the device's camera, preferring the rear camera. The local comparison page offers camera capture for either source. On desktop browsers, a camera control may open an ordinary file chooser instead. No camera stream starts when the page loads.
+
+Camera inputs request JPEG. Library inputs request JPEG, PNG, WebP, or AVIF so the device can supply a supported image. Some Apple photo pickers convert HEIC to JPEG; raw HEIC/HEIF and RAW files are not supported by this project's processor or archive. The original archive keeps the exact file delivered by the picker, including any conversion performed by the device before selection.
+
+To test on a real phone or tablet, use the published HTTPS URL or Live Server's reachable local-network address while both devices are on the same network. `127.0.0.1` or `localhost` on the phone refers to the phone itself, not the computer. The comparison page works without Google; the main page enables both upload choices only after its archive is connected and has a base photograph.
+
+Before public use, check both library selection and native camera capture on an actual iPhone/iPad and Android device, including cancellation and a portrait photograph. Desktop viewport checks verify layout, not a physical device's camera chooser or HEIC conversion.
+
 1. Upload artist photographs to the project's Drive folder and import them through the private Apps Script owner function.
 2. On the website, press **Add a photograph**. Its exact original is saved, a base is selected, and the exposure develops and archives automatically.
 3. Wait for **Saved to the archive.** Downloading a copy is optional.

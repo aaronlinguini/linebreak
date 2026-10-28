@@ -116,7 +116,7 @@ h1 { margin: 0; font-size: 13px; font-weight: 400; letter-spacing: .025em; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 42px;
+  min-height: 44px;
   padding: 9px 19px;
   border: 1px solid #5b5b5b;
   color: var(--foreground);
@@ -128,7 +128,7 @@ h1 { margin: 0; font-size: 13px; font-weight: 400; letter-spacing: .025em; }
 .file-input:disabled + label { cursor: wait; opacity: .5; }
 
 .save-button {
-  min-height: 42px;
+  min-height: 44px;
   padding: 9px 0;
   border: 0;
   border-bottom: 1px solid #555;

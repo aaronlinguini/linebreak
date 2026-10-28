@@ -226,6 +226,7 @@ function initializeExposureStudio() {
     workspace: byId("workspace"), canvas: byId("canvas"),
     resultEmpty: byId("result-empty"), participantPreview: byId("participant-preview"),
     participantInput: byId("participant-input"), uploadLabel: byId("upload-label"),
+    cameraInput: byId("participant-camera-input"), cameraLabel: byId("camera-label"),
     download: byId("download-button"), retry: byId("retry-button"),
     status: byId("status"), error: byId("error"), busy: byId("busy-indicator")
   };
@@ -249,7 +250,9 @@ function initializeExposureStudio() {
     ui.retry.textContent = workflow.pending ? "Retry saving" : "Retry";
   }
   function refreshActions() {
-    ui.participantInput.disabled = state.working || !state.ready || workflow.pending;
+    for (const input of [ui.participantInput, ui.cameraInput]) {
+      input.disabled = state.working || !state.ready || workflow.pending;
+    }
     ui.download.hidden = !state.hasResult;
     ui.download.disabled = !state.hasResult || state.working;
     ui.retry.disabled = state.working;
@@ -257,6 +260,7 @@ function initializeExposureStudio() {
     ui.workspace.setAttribute("aria-busy", String(state.working));
     ui.workspace.classList.toggle("has-result", state.hasResult);
     ui.uploadLabel.textContent = state.hasResult ? "Add another photograph" : "Add a photograph";
+    ui.cameraLabel.textContent = state.hasResult ? "Take another photo" : "Take a photo";
   }
   function setWorking(value, message) {
     state.working = value;
@@ -322,21 +326,24 @@ function initializeExposureStudio() {
     } finally { setWorking(false); }
   }
 
-  ui.participantInput.addEventListener("change", async () => {
-    const file = ui.participantInput.files?.[0];
+  async function chooseParticipantPhoto(input) {
+    const file = input.files?.[0];
     if (!file || state.working || workflow.pending || !state.ready) return;
     clearError();
     setWorking(true, "Preparing photograph…");
     let photo;
     try { photo = await loadPhoto(file); }
     catch (error) { showError(error); ui.retry.hidden = true; }
-    finally { ui.participantInput.value = ""; setWorking(false); }
+    finally { input.value = ""; setWorking(false); }
     if (!photo) return;
     releasePhoto(state.participant);
     state.participant = photo;
     clearResult();
     await finishSubmission(() => workflow.start(file));
-  });
+  }
+  for (const input of [ui.participantInput, ui.cameraInput]) {
+    input.addEventListener("change", () => chooseParticipantPhoto(input));
+  }
   ui.retry.addEventListener("click", async () => {
     if (state.working) return;
     clearError();
