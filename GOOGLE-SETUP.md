@@ -76,7 +76,7 @@ The execution log prints links to a new **Double exposure project** folder, thes
 | Folder | Contents | Available for future pairing? |
 | --- | --- | --- |
 | `01 Artist photographs` | Photographs you upload beforehand | Yes, after import |
-| `02 Participant originals` | The exact files participants submit | After their finished exposure is saved |
+| `02 Participant originals` | The exact files participants submit | Only if they opt in and a finished exposure is saved |
 | `03 Double exposures` | Automatically archived finished JPEGs | No |
 
 The setup function does not make folders or the spreadsheet public. Keep them private. Eligible source photographs are delivered through the script to make future exposures; the public API has no gallery, result-download, arbitrary-file-read, or delete operation.
@@ -120,11 +120,12 @@ Publish the updated file through GitHub Pages. The deployment URL is public conf
 
 Open the published site in a private browser window, without signing that visitor into Google:
 
-1. Add a photograph that differs from your base photograph. Wait for **Saved to the archive.**
+1. Add a photograph that differs from your base photograph. Leave the future-use checkbox unchecked and press **Create double exposure**. Wait for **Double exposure saved.**
 2. In your own Drive, verify its original file exists in **02 Participant originals** and the finished JPEG exists in **03 Double exposures**.
-3. Open **Submissions** in the index. The row should have `status = complete`, the original and base IDs, the result ID, settings, and a completion time.
+3. Open **Submissions** in the index. The row should have `status = complete`, `allowReuse = false`, the original and base IDs, the result ID, settings, and a completion time. The corresponding participant source should remain ineligible.
 4. Download the result from the site and compare it with the archived JPEG. The website downloads the same blob it sent to the archive.
-5. Open a fresh visitor window and submit another photo. Completed participant originals are now eligible alongside your originals. Random choice does not guarantee that the next selection will be a participant image.
+5. Submit a different photo with the future-use checkbox checked. Verify `allowReuse = true` and that its participant source becomes eligible only after the result is saved. A future pairing may select it; random choice does not guarantee that it will.
+6. With at least two eligible bases, press **Try another pairing**. Verify that a second completed row and JPEG appear, the original file is reused, and the second base differs from the first. **Start over** only clears the page.
 
 Do not declare the live Google connection tested until this check passes. The included automated tests use simulated Drive/Sheets services, not your real account.
 
@@ -134,15 +135,15 @@ The website saves the untouched original first, develops a JPEG, then archives t
 
 Keep the tab open until saving finishes. Closing a tab or losing the device before an upload completes cannot be made reliable by an in-memory retry mechanism. The original may already be archived even when the result has not finished; the Sheet preserves that pending state.
 
-An identical original upload reuses its participant-original file rather than weighting the pool with copies. Each new submission can still produce its own archived result. Identical images across artist and participant folders occupy one effective pairing slot. Cropped or re-exported versions are separate images.
+An identical original upload reuses its participant-original file rather than weighting the pool with copies. Each new submission can still produce its own archived result. Another pairing creates a separate submission and result without uploading the original again; a retry keeps that pairing stable. Identical images across artist and participant folders occupy one effective pairing slot. Cropped or re-exported versions are separate images.
 
-To change server code later, update **Manage deployments → Edit → New version**. Keeping that deployment preserves the `/exec` URL. Ordinary frontend `.js` and `.css` changes are published through GitHub Pages.
+To change server code later, update **Manage deployments → Edit → New version**. Keeping that deployment preserves the `/exec` URL. Deploy the new `Code.gs` together with these website changes: the old backend does not implement the consent or another-pairing requests. The new backend adds `allowReuse` and `parentSubmissionId` columns to an existing Submissions sheet when it first opens it; older blank consent cells are treated as false. Ordinary frontend `.js` and `.css` changes are published through GitHub Pages.
 
 ## Artist settings
 
 Set `forceBlackAndWhite` in `project-config.js` to `true` to make all results black and white, or `false` to preserve the input colours. Reload after changing it; publish the updated configuration when using the hosted site. The local test page reads the same option. The archived original files remain untouched.
 
-The default is to include completed participant originals as future bases. To stop that, set Script Property `INCLUDE_PARTICIPANT_PHOTOS` to `false`; originals are still archived, but the pool uses artist images only. This is an artist setting, not a visitor control.
+Participants must check the future-use box for a newly submitted original to join the source pool after a successful result. To disable all participant bases regardless of that choice, set Script Property `INCLUDE_PARTICIPANT_PHOTOS` to `false`; originals and results are still archived. This is an artist-wide override.
 
 For a local HTTP preview, add an exact additional origin such as `http://127.0.0.1:8000` to Script Property `ALLOWED_ORIGINS`. Multiple origins are comma-separated. `SITE_URL` must still identify the published HTTPS site so Google can load the external bridge script. Opening `index.html` through `file://` cannot connect to this archive.
 

@@ -1,6 +1,6 @@
 # Double exposure
 
-Participants add a photograph to create a double exposure. The Google connection archives the original upload and finished JPEG, and makes completed participant originals available as future bases.
+Participants add a photograph to create a double exposure. The Google connection archives the original upload and each finished JPEG. A participant's original joins future pairings only when they choose that option before submitting.
 
 ## Try it
 
@@ -19,10 +19,10 @@ To test on a real phone or tablet, use the published HTTPS URL or Live Server's 
 Before public use, check both library selection and native camera capture on an actual iPhone/iPad and Android device, including cancellation and a portrait photograph. Desktop viewport checks verify layout, not a physical device's camera chooser or HEIC conversion.
 
 1. Upload artist photographs to the project's Drive folder and import them through the private Apps Script owner function.
-2. On the website, press **Add a photograph**. Its exact original is saved, a base is selected, and the exposure develops and archives automatically.
-3. Wait for **Saved to the archive.** Downloading a copy is optional.
+2. On the website, choose **Upload a photo** or **Take a photo**. Review the selected photo, choose whether it may be used in future pairings, then press **Create double exposure**. The future-use checkbox starts unchecked.
+3. Wait for **Double exposure saved.** Downloading a copy is optional. If another eligible base is available, **Try another pairing** saves a second result using the same original without uploading it again. **Start over** clears the page; it does not delete archived files.
 
-The public page stays minimal and black, with no exposure controls or collection-management panel. Source photographs are stored separately from finished exposures. A private Google Sheet records both source IDs and each result. Exact duplicates share a source-pool entry; no image pairs with identical bytes. Pending and failed submissions can be retried without changing the selected base or duplicating the archived result.
+The public page stays minimal and black, with no exposure sliders or collection-management panel. Source photographs are stored separately from finished exposures. A private Google Sheet records consent, source IDs, and each result. Exact duplicates share a source-pool entry; no image pairs with identical bytes. Pending and failed submissions can be retried without changing the selected base or duplicating the archived result.
 
 The code is not yet connected to a live Google deployment: `project-config.js` deliberately contains an empty endpoint until setup is complete. It disables uploads when unconfigured and does not present local processing as a successful archive save.
 
@@ -40,7 +40,7 @@ python3 -m http.server 8000 --bind 127.0.0.1
 - `local-test.html`, `local-test.js`, and `local-test.css`: browser-only comparison controls and layout without Google.
 - `film-renderer.js`: experimental assumed film-response model, loaded only by the local comparison page.
 - `project-config.js`: the public Google deployment URL, artist colour option, and connection timeouts.
-- `archive-workflow.js`: original → develop → result archive workflow and retries.
+- `archive-workflow.js`: original → develop → result archive workflow, consent, another pairing, and retries.
 - `drive-storage.js`: website-side Google connection.
 - `drive-bridge.js`: external script running inside Google's hidden bridge frame.
 - `google-apps-script/`: private Drive/Sheets backend, bridge HTML, and manifest.
@@ -54,7 +54,7 @@ The main website's blend remains the restored linear-addition treatment. It work
 
 The later inverse-Reinhard response was removed after review of the artist's analogue examples and website outputs. Numerical boundary checks did not establish a convincing analogue match. This rollback restores the earlier behaviour; it does not claim to finish the film simulation.
 
-`PROJECT_SETTINGS` in `scripts.js` defines the artist's treatment. Google selects a random eligible source. The participant interface has no exposure sliders, contrast controls, colour options, pairing selector, or separate develop button. The main treatment uses neutral contrast and zero exposure adjustment per photograph; the colour option comes from `project-config.js`.
+`PROJECT_SETTINGS` in `scripts.js` defines the artist's treatment. Google selects a random eligible source; a second pairing avoids the immediately previous base. The participant interface has no exposure sliders, contrast controls, or colour options. The main treatment uses neutral contrast and zero exposure adjustment per photograph; the colour option comes from `project-config.js`.
 
 A rendered JPEG does not retain its original scene exposure or a measured film/development/scan response. See [EXPOSURE-NOTES.md](EXPOSURE-NOTES.md) for the current model and limitations.
 
@@ -80,7 +80,7 @@ node --check scripts.js
 node --test tests/*.test.cjs
 ```
 
-The checks cover exposure maths, exact original bytes, duplicate and self-pairing rules, result eligibility timing, interrupted archive writes, stable retries, iframe-message validation, and the separation of HTML, CSS, and JavaScript. Google services are simulated in those tests; live account authorization and deployment require the setup guide's smoke test.
+The checks cover exposure maths, exact original bytes, consent, another pairing, duplicate and self-pairing rules, result eligibility timing, interrupted archive writes, stable retries, iframe-message validation, and the separation of HTML, CSS, and JavaScript. Google services are simulated in those tests; live account authorization and deployment require the setup guide's smoke test.
 
 ## Version history
 

@@ -101,17 +101,18 @@
       return this._connectPromise;
     }
 
-    async begin({ submissionId, originalFile } = {}) {
+    async begin({ submissionId, originalFile, allowReuse = false, reuse } = {}) {
       this._assertActive();
-      if (!validSubmissionId(submissionId) || !originalFile) {
-        throw storageError("INVALID_SUBMISSION", "A submission ID and original photograph are required.");
+      if (!validSubmissionId(submissionId) || Boolean(originalFile) === Boolean(reuse) ||
+          typeof allowReuse !== "boolean" ||
+          (reuse && (!validSubmissionId(reuse.submissionId) || typeof reuse.token !== "string" || !reuse.token))) {
+        throw storageError("INVALID_SUBMISSION", "A submission ID and one original photograph or saved exposure are required.");
       }
       if (!this._connected) await this.connect();
+      if (reuse) return this._request("begin", { submissionId, reuse });
       const base64 = await this._readBase64(originalFile);
-      return this._request("begin", {
-        submissionId,
-        original: { name: originalFile.name || "photograph", mimeType: mimeType(originalFile), base64 },
-      });
+      return this._request("begin", { submissionId, allowReuse,
+        original: { name: originalFile.name || "photograph", mimeType: mimeType(originalFile), base64 } });
     }
 
     async complete({ submissionId, token, resultBlob, width, height, settings = {} } = {}) {

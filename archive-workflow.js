@@ -15,10 +15,33 @@ class ExposureArchiveWorkflow {
 
   get pending() { return Boolean(this.operation && !this.operation.receipt); }
 
-  async start(file) {
+  async start(file, { allowReuse = false } = {}) {
     if (this.busy || this.pending) throw new Error("Finish saving this photograph before adding another.");
-    this.operation = { submissionId: this.makeId(), file, begin: null, result: null, receipt: null };
+    if (typeof allowReuse !== "boolean") throw new Error("The photograph sharing choice is invalid.");
+    this.operation = { submissionId: this.makeId(), file, allowReuse, reuse: null, begin: null, result: null, receipt: null };
     return this.run();
+  }
+
+  async rePair() {
+    if (this.busy || this.pending) throw new Error("Finish saving this photograph before trying another pairing.");
+    const previous = this.operation;
+    if (!previous?.receipt || !previous.begin?.token) throw new Error("Create and save an exposure first.");
+    if (previous.receipt.canRePair === false) throw new Error("There is no other photograph available to pair right now.");
+    this.operation = { submissionId: this.makeId(), file: previous.file,
+      allowReuse: previous.allowReuse, reuse: { submissionId: previous.submissionId, token: previous.begin.token },
+      begin: null, result: null, receipt: null };
+    try {
+      return await this.run();
+    } catch (error) {
+      // No new base was assigned, so there is no new exposure to finish.
+      // Keep the previous saved result available for download and another try.
+      if (["NO_ALTERNATIVE_BASE", "BASE_UNAVAILABLE"].includes(error.code) &&
+          !this.operation.begin && !this.operation.result) {
+        this.operation = previous;
+        error.previousResultRestored = true;
+      }
+      throw error;
+    }
   }
 
   async retry() {
@@ -30,11 +53,12 @@ class ExposureArchiveWorkflow {
     if (this.busy) throw new Error("This photograph is still being saved.");
     this.busy = true;
     const operation = this.operation;
-    let stage = "original";
+    let stage = operation.reuse ? "pairing" : "original";
     try {
       if (!operation.begin) {
         this.onProgress({ stage });
-        const begin = await this.storage.begin({ submissionId: operation.submissionId, originalFile: operation.file });
+        const begin = await this.storage.begin({ submissionId: operation.submissionId,
+          ...(operation.reuse ? { reuse: operation.reuse } : { originalFile: operation.file, allowReuse: operation.allowReuse }) });
         if (begin.submissionId !== operation.submissionId || !begin.token || !begin.originalId ||
             !begin.base?.id || !begin.base.mimeType || !begin.base.base64) {
           throw new Error("The collection did not confirm the photograph. Please retry.");

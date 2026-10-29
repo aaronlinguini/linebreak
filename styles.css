@@ -3,7 +3,6 @@
   --background: #050505;
   --foreground: #e8e8e8;
   --muted: #939393;
-  --line: #252525;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -22,10 +21,10 @@ body {
 }
 
 button, input { font: inherit; }
-button, label, summary, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
-button, label, summary { cursor: pointer; }
+button, label, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+button, label { cursor: pointer; }
 button:disabled { cursor: wait; opacity: .5; }
-button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visible {
+button:focus-visible, a:focus-visible, input:focus-visible {
   outline: 1px solid var(--foreground);
   outline-offset: 6px;
 }
@@ -99,6 +98,19 @@ h1 { margin: 0; font-size: 13px; font-weight: 400; letter-spacing: .025em; }
   padding-top: 27px;
 }
 
+.choice-separator { color: var(--muted); font-size: 12px; }
+
+.sharing-choice {
+  max-width: 520px;
+  margin: 24px auto 0;
+  padding: 20px;
+  border: 1px solid #353535;
+}
+.sharing-choice p { margin: 0 0 14px; color: var(--muted); font-size: 12px; }
+.sharing-choice label { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.sharing-choice input { width: 18px; height: 18px; margin: 0; accent-color: var(--foreground); }
+.sharing-choice .actions { padding-top: 15px; }
+
 .file-picker { position: relative; }
 .file-input {
   position: absolute;
@@ -154,6 +166,8 @@ h1 { margin: 0; font-size: 13px; font-weight: 400; letter-spacing: .025em; }
   .image-stage canvas, .image-stage img { max-height: calc(59svh - 26px); }
   .empty-state { font-size: 15px; }
   .actions { padding-top: 23px; gap: 14px 24px; }
+  .source-actions { gap: 10px 14px; }
+  .sharing-choice { margin-top: 20px; padding: 16px; }
   .feedback { padding-top: 13px; }
   .site-footer { padding-top: 22px; }
   .privacy-note { margin-bottom: 26px; }

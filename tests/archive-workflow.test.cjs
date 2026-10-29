@@ -39,6 +39,100 @@ test("saves the exact original before developing, then requires a matching archi
   assert.equal(workflow.busy, false);
 });
 
+test("sharing is opt-in and is sent with the exact original", async () => {
+  const { workflow, calls } = fixture();
+  await workflow.start(file);
+  const firstBegin = calls.find(([type]) => type === "begin")[1];
+  assert.equal(firstBegin.allowReuse, false);
+  assert.strictEqual(firstBegin.originalFile, file);
+  await workflow.start(file, { allowReuse: true });
+  const secondBegin = calls.filter(([type]) => type === "begin")[1][1];
+  assert.equal(secondBegin.allowReuse, true);
+});
+
+test("another pairing uses a new identity and prior token without another original upload", async () => {
+  const requests = [];
+  let serial = 0;
+  const workflow = new Workflow({
+    storage: {
+      begin: async (request) => {
+        requests.push(["begin", request]);
+        return { ...begin(), submissionId: request.submissionId,
+          base: { id: serial === 1 ? "base-1" : "base-2", mimeType: "image/jpeg", base64: "AA==" } };
+      },
+      complete: async (request) => {
+        requests.push(["complete", request]);
+        return { ...receipt(), submissionId: request.submissionId,
+          resultId: `result-${serial}`, baseId: serial === 1 ? "base-1" : "base-2", canRePair: true };
+      }
+    },
+    render: async ({ base }) => { requests.push(["render", base.id]); return { blob, width: 1200, height: 800 }; },
+    settings, makeId: () => `submission-${++serial}`
+  });
+  const first = await workflow.start(file, { allowReuse: true });
+  const second = await workflow.rePair();
+  assert.notEqual(second.submissionId, first.submissionId);
+  assert.equal(second.begin.originalId, first.begin.originalId);
+  assert.notEqual(second.receipt.resultId, first.receipt.resultId, "another result is confirmed");
+  assert.deepEqual(JSON.parse(JSON.stringify(requests.filter(([type]) => type === "begin")[1][1])), {
+    submissionId: second.submissionId,
+    reuse: { submissionId: first.submissionId, token: first.begin.token }
+  });
+  assert.equal(requests.filter(([type]) => type === "render").length, 2);
+  assert.equal(requests.filter(([type]) => type === "complete").length, 2);
+});
+
+test("another pairing is unavailable until saved and when the archive has no other base", async () => {
+  const { workflow, storage } = fixture();
+  await assert.rejects(workflow.rePair(), /Create and save/);
+  storage.complete = async () => ({ ...receipt(), canRePair: false });
+  await workflow.start(file);
+  await assert.rejects(workflow.rePair(), /no other photograph/);
+});
+
+for (const code of ["NO_ALTERNATIVE_BASE", "BASE_UNAVAILABLE"]) {
+  test(`a ${code} pairing failure restores the previous saved result`, async () => {
+    let begins = 0;
+    let serial = 0;
+    const storage = {
+      begin: async (request) => {
+        if (++begins > 1) throw Object.assign(new Error("No other source"), { code, originalSaved: true });
+        return { ...begin(), submissionId: request.submissionId };
+      },
+      complete: async (request) => ({ ...receipt(), submissionId: request.submissionId, canRePair: true })
+    };
+    const workflow = new Workflow({ storage,
+      render: async () => ({ blob, width: 1200, height: 800 }),
+      settings, makeId: () => `submission-${++serial}` });
+    const saved = await workflow.start(file);
+    await assert.rejects(workflow.rePair(), (error) => error.code === code && error.previousResultRestored === true);
+    assert.strictEqual(workflow.operation, saved);
+    assert.equal(workflow.pending, false);
+    assert.equal(workflow.operation.receipt.saved, true);
+  });
+}
+
+test("a new pairing with an assigned base stays pending if its render fails", async () => {
+  let serial = 0;
+  let renders = 0;
+  const workflow = new Workflow({
+    storage: {
+      begin: async (request) => ({ ...begin(), submissionId: request.submissionId }),
+      complete: async (request) => ({ ...receipt(), submissionId: request.submissionId, canRePair: true })
+    },
+    render: async () => {
+      if (++renders === 2) throw new Error("Development failed");
+      return { blob, width: 1200, height: 800 };
+    },
+    settings, makeId: () => `submission-${++serial}`
+  });
+  const previous = await workflow.start(file);
+  await assert.rejects(workflow.rePair(), (error) => error.stage === "develop" && !error.previousResultRestored);
+  assert.notStrictEqual(workflow.operation, previous);
+  assert.equal(workflow.pending, true);
+  assert.ok(workflow.operation.begin?.base);
+});
+
 test("an uncertain original upload retries the same submission identity", async () => {
   const { workflow, calls, storage } = fixture({ storage: { begin: async () => { throw new Error("connection lost"); } } });
   await assert.rejects(workflow.start(file), (error) => error.stage === "original" && !error.originalSaved);

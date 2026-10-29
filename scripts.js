@@ -225,18 +225,23 @@ function initializeExposureStudio() {
   const ui = {
     workspace: byId("workspace"), canvas: byId("canvas"),
     resultEmpty: byId("result-empty"), participantPreview: byId("participant-preview"),
-    participantInput: byId("participant-input"), uploadLabel: byId("upload-label"),
-    cameraInput: byId("participant-camera-input"), cameraLabel: byId("camera-label"),
+    sourceActions: byId("source-actions"), sharingChoice: byId("sharing-choice"),
+    resultActions: byId("result-actions"), allowReuse: byId("allow-reuse"),
+    develop: byId("develop-button"), cancelSelection: byId("cancel-selection"),
+    newPairing: byId("new-pairing-button"), reset: byId("reset-button"),
+    participantInput: byId("participant-input"), cameraInput: byId("participant-camera-input"),
     download: byId("download-button"), retry: byId("retry-button"),
     status: byId("status"), error: byId("error"), busy: byId("busy-indicator")
   };
-  const state = { working: false, ready: false, hasResult: false, participant: null, downloadUrl: null };
+  const state = { working: false, ready: false, hasResult: false, participant: null,
+    selectedFile: null, downloadUrl: null, rePairUnavailable: false };
   const { loadPhoto, releasePhoto, develop } = createExposureProcessor();
   const storage = new GoogleDriveStorage(EXPOSURE_CONFIG);
   const workflow = new ExposureArchiveWorkflow({
     storage, settings: PROJECT_SETTINGS, render: renderSubmission,
     onProgress: ({ stage }) => {
-      const labels = { original: "Saving photograph…", develop: "Developing…", archive: "Saving exposure…", saved: "Saved to the archive." };
+      const labels = { original: "Saving photograph…", pairing: "Finding another pairing…",
+        develop: "Developing…", archive: "Saving exposure…", saved: "Saved." };
       announce(labels[stage]);
       ui.busy.textContent = labels[stage];
     }
@@ -250,17 +255,26 @@ function initializeExposureStudio() {
     ui.retry.textContent = workflow.pending ? "Retry saving" : "Retry";
   }
   function refreshActions() {
+    const selected = Boolean(state.selectedFile);
+    const pending = workflow.pending;
+    const completed = state.hasResult && !pending;
     for (const input of [ui.participantInput, ui.cameraInput]) {
-      input.disabled = state.working || !state.ready || workflow.pending;
+      input.disabled = state.working || !state.ready || selected || pending;
     }
-    ui.download.hidden = !state.hasResult;
+    ui.sourceActions.hidden = selected || state.hasResult;
+    ui.sharingChoice.hidden = !selected || state.hasResult || pending;
+    ui.resultActions.hidden = !state.hasResult;
+    ui.develop.disabled = state.working || !state.ready || pending;
+    ui.cancelSelection.disabled = state.working || pending;
+    ui.allowReuse.disabled = state.working || pending;
     ui.download.disabled = !state.hasResult || state.working;
+    ui.newPairing.hidden = !completed || state.rePairUnavailable || workflow.operation?.receipt?.canRePair !== true;
+    ui.newPairing.disabled = state.working || pending;
+    ui.reset.disabled = state.working || pending;
     ui.retry.disabled = state.working;
     ui.busy.hidden = !state.working;
     ui.workspace.setAttribute("aria-busy", String(state.working));
     ui.workspace.classList.toggle("has-result", state.hasResult);
-    ui.uploadLabel.textContent = state.hasResult ? "Add another photograph" : "Add a photograph";
-    ui.cameraLabel.textContent = state.hasResult ? "Take another photo" : "Take a photo";
   }
   function setWorking(value, message) {
     state.working = value;
@@ -271,11 +285,22 @@ function initializeExposureStudio() {
     state.hasResult = false;
     ui.canvas.hidden = true;
     ui.canvas.width = ui.canvas.height = 1;
-    ui.participantPreview.hidden = true;
     ui.resultEmpty.hidden = false;
     if (state.downloadUrl) URL.revokeObjectURL(state.downloadUrl);
     state.downloadUrl = null;
     refreshActions();
+  }
+
+  function clearSelection() {
+    releasePhoto(state.participant);
+    state.participant = null;
+    state.selectedFile = null;
+    state.rePairUnavailable = false;
+    ui.allowReuse.checked = false;
+    ui.participantPreview.hidden = true;
+    ui.participantPreview.removeAttribute("src");
+    clearResult();
+    announce("");
   }
 
   function fileFromBase(base) {
@@ -287,14 +312,17 @@ function initializeExposureStudio() {
   async function renderSubmission({ base, settings }) {
     const basePhoto = await loadPhoto(fileFromBase(base));
     try {
-      return await develop(basePhoto, state.participant, ui.canvas, settings);
+      // Keep the previous finished exposure visible until the new archive write
+      // succeeds. A failed retry must not display an unarchived result.
+      const preparedCanvas = document.createElement("canvas");
+      return { ...await develop(basePhoto, state.participant, preparedCanvas, settings), preparedCanvas };
     } finally { releasePhoto(basePhoto); }
   }
   async function connectArchive() {
     clearError();
     if (!storage.configured) {
       state.ready = false;
-      announce("The collection is not connected yet.");
+      announce("");
       refreshActions();
       return;
     }
@@ -302,27 +330,44 @@ function initializeExposureStudio() {
     try {
       const collection = await storage.connect();
       state.ready = collection.totalEligible > 0;
-      announce(state.ready ? "Add a photograph." : "The collection is waiting for its first photographs.");
-      if (!state.ready) ui.retry.hidden = false;
+      announce(state.ready ? "" : "Photo submissions are temporarily unavailable.");
+      ui.retry.hidden = state.ready;
     } catch (error) {
       state.ready = false;
-      showError(error);
-      announce("The collection could not be reached.");
+      ui.retry.hidden = false;
+      ui.error.hidden = true;
+      announce("Photo submissions are temporarily unavailable.");
     } finally { setWorking(false); }
   }
   async function finishSubmission(action) {
     setWorking(true);
     try {
       const operation = await action();
+      state.rePairUnavailable = false;
+      const preparedCanvas = operation.result.preparedCanvas;
+      ui.canvas.width = operation.result.width;
+      ui.canvas.height = operation.result.height;
+      const visibleContext = ui.canvas.getContext("2d");
+      if (!visibleContext) throw new Error("This browser cannot display the double exposure.");
+      visibleContext.drawImage(preparedCanvas, 0, 0);
+      preparedCanvas.width = preparedCanvas.height = 1;
+      delete operation.result.preparedCanvas;
+      if (state.downloadUrl) URL.revokeObjectURL(state.downloadUrl);
       state.downloadUrl = URL.createObjectURL(operation.result.blob);
       state.hasResult = true;
       ui.canvas.hidden = false;
       ui.participantPreview.hidden = true;
       ui.resultEmpty.hidden = true;
-      announce("Saved to the archive.");
+      announce("Double exposure saved.");
     } catch (error) {
       showError(error);
-      announce(error.originalSaved ? "Your original is saved. The exposure still needs to be completed." : "The save could not be confirmed.");
+      if (error.previousResultRestored) {
+        ui.retry.hidden = true;
+        state.rePairUnavailable = error.code === "NO_ALTERNATIVE_BASE";
+      }
+      announce(error.previousResultRestored ? "Your previous exposure is still saved."
+        : error.originalSaved ? "Your photo is saved. Please retry to finish the double exposure."
+          : "The save could not be confirmed.");
     } finally { setWorking(false); }
   }
 
@@ -333,17 +378,43 @@ function initializeExposureStudio() {
     setWorking(true, "Preparing photograph…");
     let photo;
     try { photo = await loadPhoto(file); }
-    catch (error) { showError(error); ui.retry.hidden = true; }
+    catch (error) { showError(error); ui.retry.hidden = true; announce(""); }
     finally { input.value = ""; setWorking(false); }
     if (!photo) return;
     releasePhoto(state.participant);
     state.participant = photo;
+    state.selectedFile = file;
     clearResult();
-    await finishSubmission(() => workflow.start(file));
+    ui.participantPreview.src = photo.thumbnail;
+    ui.participantPreview.hidden = false;
+    ui.resultEmpty.hidden = true;
+    ui.allowReuse.checked = false;
+    announce("");
+    refreshActions();
   }
   for (const input of [ui.participantInput, ui.cameraInput]) {
     input.addEventListener("change", () => chooseParticipantPhoto(input));
   }
+  ui.develop.addEventListener("click", async () => {
+    if (!state.selectedFile || state.working || workflow.pending || !state.ready) return;
+    clearError();
+    await finishSubmission(() => workflow.start(state.selectedFile, { allowReuse: ui.allowReuse.checked }));
+  });
+  ui.cancelSelection.addEventListener("click", () => {
+    if (state.working || workflow.pending) return;
+    clearError();
+    clearSelection();
+  });
+  ui.newPairing.addEventListener("click", async () => {
+    if (!state.hasResult || state.working || workflow.pending || workflow.operation?.receipt?.canRePair !== true) return;
+    clearError();
+    await finishSubmission(() => workflow.rePair());
+  });
+  ui.reset.addEventListener("click", () => {
+    if (state.working || workflow.pending) return;
+    clearError();
+    clearSelection();
+  });
   ui.retry.addEventListener("click", async () => {
     if (state.working) return;
     clearError();
@@ -365,6 +436,7 @@ function initializeExposureStudio() {
   window.addEventListener("pagehide", (event) => {
     if (event.persisted) return;
     storage.dispose();
+    releasePhoto(state.participant);
     if (state.downloadUrl) URL.revokeObjectURL(state.downloadUrl);
   });
   connectArchive();

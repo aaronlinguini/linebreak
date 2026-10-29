@@ -135,6 +135,19 @@ test("participant upload transmits the actual original file bytes", async () => 
   harness.storage.dispose();
 });
 
+test("sharing choice travels with the original, while another pairing sends no image bytes", async () => {
+  const harness = makeTransport(); await harness.connect();
+  const bytes = Buffer.from([255, 216, 255, 217]);
+  await harness.storage.begin({ submissionId: "submission-1", originalFile: { name: "photo.jpg", type: "image/jpeg", bytes }, allowReuse: true });
+  const first = harness.messages.filter(({ message }) => message.request?.action === "begin").at(-1).message.request.payload;
+  assert.equal(first.allowReuse, true);
+  assert.deepEqual(Buffer.from(first.original.base64, "base64"), bytes);
+  await harness.storage.begin({ submissionId: "submission-2", reuse: { submissionId: "submission-1", token: "private-token" } });
+  const next = harness.messages.filter(({ message }) => message.request?.action === "begin").at(-1).message.request.payload;
+  assert.deepEqual(next, { submissionId: "submission-2", reuse: { submissionId: "submission-1", token: "private-token" } });
+  harness.storage.dispose();
+});
+
 test("server refusal rejects an upload and preserves its saved-original flag", async () => {
   const harness = makeTransport(); await harness.connect(); harness.settings.autoReply = false;
   const result = harness.storage.begin({ submissionId: "submission-1", originalFile: { name: "photo.jpg", type: "image/jpeg", bytes: Buffer.from([255, 216, 255]) } });

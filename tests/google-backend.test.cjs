@@ -172,7 +172,8 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
     return matches.find((entry) => /^\d+ /.test(entry.name)) || matches[0];
   };
   const seed = (marker = 1, name = `artist-${marker}.jpg`, mimeType = "image/jpeg", bytes = jpeg(marker)) => folder("Artist").createFile(new Blob(bytes, mimeType, name));
-  const begin = (number, marker = number + 10) => data("begin", { submissionId: submissionId(number), original: original(marker) });
+  const begin = (number, marker = number + 10, allowReuse = false) =>
+    data("begin", { submissionId: submissionId(number), original: original(marker), allowReuse });
   const completePayload = (begun, marker = 90) => ({ submissionId: begun.submissionId, token: begun.token, result: original(marker, `${begun.submissionId}.jpg`), width: 640, height: 480, settings: { baseExposure: -1, participantExposure: -1, contrast: 0, monochrome: false } });
   const setup = () => sandbox.setupProject();
   const refresh = () => sandbox.refreshArtistCollection();
@@ -192,6 +193,18 @@ test("owner setup is repeatable and creates distinct private storage roles", () 
   assert.equal(backend.lock.held, false);
 });
 
+test("an existing archive index gains consent columns without changing older records", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const old = backend.begin(1, 22);
+  const sheet = [...backend.books.values()][0].getSheetByName("Submissions");
+  sheet.rows = sheet.rows.map((row) => row.slice(0, 13));
+  const before = sheet.rows[1].slice();
+  assert.equal(backend.data("bootstrap").totalEligible, 1);
+  assert.deepEqual(sheet.rows[0].slice(13), ["allowReuse", "parentSubmissionId"]);
+  assert.deepEqual(sheet.rows[1].slice(0, 13), before);
+  assert.equal(backend.data("begin", { submissionId: old.submissionId, original: original(22) }).originalId, old.originalId);
+});
+
 test("an original is saved byte-for-byte before the finished exposure exists", () => {
   const backend = makeBackend(); backend.setup(); const artist = backend.seed(); backend.refresh();
   const begun = backend.begin(1, 22);
@@ -204,7 +217,7 @@ test("an original is saved byte-for-byte before the finished exposure exists", (
 
 test("completion archives the result, records both sources, and only then enables the original", () => {
   const backend = makeBackend(); backend.setup(); const artist = backend.seed(); backend.refresh();
-  const begun = backend.begin(1, 22);
+  const begun = backend.begin(1, 22, true);
   const saved = backend.data("complete", backend.completePayload(begun));
   assert.equal(saved.saved, true);
   assert.equal(saved.originalId, begun.originalId);
@@ -217,9 +230,67 @@ test("completion archives the result, records both sources, and only then enable
   assert.equal(backend.lock.held, false);
 });
 
+test("a completed original is archived privately by default while an explicit opt-in joins the pool", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const privateBegin = backend.begin(1, 22);
+  const privateResult = backend.data("complete", backend.completePayload(privateBegin, 90));
+  assert.equal(privateResult.saved, true);
+  assert.equal(backend.data("bootstrap").totalEligible, 1);
+  assert.equal(backend.folder("Participant").files.length, 1);
+  assert.equal(backend.folder("Double exposure").files.length, 1);
+  const publicBegin = backend.begin(2, 23, true);
+  backend.data("complete", backend.completePayload(publicBegin, 91));
+  assert.equal(backend.data("bootstrap").totalEligible, 2);
+  assert.equal(backend.api("begin", { submissionId: submissionId(2), original: original(23), allowReuse: false }).error.code, "SUBMISSION_CONFLICT");
+});
+
+test("another pairing reuses an authenticated original, chooses a different base, and archives a second result", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.seed(2); backend.refresh();
+  const first = backend.begin(1, 22, true);
+  const firstReceipt = backend.data("complete", backend.completePayload(first, 90));
+  assert.equal(firstReceipt.canRePair, true);
+  const rePairPayload = { submissionId: submissionId(2), reuse: { submissionId: first.submissionId, token: first.token } };
+  const second = backend.data("begin", rePairPayload);
+  assert.equal(second.originalId, first.originalId);
+  assert.notEqual(second.base.id, first.base.id);
+  assert.deepEqual(backend.data("begin", rePairPayload), second, "a retry retains the selected base and token");
+  const secondReceipt = backend.data("complete", backend.completePayload(second, 91));
+  assert.equal(secondReceipt.saved, true);
+  assert.equal(secondReceipt.originalId, firstReceipt.originalId);
+  assert.notEqual(secondReceipt.resultId, firstReceipt.resultId);
+  assert.equal(backend.folder("Participant").files.length, 1);
+  assert.equal(backend.folder("Double exposure").files.length, 2);
+  const rows = [...backend.books.values()][0].getSheetByName("Submissions").rows;
+  const secondRow = rows.find((row) => row.includes(second.submissionId));
+  assert.equal(secondRow.at(-2), true, "a re-pair inherits consent");
+  assert.equal(secondRow.at(-1), first.submissionId);
+});
+
+test("a re-pair cannot reuse the same base when no alternative is available", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const first = backend.begin(1, 22);
+  assert.equal(backend.data("complete", backend.completePayload(first)).canRePair, false);
+  const attempt = backend.api("begin", { submissionId: submissionId(2), reuse: { submissionId: first.submissionId, token: first.token } });
+  assert.equal(attempt.ok, false);
+  assert.equal(attempt.error.code, "NO_ALTERNATIVE_BASE");
+  assert.equal(backend.folder("Participant").files.length, 1);
+  assert.equal(backend.folder("Double exposure").files.length, 1);
+});
+
+test("another pairing rejects a forged token and cannot change opt-in", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.seed(2); backend.refresh();
+  const first = backend.begin(1, 22); backend.data("complete", backend.completePayload(first));
+  const previous = { submissionId: first.submissionId, token: "wrong-token" };
+  assert.equal(backend.api("begin", { submissionId: submissionId(2), reuse: previous }).error.code, "INVALID_TOKEN");
+  assert.equal(backend.api("begin", { submissionId: submissionId(2), reuse: { ...previous, token: first.token }, allowReuse: true }).error.code, "INVALID_REQUEST");
+  const second = backend.data("begin", { submissionId: submissionId(2), reuse: { ...previous, token: first.token } });
+  backend.data("complete", backend.completePayload(second, 91));
+  assert.equal(backend.data("bootstrap").totalEligible, 2, "both artist bases only; inherited opt-out remains private");
+});
+
 test("a later participant can pair with an earlier participant, never their identical image", () => {
   const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
-  const first = backend.begin(1, 22); backend.data("complete", backend.completePayload(first));
+  const first = backend.begin(1, 22, true); backend.data("complete", backend.completePayload(first));
   const second = backend.begin(2, 1);
   assert.equal(second.base.id, first.originalId, "the other participant is the only distinct eligible source");
   assert.notEqual(Buffer.from(second.base.base64, "base64").toString("hex"), jpeg(1).toString("hex"));
@@ -284,7 +355,7 @@ for (const boundary of ["source", "pending", "paired"]) {
 
 for (const boundary of ["saving", "complete", "eligible"]) {
   test(`an interrupted ${boundary} archive update resumes without duplicate composites`, () => {
-    const backend = makeBackend(); backend.setup(); backend.seed(); backend.refresh(); const begun = backend.begin(1, 22);
+    const backend = makeBackend(); backend.setup(); backend.seed(); backend.refresh(); const begun = backend.begin(1, 22, true);
     const request = backend.completePayload(begun);
     backend.failures.sheetWrite = (sheet, values) => boundary === "eligible"
       ? sheet.name === "Sources" && values.some((row) => row.includes("participant") && row.includes(true))
@@ -304,7 +375,7 @@ for (const boundary of ["saving", "complete", "eligible"]) {
 
 test("duplicate participant files share one stored source while each result is retained", () => {
   const backend = makeBackend(); backend.setup(); backend.seed(); backend.refresh();
-  const first = backend.begin(1, 22); backend.data("complete", backend.completePayload(first, 90));
+  const first = backend.begin(1, 22, true); backend.data("complete", backend.completePayload(first, 90));
   const second = backend.begin(2, 22); backend.data("complete", backend.completePayload(second, 91));
   assert.equal(first.originalId, second.originalId);
   assert.equal(backend.folder("Participant").files.length, 1);

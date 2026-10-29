@@ -7,21 +7,23 @@
  * SITE_URL: full HTTPS site base, including its GitHub repository path.
  * ALLOWED_ORIGINS: optional comma-separated exact extra origins (local HTTP
  *                 origins are allowed for development; wildcards are not).
- * INCLUDE_PARTICIPANT_PHOTOS: "false" opts out; otherwise completed originals
- *                           join the source pool. Composites never join it.
+ * INCLUDE_PARTICIPANT_PHOTOS: "false" disables all participant bases. Otherwise
+ *                           only completed, individually opted-in originals join.
  * EXPOSURE_*_ID properties are populated by setupProject_.
  *
  * Sources columns: sourceId, sha256, nameJson, mimeType, byteLength, kind,
  *                  eligible, createdAt. kind is artist or participant.
  * Submissions columns: submissionId, token, originalId, originalSha256, baseId,
  *   status, resultId, resultSha256, width, height, settingsJson, createdAt,
- *   completedAt. Status progresses pending -> paired -> saving -> complete.
+ *   completedAt, allowReuse, parentSubmissionId. Status progresses pending ->
+ *   paired -> saving -> complete. Blank allowReuse on older rows means false.
  * JSON-encoded names cannot become spreadsheet formulas. Dates are ISO strings.
  * Files use deterministic names so a retry can recover a Drive write that
  * succeeded immediately before a Sheet write was interrupted.
  *
  * This is a public submission endpoint, not an authentication boundary for an
- * artist admin. Editor launchers check that the active user is the executing
+ * artist admin. A prior submission token authorizes another pairing of its
+ * original. Editor launchers check that the active user is the executing
  * owner. Their internal helpers end in _. Keep this script, its properties,
  * Sheet and folders private.
  */
@@ -32,7 +34,7 @@ var EXPOSURE_CONFIG_ = Object.freeze({
   maxOriginalBytes: 30 * 1024 * 1024,
   maxResultBytes: 12 * 1024 * 1024,
   sourcesHeaders: ["sourceId", "sha256", "nameJson", "mimeType", "byteLength", "kind", "eligible", "createdAt"],
-  submissionsHeaders: ["submissionId", "token", "originalId", "originalSha256", "baseId", "status", "resultId", "resultSha256", "width", "height", "settingsJson", "createdAt", "completedAt"]
+  submissionsHeaders: ["submissionId", "token", "originalId", "originalSha256", "baseId", "status", "resultId", "resultSha256", "width", "height", "settingsJson", "createdAt", "completedAt", "allowReuse", "parentSubmissionId"]
 });
 
 function doGet(e) {
@@ -225,18 +227,53 @@ function bootstrap_(project) {
 
 function begin_(project, payload) {
   var submissionId = submissionId_(payload.submissionId);
-  var original = imageInput_(payload.original, EXPOSURE_CONFIG_.maxOriginalBytes, false);
+  if (payload.reuse !== undefined && !isObject_(payload.reuse)) {
+    throw apiError_("INVALID_REQUEST", "The previous exposure could not be verified.");
+  }
+  var reusing = isObject_(payload.reuse);
+  if (reusing === (payload.original !== undefined)) {
+    throw apiError_("INVALID_REQUEST", "Choose one photograph or one saved exposure to pair.");
+  }
+  if (reusing && payload.allowReuse !== undefined) {
+    throw apiError_("INVALID_REQUEST", "A photograph's sharing choice cannot be changed by another pairing.");
+  }
   var submissions = readRecords_(project.submissions, EXPOSURE_CONFIG_.submissionsHeaders);
+  var previous = null;
+  var original = null;
+  var originalHash;
+  var allowReuse;
+  if (reusing) {
+    var previousId = submissionId_(payload.reuse.submissionId);
+    previous = findRecord_(submissions, "submissionId", previousId);
+    if (!previous || !tokenMatches_(previous.token, payload.reuse.token) || previous.status !== "complete") {
+      throw apiError_("INVALID_TOKEN", "The previous exposure could not be verified. Start with a new photograph.");
+    }
+    originalHash = previous.originalSha256;
+    allowReuse = previous.allowReuse === true || previous.allowReuse === "true";
+  } else {
+    if (payload.allowReuse !== undefined && typeof payload.allowReuse !== "boolean") {
+      throw apiError_("INVALID_REQUEST", "The photograph sharing choice is invalid.");
+    }
+    original = imageInput_(payload.original, EXPOSURE_CONFIG_.maxOriginalBytes, false);
+    originalHash = original.hash;
+    allowReuse = payload.allowReuse === true;
+  }
   var submission = findRecord_(submissions, "submissionId", submissionId);
-  if (submission && submission.originalSha256 !== original.hash) {
+  if (submission && (submission.originalSha256 !== originalHash ||
+      (submission.allowReuse === true || submission.allowReuse === "true") !== allowReuse ||
+      String(submission.parentSubmissionId || "") !== (previous ? previous.submissionId : ""))) {
     throw apiError_("SUBMISSION_CONFLICT", "This submission already belongs to a different photograph. Start a new submission.");
   }
   if (!submission) {
-    var source = saveOriginal_(project, original);
+    var source = previous
+      ? findRecord_(readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders), "sourceId", previous.originalId)
+      : saveOriginal_(project, original);
+    if (!source || source.sha256 !== originalHash) throw apiError_("ARCHIVE_UNAVAILABLE", "The original photograph is unavailable. Please contact the artist.");
     submission = {
       submissionId: submissionId, token: newToken_(), originalId: source.sourceId,
-      originalSha256: original.hash, baseId: "", status: "pending", resultId: "",
-      resultSha256: "", width: "", height: "", settingsJson: "", createdAt: now_(), completedAt: ""
+      originalSha256: originalHash, baseId: "", status: "pending", resultId: "",
+      resultSha256: "", width: "", height: "", settingsJson: "", createdAt: now_(), completedAt: "",
+      allowReuse: allowReuse, parentSubmissionId: previous ? previous.submissionId : ""
     };
     writeRecord_(project.submissions, EXPOSURE_CONFIG_.submissionsHeaders, submission);
   }
@@ -247,7 +284,13 @@ function begin_(project, payload) {
       if (!assigned) throw apiError_("BASE_UNAVAILABLE", "The assigned photograph is unavailable. Please contact the artist.");
       base = readSource_(assigned);
     } else {
-      var candidates = eligibleSources_(project, original.hash, includeParticipants_());
+      var excludedBaseHash = "";
+      if (previous) {
+        var priorBase = findRecord_(readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders), "sourceId", previous.baseId);
+        if (!priorBase) throw apiError_("BASE_UNAVAILABLE", "The previous base photograph is unavailable. Please contact the artist.", true);
+        excludedBaseHash = priorBase.sha256;
+      }
+      var candidates = eligibleSources_(project, originalHash, includeParticipants_(), excludedBaseHash);
       var hadCandidates = candidates.length > 0;
       while (candidates.length && !base) {
         var choice = Math.floor(Math.random() * candidates.length);
@@ -260,6 +303,7 @@ function begin_(project, payload) {
       }
       if (!base) {
         if (hadCandidates) throw apiError_("BASE_UNAVAILABLE", "Your original was saved, but source photographs could not be read. Please retry.", true);
+        if (previous) throw apiError_("NO_ALTERNATIVE_BASE", "There is no different photograph available for another pairing yet.", true);
         throw apiError_("NO_BASE", "Your original was saved. No different source photograph is available yet. Retry after the artist adds photographs.", true);
       }
       submission.baseId = base.id;
@@ -304,13 +348,16 @@ function complete_(project, payload) {
     writeRecord_(project.submissions, EXPOSURE_CONFIG_.submissionsHeaders, submission);
     var original = findRecord_(readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders), "sourceId", submission.originalId);
     if (!original) throw apiError_("ARCHIVE_UNAVAILABLE", "The original's archive record is unavailable. Please retry.", true);
-    // Eligibility follows the saved result. A retry repairs an interrupted final
-    // eligibility update without writing another source or composite file.
-    if (!isEligible_(original)) {
+    // Eligibility follows the saved result and this photograph's consent.
+    // A retry repairs an interrupted final update without another file write.
+    if ((submission.allowReuse === true || submission.allowReuse === "true") && !isEligible_(original)) {
       original.eligible = true;
       writeRecord_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders, original);
     }
-    return { submissionId: submissionId, saved: true, resultId: file.getId(), originalId: submission.originalId, baseId: submission.baseId };
+    var currentBase = findRecord_(readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders), "sourceId", submission.baseId);
+    var alternatives = currentBase ? eligibleSources_(project, submission.originalSha256, includeParticipants_(), currentBase.sha256) : [];
+    return { submissionId: submissionId, saved: true, resultId: file.getId(), originalId: submission.originalId,
+      baseId: submission.baseId, canRePair: alternatives.length > 0 };
   } catch (error) {
     error.originalSaved_ = true;
     throw error;
@@ -360,9 +407,10 @@ function readSource_(source) {
   }
 }
 
-function eligibleSources_(project, excludedHash, includeParticipants) {
+function eligibleSources_(project, excludedHash, includeParticipants, excludedBaseHash) {
   var candidates = readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders).filter(function (source) {
-    return isEligible_(source) && source.sha256 !== excludedHash && (source.kind === "artist" || (includeParticipants && source.kind === "participant"));
+    return isEligible_(source) && source.sha256 !== excludedHash && source.sha256 !== excludedBaseHash &&
+      (source.kind === "artist" || (includeParticipants && source.kind === "participant"));
   });
   // Archive roles remain separate, but byte-identical photographs get one
   // chance in the lottery. Prefer the artist's source when both roles exist.
@@ -441,7 +489,7 @@ function project_() {
   var submissions = spreadsheet.getSheetByName("Submissions");
   if (!sources || !submissions) throw apiError_("NOT_CONFIGURED", "The archive index has not been set up yet.");
   validateHeaders_(sources, EXPOSURE_CONFIG_.sourcesHeaders);
-  validateHeaders_(submissions, EXPOSURE_CONFIG_.submissionsHeaders);
+  ensureSubmissionHeaders_(submissions);
   return { artist: DriveApp.getFolderById(ids[0]), originals: DriveApp.getFolderById(ids[1]), results: DriveApp.getFolderById(ids[2]), sources: sources, submissions: submissions };
 }
 
@@ -457,8 +505,17 @@ function setupFolder_(root, properties, key, name) {
 function setupSheet_(spreadsheet, name, headers) {
   var sheet = spreadsheet.getSheetByName(name) || spreadsheet.insertSheet(name);
   if (sheet.getLastRow() === 0) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  validateHeaders_(sheet, headers);
+  if (name === "Submissions") ensureSubmissionHeaders_(sheet);
+  else validateHeaders_(sheet, headers);
   return sheet;
+}
+
+function ensureSubmissionHeaders_(sheet) {
+  var headers = EXPOSURE_CONFIG_.submissionsHeaders;
+  validateHeaders_(sheet, headers.slice(0, 13));
+  var extra = sheet.getRange(1, 14, 1, 2).getValues()[0];
+  if (extra[0] === "" && extra[1] === "") sheet.getRange(1, 14, 1, 2).setValues([headers.slice(13)]);
+  validateHeaders_(sheet, headers);
 }
 
 function validateHeaders_(sheet, headers) {

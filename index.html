@@ -26,27 +26,45 @@
         <p id="busy-indicator" class="busy-indicator" hidden>Developing…</p>
       </div>
 
-      <div class="actions">
+      <div id="source-actions" class="actions source-actions">
         <div class="file-picker">
           <input id="participant-input" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="archive-note" disabled>
-          <label id="upload-label" class="upload-label" for="participant-input">Add a photograph</label>
+          <label id="upload-label" class="upload-label" for="participant-input">Upload a photo</label>
         </div>
+        <span class="choice-separator">or</span>
         <div class="file-picker">
           <input id="participant-camera-input" class="file-input" type="file" accept="image/jpeg" capture="environment" aria-describedby="archive-note" disabled>
           <label id="camera-label" class="upload-label" for="participant-camera-input">Take a photo</label>
         </div>
-        <button id="download-button" class="save-button" type="button" hidden disabled>Download image</button>
-        <button id="retry-button" class="save-button" type="button" hidden>Retry</button>
+      </div>
+
+      <div id="sharing-choice" class="sharing-choice" hidden>
+        <p>Your original and finished image will be saved. May your original also be paired with other visitors’ photos later?</p>
+        <label for="allow-reuse">
+          <input id="allow-reuse" type="checkbox">
+          Yes, use my photo in future pairings
+        </label>
+        <div class="actions">
+          <button id="develop-button" class="save-button" type="button">Create double exposure</button>
+          <button id="cancel-selection" class="save-button" type="button">Back</button>
+        </div>
+      </div>
+
+      <div id="result-actions" class="actions" hidden>
+        <button id="download-button" class="save-button" type="button" disabled>Download image</button>
+        <button id="new-pairing-button" class="save-button" type="button">Try another pairing</button>
+        <button id="reset-button" class="save-button" type="button">Start over</button>
       </div>
 
       <div class="feedback">
-        <p id="status" class="status" role="status" aria-live="polite">Choose a photograph.</p>
+        <p id="status" class="status" role="status" aria-live="polite"></p>
         <p id="error" class="error" role="alert" hidden></p>
+        <button id="retry-button" class="save-button" type="button" hidden>Retry</button>
       </div>
     </main>
 
     <footer class="site-footer">
-      <p id="archive-note" class="privacy-note">Your photograph joins the collection. Originals and double exposures are saved.</p>
+      <p id="archive-note" class="privacy-note">Photos and finished exposures are saved to the project archive. Future pairing is your choice.</p>
     </footer>
   </body>
 </html>
