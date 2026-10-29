@@ -19,6 +19,11 @@ function render(first, second, settings = {}) {
   film.createMixer(settings)(first, second, output);
   return Array.from(output);
 }
+function renderSmooth(first, second, settings = {}) {
+  const output = new Uint8ClampedArray(first.length);
+  film.createSmoothMixer(settings)(first, second, output);
+  return Array.from(output);
+}
 
 test("the experimental module loads in a plain browser scope without Node or DOM globals", () => {
   assert.equal(film.version, "assumed-film-v1");
@@ -116,11 +121,110 @@ test("model tables are reused across exposure changes and the cache is bounded",
     constructor(...args) { super(...args); modelsBuilt++; }
   }
   const cached = load({ Float64Array: CountedFloat64Array });
+  const tablesAtLoad = modelsBuilt;
   cached.createMixer({ filmContrast: 1 });
   cached.createMixer({ filmContrast: 1, baseExposure: 0 });
-  assert.equal(modelsBuilt, 1);
+  assert.equal(modelsBuilt - tablesAtLoad, 1);
   for (const filmContrast of [0.7, 0.8, 0.9, 1.1]) cached.createMixer({ filmContrast });
-  assert.equal(modelsBuilt, 5);
+  assert.equal(modelsBuilt - tablesAtLoad, 5);
   cached.createMixer({ filmContrast: 1 });
-  assert.equal(modelsBuilt, 6, "the least-recently-used model should have been evicted");
+  assert.equal(modelsBuilt - tablesAtLoad, 6, "the least-recently-used model should have been evicted");
+});
+
+test("the smooth trial identifies its separate model and preserves a photo against black", () => {
+  assert.equal(film.smoothVersion, "smooth-exposure-v1");
+  assert.ok(Object.isFrozen(film.smoothParameters));
+  assert.deepEqual({ ...film.smoothParameters }, { exposurePower: 2, whiteAnchor: 0.98 });
+  const ramp = rgba(Array.from({ length: 256 }, (_, byte) => [byte, byte, byte]).flat());
+  const black = new Uint8ClampedArray(ramp.length);
+  for (const monochrome of [true, false]) {
+    assert.deepEqual(renderSmooth(ramp, black, { monochrome }), Array.from(ramp));
+    assert.deepEqual(renderSmooth(black, ramp, { monochrome }), Array.from(ramp));
+  }
+  const colours = rgba([0, 0, 0, 25, 80, 120, 220, 100, 40, 0, 255, 80, 255, 255, 255]);
+  assert.deepEqual(renderSmooth(colours, new Uint8ClampedArray(colours.length), { monochrome: false }), Array.from(colours));
+});
+
+test("smooth grayscale transitions remain monotone without the rejected highlight gap", () => {
+  const ramp = rgba(Array.from({ length: 256 }, (_, byte) => [byte, byte, byte]).flat());
+  for (const secondByte of [0, 20, 40, 128, 185, 255]) {
+    const secondRamp = rgba(Array.from({ length: 256 }, () => [secondByte, secondByte, secondByte]).flat());
+    for (const monochrome of [true, false]) {
+      const pixels = renderSmooth(ramp, secondRamp, { monochrome });
+      const values = pixels.filter((_, index) => index % 4 === 0);
+      for (let index = 1; index < values.length; index++) {
+        assert.ok(values[index] >= values[index - 1], `a brighter input must not darken the output (${secondByte}, ${index})`);
+        assert.ok(values[index] - values[index - 1] <= 4, `adjacent tones must not jump into a clipped highlight (${secondByte}, ${index})`);
+      }
+      assert.ok(pixels.every((byte, index) => index % 4 !== 3 || byte === 255));
+    }
+  }
+  const unchanged = renderSmooth(ramp, new Uint8ClampedArray(ramp.length));
+  const outputValues = new Set(unchanged.filter((_, index) => index % 4 === 0));
+  for (let byte = 185; byte < 255; byte++) assert.ok(outputValues.has(byte), `highlight tone ${byte} must remain representable`);
+});
+
+test("a dark area leaves the second image clear while a bright area dominates it smoothly", () => {
+  const middle = rgba([128, 128, 128]);
+  const darkResult = renderSmooth(rgba([35, 35, 35]), middle)[0];
+  const brightResult = renderSmooth(rgba([185, 185, 185]), middle)[0];
+  assert.ok(Math.abs(darkResult - 128) <= 2, "a near-black source must not put a gray veil over the second photo");
+  assert.ok(brightResult >= 185 && brightResult <= 190, "a midtone must change the bright region only slightly");
+});
+
+test("smooth exposure accumulation respects photo order and half-exposure equivalence", () => {
+  const ramp = rgba(Array.from({ length: 256 }, (_, byte) => [byte, byte, byte]).flat());
+  for (const monochrome of [true, false]) {
+    assert.deepEqual(renderSmooth(ramp, ramp, { baseExposure: -1, participantExposure: -1, monochrome }), Array.from(ramp));
+    assert.deepEqual(
+      renderSmooth(first, second, { baseExposure: -0.5, participantExposure: 1, monochrome }),
+      renderSmooth(second, first, { baseExposure: 1, participantExposure: -0.5, monochrome })
+    );
+  }
+  const highlights = rgba([185, 185, 185, 255, 255, 255]);
+  const reduced = renderSmooth(highlights, new Uint8ClampedArray(highlights.length), { baseExposure: -1 });
+  assert.ok(reduced[0] < reduced[4], "highlight detail must survive exposure reduction instead of being discarded before it");
+});
+
+test("smooth colour processing preserves a shared hue and can develop neutral monochrome", () => {
+  const toLinear = (byte) => {
+    const encoded = byte / 255;
+    return encoded <= 0.04045 ? encoded / 12.92 : ((encoded + 0.055) / 1.055) ** 2.4;
+  };
+  const huePosition = (pixel) => {
+    const [red, green, blue] = pixel.slice(0, 3).map(toLinear);
+    return (green - blue) / (red - blue);
+  };
+  for (const colour of [[100, 60, 30], [220, 100, 40], [250, 180, 80]]) {
+    const source = rgba(colour);
+    const result = renderSmooth(source, source, { monochrome: false });
+    assert.ok(result[0] > result[1] && result[1] > result[2]);
+    assert.ok(Math.abs(huePosition(result) - huePosition(colour)) < 0.025, "channels should share a smooth colour response rather than cross separate clipping thresholds");
+  }
+  const mono = renderSmooth(rgba([200, 40, 20]), rgba([10, 80, 160]), { monochrome: true });
+  assert.equal(mono[0], mono[1]);
+  assert.equal(mono[1], mono[2]);
+  assert.equal(mono[3], 255);
+});
+
+test("smooth mixing validates settings and writes only the requested pixel chunks", () => {
+  const settings = { baseExposure: -1, participantExposure: 0.5, monochrome: false };
+  const mix = film.createSmoothMixer(settings);
+  const output = new Uint8ClampedArray(first.length).fill(77);
+  mix(first, second, output, 4, 16);
+  assert.deepEqual(Array.from(output.slice(0, 4)), [77, 77, 77, 77]);
+  assert.ok(output.slice(16).every((byte) => byte === 77));
+  mix(first, second, output, 0, 4);
+  mix(first, second, output, 16, first.length);
+  assert.deepEqual(Array.from(output), renderSmooth(first, second, settings));
+  for (const invalid of [NaN, Infinity, -3.1, 2.1, "0"]) {
+    assert.throws(() => film.createSmoothMixer({ baseExposure: invalid }), /exposure must be between/);
+    assert.throws(() => film.createSmoothMixer({ participantExposure: invalid }), /exposure must be between/);
+  }
+  assert.throws(() => film.createSmoothMixer({ monochrome: "false" }), /Monochrome must be/);
+  assert.throws(() => mix([0, 0, 0], [0, 0, 0], [0, 0, 0]), /RGBA dimensions/);
+  assert.throws(() => mix(first, second, new Uint8ClampedArray(4)), /RGBA dimensions/);
+  for (const [start, end] of [[1, 4], [0, 5], [-4, 4], [8, 4], [0, first.length + 4], [NaN, 4]]) {
+    assert.throws(() => mix(first, second, output, start, end), /aligned RGBA boundaries/);
+  }
 });

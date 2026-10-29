@@ -58,6 +58,21 @@ const FilmExposureMath = (() => {
     return Math.round(encoded * 255);
   }
 
+  function validateSettings(baseExposure, participantExposure, monochrome) {
+    if (![baseExposure, participantExposure].every((value) => Number.isFinite(value) && value >= -3 && value <= 2)) {
+      throw new RangeError("Each exposure must be between -3 and +2 EV.");
+    }
+    if (typeof monochrome !== "boolean") throw new TypeError("Monochrome must be true or false.");
+  }
+  function validateBuffers(base, participant, output, start, end) {
+    if (base.length !== participant.length || base.length !== output.length || base.length % 4 !== 0) {
+      throw new RangeError("Input and output buffers must have identical RGBA dimensions.");
+    }
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start % 4 !== 0 || end % 4 !== 0 || start < 0 || end < start || end > base.length) {
+      throw new RangeError("Pixel chunks must use aligned RGBA boundaries within the buffers.");
+    }
+  }
+
   function prepareModel(filmContrast) {
     if (models.has(filmContrast)) {
       const cached = models.get(filmContrast);
@@ -98,26 +113,18 @@ const FilmExposureMath = (() => {
   }
 
   function createMixer({ baseExposure = -1, participantExposure = -1, monochrome = true, filmContrast = 1 } = {}) {
-    if (![baseExposure, participantExposure].every((value) => Number.isFinite(value) && value >= -3 && value <= 2)) {
-      throw new RangeError("Each exposure must be between -3 and +2 EV.");
-    }
+    validateSettings(baseExposure, participantExposure, monochrome);
     // filmContrast belongs to the assumed response model. It is intentionally
     // separate from the current renderer's display-space contrast (0 = neutral).
     if (!Number.isFinite(filmContrast) || filmContrast < 0.65 || filmContrast > 1.5) {
       throw new RangeError("Film contrast must be between 0.65 and 1.5.");
     }
-    if (typeof monochrome !== "boolean") throw new TypeError("Monochrome must be true or false.");
     const { rgbLinear, estimateExposure, developedByte } = prepareModel(filmContrast);
     const multiplierA = 2 ** baseExposure;
     const multiplierB = 2 ** participantExposure;
 
     return function mix(base, participant, output, start = 0, end = base.length) {
-      if (base.length !== participant.length || base.length !== output.length || base.length % 4 !== 0) {
-        throw new RangeError("Input and output buffers must have identical RGBA dimensions.");
-      }
-      if (!Number.isInteger(start) || !Number.isInteger(end) || start % 4 !== 0 || end % 4 !== 0 || start < 0 || end < start || end > base.length) {
-        throw new RangeError("Pixel chunks must use aligned RGBA boundaries within the buffers.");
-      }
+      validateBuffers(base, participant, output, start, end);
       for (let index = start; index < end; index += 4) {
         if (monochrome) {
           const luminanceA = 0.2126 * rgbLinear[base[index]] + 0.7152 * rgbLinear[base[index + 1]] + 0.0722 * rgbLinear[base[index + 2]];
@@ -136,9 +143,67 @@ const FilmExposureMath = (() => {
     };
   }
 
+  // A separate visual approximation for finished photographs. A smooth inverse
+  // response makes dark pixels contribute little beside brighter pixels. The
+  // two estimated exposures are added before developing one output luminance.
+  // The finite white anchor keeps the whole input range usable under EV changes.
+  const smoothParameters = Object.freeze({ exposurePower: 2, whiteAnchor: 0.98 });
+  const smoothLinear = Float64Array.from({ length: 256 }, (_, byte) => srgb8ToLinear(byte));
+  const smoothEncode = Uint8Array.from({ length: 65536 }, (_, index) => linearToSrgb8(index / 65535));
+  const encodeSmooth = (linear) => smoothEncode[Math.round(clamp(linear) * 65535)];
+  function smoothExposure(luminance) {
+    const value = smoothParameters.whiteAnchor * luminance;
+    return (value / (1 - value)) ** smoothParameters.exposurePower;
+  }
+  function smoothLuminance(exposure) {
+    const value = Math.sqrt(exposure);
+    return clamp(value / (smoothParameters.whiteAnchor * (1 + value)));
+  }
+  function createSmoothMixer({ baseExposure = 0, participantExposure = 0, monochrome = true } = {}) {
+    validateSettings(baseExposure, participantExposure, monochrome);
+    const gainA = 2 ** baseExposure;
+    const gainB = 2 ** participantExposure;
+    return function mix(base, participant, output, start = 0, end = base.length) {
+      validateBuffers(base, participant, output, start, end);
+      for (let index = start; index < end; index += 4) {
+        const ar = smoothLinear[base[index]], ag = smoothLinear[base[index + 1]], ab = smoothLinear[base[index + 2]];
+        const br = smoothLinear[participant[index]], bg = smoothLinear[participant[index + 1]], bb = smoothLinear[participant[index + 2]];
+        const luminanceA = 0.2126 * ar + 0.7152 * ag + 0.0722 * ab;
+        const luminanceB = 0.2126 * br + 0.7152 * bg + 0.0722 * bb;
+        const exposureA = gainA * smoothExposure(luminanceA);
+        const exposureB = gainB * smoothExposure(luminanceB);
+        const total = exposureA + exposureB;
+        const luminance = smoothLuminance(total);
+        if (monochrome || total === 0) {
+          const grey = encodeSmooth(luminance);
+          output[index] = output[index + 1] = output[index + 2] = grey;
+        } else {
+          // Weight colour by its estimated exposure, then apply one shared
+          // luminance. Black contributes no colour and no veil over the photo.
+          const weightA = luminanceA > 0 ? luminance * exposureA / (total * luminanceA) : 0;
+          const weightB = luminanceB > 0 ? luminance * exposureB / (total * luminanceB) : 0;
+          const red = weightA * ar + weightB * br;
+          const green = weightA * ag + weightB * bg;
+          const blue = weightA * ab + weightB * bb;
+          const maximum = Math.max(red, green, blue);
+          // Bring out-of-gamut colour toward neutral using one common factor.
+          // Independent channel clipping would shift hue and flatten details.
+          const chroma = maximum > 1 ? (1 - luminance) / (maximum - luminance) : 1;
+          output[index] = encodeSmooth(luminance + chroma * (red - luminance));
+          output[index + 1] = encodeSmooth(luminance + chroma * (green - luminance));
+          output[index + 2] = encodeSmooth(luminance + chroma * (blue - luminance));
+        }
+        output[index + 3] = 255;
+      }
+    };
+  }
+
   return Object.freeze({
     version,
     createMixer,
+    createSmoothMixer,
+    smoothVersion: "smooth-exposure-v1",
+    smoothParameters,
     parameters: Object.freeze({ logMin: LOG_MIN, logMax: LOG_MAX, toe: TOE, shoulder: SHOULDER, softness: SOFTNESS })
   });
 })();

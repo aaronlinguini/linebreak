@@ -16,7 +16,7 @@ For the silhouette technique, the crucial condition is a bright background and a
 
 For ordinary double exposures on undeveloped film, shooting order generally makes little difference to the blend. In the section "Worrying about the order of the exposures," [ILFORD's guest photographer](https://www.ilfordphoto.com/taking-a-double-exposure/) advises taking either the silhouette or subject first. Order independence follows from the approximate model of adding both exposures before applying the photographic response; it is not a claim that all film chemistry is perfectly independent of time or exposure conditions.
 
-The website therefore reads the light values from both photographs at each matching position after alignment. These local relationships apply in either direction:
+The website therefore reads the light values from both photographs at each matching position after alignment. These intended local relationships apply in either direction, though the amount of brightening differs between treatments:
 
 | Photograph A at a position | Photograph B at that position | Resulting tendency |
 | --- | --- | --- |
@@ -27,7 +27,7 @@ The website therefore reads the light values from both photographs at each match
 | White | Any tone | White, at the current project settings |
 | Any tone | White | White, at the current project settings |
 
-The mixer calculates continuous light contributions per colour channel. It does not need to label whole objects or pick a winning photograph. A numerical check using the actual project settings gives the same result when the two aligned inputs are swapped. The base photograph defines the output frame; both full photographs fit inside it with black padding where needed. Swapping photographs with different aspect ratios can therefore change framing even though the pixel calculation is symmetric. Portraits rotate clockwise before fitting.
+The public mixer calculates continuous light contributions per colour channel; the smooth trial uses luminance for its exposure calculation and combines colour afterward. Neither needs to label whole objects or pick a winning photograph. Numerical checks give the same result when the two aligned inputs and their EV settings are swapped. The base photograph defines the output frame; both full photographs fit inside it with black padding where needed. Swapping photographs with different aspect ratios can therefore change framing even though the pixel calculation is symmetric. Portraits rotate clockwise before fitting.
 
 ## The current restored baseline
 
@@ -62,7 +62,17 @@ The final values in a scanned photograph reflect the film, development, scanning
 
 This model accepts both digital photographs and film scans. Neither source is guaranteed to match its assumed response. Its normalized density-shaped curve is used directly as positive brightness; it does not separately reconstruct the negative's transmission and the print or scan. It is not calibrated to a stock, developer, scanner, or capture duration. Colour is an approximation applying the same response separately to RGB channels. A technical caveat is the large exposure jump assigned to pure white compared with almost-white, which deserves review on real clipped highlights.
 
-The fixed reference uses the current addition at zero EV. The adjustable result starts with the experimental curve at zero EV for each photograph, so the first comparison changes only the treatment. Reducing both photographs by one stop can make a bright light-table base less able to hide the other photo and can dim the other photo inside dark film strips. [FILM-EXPERIMENT.md](FILM-EXPERIMENT.md) covers the controls, full proposal, visual comparisons, result records, and exact Git fallback.
+The supplied film curve remains selectable beside the fixed current-addition reference. Reducing both photographs by one stop can make a bright light-table base less able to hide the other photo and can dim the other photo inside dark film strips.
+
+## The smooth-exposure trial
+
+The default adjustable treatment on the local page is now **Smooth exposure**, starting at zero EV for each photograph. At each pixel it estimates exposure from linear luminance `Y` using `E(Y) = (0.98Y / (1 − 0.98Y))²`. Each photograph's EV scales its estimated exposure; the two estimates are added and developed using `Yout = min(1, √E / (0.98 × (1 + √E)))`. The 0.98 anchor keeps the white endpoint finite. The response reaches white continuously and uses every grayscale output value when a source is combined with black.
+
+The purpose is to preserve more separation in dark areas. A dark pixel has little influence beside a brighter pixel: gray 35 plus gray 128 stays about 128, two gray-128 pixels become about 144, and gray 185 plus gray 128 becomes about 187 at 0/0 EV. Both photographs contribute according to the same rule, with no shooting-order priority or global opacity reduction. These values describe the chosen model, not measured film behaviour.
+
+For colour, the two source chromaticities are weighted by estimated exposure and given one shared finished luminance. A common factor moves out-of-gamut colour toward neutral, avoiding the separate RGB threshold jumps that caused harsh colour patches in the rejected experiment. Monochrome uses the luminances directly. The model accepts both scans and digital photographs, but a finished upload does not reveal its original exposure or tone curve; this remains an artistic approximation requiring visual judgement.
+
+The earlier threshold experiment was removed because its output jumped from 185 to 255 and clipped input detail before EV adjustment. The smooth trial has no equivalent middle-gray cutoff. [FILM-EXPERIMENT.md](FILM-EXPERIMENT.md) covers the controls, comparisons, result records, and the exact `exposure-checkpoint-2026-10-29` fallback at `f03ce10`. The public renderer and Google archive are unchanged.
 
 ## Camera modes
 
