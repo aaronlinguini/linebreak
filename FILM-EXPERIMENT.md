@@ -9,10 +9,10 @@ The exact supplied [proposal](references/supplied-proposal.md) and [original fil
 Open `local-test.html` with VS Code's Live Server and choose two photographs. Both outputs use the same photographs, portrait rotation, full-frame fitting, dimensions, and JPEG export.
 
 - The reference is the current addition at **0 EV for both photographs**.
-- The adjustable result starts with **Film curve**, at **−1 EV for each photograph**.
+- The adjustable result starts with **Film curve**, at **0 EV for each photograph**. This holds exposure fixed when comparing the two treatments and avoids dimming the second image by default.
 - Choose the renderer and move the base and participant exposure sliders separately. The range is −3 to +2 EV in half-stop steps. −1 EV halves that photograph's estimated exposure; +1 EV doubles it.
 - The black-and-white control starts from the artist's configuration and can be changed temporarily for the comparison. It affects both outputs.
-- Reset restores the experimental renderer and −1/−1 EV. Download either result and the settings record before changing photographs if you want to keep the comparison.
+- Reset restores the experimental renderer and 0/0 EV. Download either result and the settings record before changing photographs if you want to keep the comparison.
 
 Nothing on this page is uploaded or automatically archived. Original files are unchanged.
 

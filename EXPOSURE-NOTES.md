@@ -62,7 +62,7 @@ The final values in a scanned photograph reflect the film, development, scanning
 
 This model accepts both digital photographs and film scans. Neither source is guaranteed to match its assumed response. Its normalized density-shaped curve is used directly as positive brightness; it does not separately reconstruct the negative's transmission and the print or scan. It is not calibrated to a stock, developer, scanner, or capture duration. Colour is an approximation applying the same response separately to RGB channels. A technical caveat is the large exposure jump assigned to pure white compared with almost-white, which deserves review on real clipped highlights.
 
-The fixed reference uses the current addition at zero EV. The adjustable result starts with the experimental curve at minus one EV per photograph. Match EV settings when judging the effect of the curve itself, because exposure reduction and the response curve are different changes. [FILM-EXPERIMENT.md](FILM-EXPERIMENT.md) covers the controls, full proposal, visual comparisons, result records, and exact Git fallback.
+The fixed reference uses the current addition at zero EV. The adjustable result starts with the experimental curve at zero EV for each photograph, so the first comparison changes only the treatment. Reducing both photographs by one stop can make a bright light-table base less able to hide the other photo and can dim the other photo inside dark film strips. [FILM-EXPERIMENT.md](FILM-EXPERIMENT.md) covers the controls, full proposal, visual comparisons, result records, and exact Git fallback.
 
 ## Camera modes
 

@@ -216,7 +216,7 @@ function initializeLocalExposureTest() {
   ui.reset.addEventListener("click", () => {
     if (state.working) return;
     ui.renderer.value = "film";
-    ui.baseExposure.value = ui.participantExposure.value = "-1";
+    ui.baseExposure.value = ui.participantExposure.value = "0";
     return changeSettings();
   });
   ui.download.addEventListener("click", () => {

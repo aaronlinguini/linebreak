@@ -21,8 +21,8 @@ function harness() {
     });
   }
   elements.get("test-renderer").value = "film";
-  elements.get("test-base-exposure").value = "-1";
-  elements.get("test-participant-exposure").value = "-1";
+  elements.get("test-base-exposure").value = "0";
+  elements.get("test-participant-exposure").value = "0";
   const renders = [];
   const downloads = [];
   const urls = new Map();
@@ -85,14 +85,14 @@ test("trial settings affect only the trial, and downloads identify the completed
   const h = harness();
   await h.pair();
   assert.equal(h.renders.length, 2);
-  assert.deepEqual(h.renders.map(({ renderer, baseExposure, participantExposure }) => [renderer, baseExposure, participantExposure]), [["linear",0,0], ["film",-1,-1]]);
+  assert.deepEqual(h.renders.map(({ renderer, baseExposure, participantExposure }) => [renderer, baseExposure, participantExposure]), [["linear",0,0], ["film",0,0]]);
   assert.equal(h.elements.get("test-monochrome").checked, true);
 
   h.elements.get("test-base-exposure").value = "-0.5";
   await h.fire("test-base-exposure");
   assert.equal(h.renders.length, 3, "an exposure change must not redevelop the fixed reference");
   assert.equal(h.renders[2].baseExposure, -0.5);
-  assert.equal(h.renders[2].participantExposure, -1);
+  assert.equal(h.renders[2].participantExposure, 0);
   const recipe = await h.recipe();
   assert.equal(recipe.schemaVersion, 1);
   assert.equal(recipe.reference.settings.baseExposure, 0);
@@ -104,7 +104,7 @@ test("trial settings affect only the trial, and downloads identify the completed
   assert.equal(recipe.sources.base.workingWidth, 600);
 
   await h.fire("test-download", "click");
-  assert.match(h.downloads.at(-1).filename, /^double-exposure-film-base-minus0\.5EV-second-minus1EV-bw-\d+\.jpg$/);
+  assert.match(h.downloads.at(-1).filename, /^double-exposure-film-base-minus0\.5EV-second-0EV-bw-\d+\.jpg$/);
   await h.fire("test-reference-download", "click");
   assert.match(h.downloads.at(-1).filename, /^double-exposure-linear-base-0EV-second-0EV-bw-\d+\.jpg$/);
 });
@@ -119,7 +119,7 @@ test("moving a slider updates its readout without relabelling or replacing the c
   assert.equal(h.elements.get("trial-title").textContent, completedTitle);
   assert.equal(h.renders.length, 2);
   const recipe = await h.recipe();
-  assert.equal(recipe.trial.settings.baseExposure, -1);
+  assert.equal(recipe.trial.settings.baseExposure, 0);
 });
 
 test("colour selection regenerates both images, while reset restores only trial treatment and exposure", async () => {
@@ -135,8 +135,8 @@ test("colour selection regenerates both images, while reset restores only trial 
   assert.equal(h.renders.at(-1).renderer, "linear");
   await h.fire("test-reset", "click");
   assert.equal(h.renders.at(-1).renderer, "film");
-  assert.equal(h.renders.at(-1).baseExposure, -1);
-  assert.equal(h.renders.at(-1).participantExposure, -1);
+  assert.equal(h.renders.at(-1).baseExposure, 0);
+  assert.equal(h.renders.at(-1).participantExposure, 0);
   assert.equal(h.renders.at(-1).monochrome, false);
 });
 
