@@ -136,65 +136,9 @@ const FilmExposureMath = (() => {
     };
   }
 
-  // A separate artistic approximation of one shared frame. The two sources
-  // contribute estimated exposure at each pixel, then one result is developed.
-  // JPEG values are not measured scene exposure; these thresholds are choices
-  // for the local comparison, not a calibrated film stock.
-  const thresholdParameters = Object.freeze({ blackPoint: 20, whitePoint: 185, gamma: 1.6 });
-  const thresholdBlack = srgb8ToLinear(thresholdParameters.blackPoint);
-  const thresholdWhite = srgb8ToLinear(thresholdParameters.whitePoint);
-  const thresholdSpan = thresholdWhite - thresholdBlack;
-  function estimatedExposure(linear) {
-    const position = clamp((linear - thresholdBlack) / thresholdSpan);
-    return position ** thresholdParameters.gamma;
-  }
-  function developedThreshold(exposure) {
-    if (exposure <= 0) return 0;
-    if (exposure >= 1) return 255;
-    return linearToSrgb8(thresholdBlack + exposure ** (1 / thresholdParameters.gamma) * thresholdSpan);
-  }
-  const linearBytes = Float32Array.from({ length: 256 }, (_, byte) => srgb8ToLinear(byte));
-  const thresholdBytes = Float32Array.from(linearBytes, estimatedExposure);
-
-  function createThresholdMixer({ baseExposure = 0, participantExposure = 0, monochrome = true } = {}) {
-    if (![baseExposure, participantExposure].every((value) => Number.isFinite(value) && value >= -3 && value <= 2)) {
-      throw new RangeError("Each exposure must be between -3 and +2 EV.");
-    }
-    if (typeof monochrome !== "boolean") throw new TypeError("Monochrome must be true or false.");
-    const baseGain = 2 ** baseExposure;
-    const secondGain = 2 ** participantExposure;
-    return function mix(base, participant, output, start = 0, end = base.length) {
-      if (base.length !== participant.length || base.length !== output.length || base.length % 4 !== 0) {
-        throw new RangeError("Input and output buffers must have identical RGBA dimensions.");
-      }
-      if (!Number.isInteger(start) || !Number.isInteger(end) || start % 4 !== 0 || end % 4 !== 0 || start < 0 || end < start || end > base.length) {
-        throw new RangeError("Pixel chunks must use aligned RGBA boundaries within the buffers.");
-      }
-      for (let index = start; index < end; index += 4) {
-        if (monochrome) {
-          const first = 0.2126 * linearBytes[base[index]] + 0.7152 * linearBytes[base[index + 1]] + 0.0722 * linearBytes[base[index + 2]];
-          const second = 0.2126 * linearBytes[participant[index]] + 0.7152 * linearBytes[participant[index + 1]] + 0.0722 * linearBytes[participant[index + 2]];
-          const value = developedThreshold(baseGain * estimatedExposure(first) + secondGain * estimatedExposure(second));
-          output[index] = output[index + 1] = output[index + 2] = value;
-        } else {
-          for (let channel = 0; channel < 3; channel++) {
-            output[index + channel] = developedThreshold(
-              baseGain * thresholdBytes[base[index + channel]] +
-              secondGain * thresholdBytes[participant[index + channel]]
-            );
-          }
-        }
-        output[index + 3] = 255;
-      }
-    };
-  }
-
   return Object.freeze({
     version,
     createMixer,
-    createThresholdMixer,
-    thresholdVersion: "threshold-exposure-v1",
-    thresholdParameters,
     parameters: Object.freeze({ logMin: LOG_MIN, logMax: LOG_MAX, toe: TOE, shoulder: SHOULDER, softness: SOFTNESS })
   });
 })();

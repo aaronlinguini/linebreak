@@ -19,9 +19,9 @@ function initializeLocalExposureTest() {
   };
   const processor = createExposureProcessor({
     mixerFactory(settings) {
-      if (settings.renderer === "threshold") return FilmExposureMath.createThresholdMixer(settings);
-      if (settings.renderer === "film") return FilmExposureMath.createMixer(settings);
-      return ExposureMath.createMixer(settings);
+      return settings.renderer === "film"
+        ? FilmExposureMath.createMixer(settings)
+        : ExposureMath.createMixer(settings);
     }
   });
   const state = {
@@ -41,8 +41,7 @@ function initializeLocalExposureTest() {
     ui.participantValue.textContent = evLabel(ui.participantExposure.value);
   }
   function updateTrialTitle(settings = { renderer: ui.renderer.value, baseExposure: Number(ui.baseExposure.value), participantExposure: Number(ui.participantExposure.value) }) {
-    const names = { threshold: "threshold exposure", film: "film curve", linear: "current addition" };
-    ui.trialTitle.textContent = `Trial · ${names[settings.renderer]} · ${evLabel(settings.baseExposure)} / ${evLabel(settings.participantExposure)}`;
+    ui.trialTitle.textContent = `Trial · ${settings.renderer === "film" ? "film curve" : "current addition"} · ${evLabel(settings.baseExposure)} / ${evLabel(settings.participantExposure)}`;
   }
   function settingsFor(renderer, baseExposure, participantExposure) {
     return {
@@ -109,12 +108,10 @@ function initializeLocalExposureTest() {
     };
   }
   function renderRecord(settings, result) {
-    const isThreshold = settings.renderer === "threshold";
-    const isFilm = settings.renderer === "film";
     return {
       renderer: settings.renderer,
-      rendererVersion: isThreshold ? FilmExposureMath.thresholdVersion : isFilm ? FilmExposureMath.version : "linear-addition-c6a65ba",
-      ...((isThreshold || isFilm) ? { modelParameters: { ...(isThreshold ? FilmExposureMath.thresholdParameters : FilmExposureMath.parameters) } } : {}),
+      rendererVersion: settings.renderer === "film" ? FilmExposureMath.version : "linear-addition-c6a65ba",
+      ...(settings.renderer === "film" ? { modelParameters: { ...FilmExposureMath.parameters } } : {}),
       settings: { ...settings }, width: result.width, height: result.height,
       format: "image/jpeg", quality: 0.95
     };
@@ -218,7 +215,7 @@ function initializeLocalExposureTest() {
   ui.monochrome.addEventListener("change", () => changeSettings(true));
   ui.reset.addEventListener("click", () => {
     if (state.working) return;
-    ui.renderer.value = "threshold";
+    ui.renderer.value = "film";
     ui.baseExposure.value = ui.participantExposure.value = "0";
     return changeSettings();
   });

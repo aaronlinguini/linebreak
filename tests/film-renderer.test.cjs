@@ -19,11 +19,6 @@ function render(first, second, settings = {}) {
   film.createMixer(settings)(first, second, output);
   return Array.from(output);
 }
-function renderThreshold(first, second, settings = {}) {
-  const output = new Uint8ClampedArray(first.length);
-  film.createThresholdMixer(settings)(first, second, output);
-  return Array.from(output);
-}
 
 test("the experimental module loads in a plain browser scope without Node or DOM globals", () => {
   assert.equal(film.version, "assumed-film-v1");
@@ -128,64 +123,4 @@ test("model tables are reused across exposure changes and the cache is bounded",
   assert.equal(modelsBuilt, 5);
   cached.createMixer({ filmContrast: 1 });
   assert.equal(modelsBuilt, 6, "the least-recently-used model should have been evicted");
-});
-
-test("the threshold trial keeps an almost unexposed area clear for the other photo", () => {
-  assert.equal(film.thresholdVersion, "threshold-exposure-v1");
-  assert.ok(Object.isFrozen(film.thresholdParameters));
-  const blackFrame = rgba([0, 0, 0, 30, 30, 30]);
-  const portrait = rgba([128, 128, 128, 128, 128, 128]);
-  const result = renderThreshold(blackFrame, portrait);
-  assert.deepEqual(result.slice(0, 4), [128, 128, 128, 255]);
-  assert.ok(result[4] >= 128 && result[4] <= 131, "a dark base must not wash the portrait into a gray veil");
-});
-
-test("bright regions exhaust the shared frame and suppress detail from either photo", () => {
-  const bright = rgba([185, 185, 185]);
-  const dark = rgba([20, 20, 20]);
-  const detailed = rgba([150, 150, 150]);
-  assert.deepEqual(renderThreshold(bright, dark), [255, 255, 255, 255]);
-  assert.deepEqual(renderThreshold(bright, detailed), [255, 255, 255, 255]);
-  assert.deepEqual(renderThreshold(dark, bright), [255, 255, 255, 255]);
-});
-
-test("midtones combine locally and swapping the exposures preserves the result", () => {
-  const grayA = rgba([80, 80, 80]);
-  const grayB = rgba([120, 120, 120]);
-  const combined = renderThreshold(grayA, grayB)[0];
-  assert.ok(combined > 120 && combined < 185, "both midtones should contribute without globally fading either image");
-  for (const monochrome of [true, false]) {
-    assert.deepEqual(
-      renderThreshold(first, second, { baseExposure: -0.5, participantExposure: 1, monochrome }),
-      renderThreshold(second, first, { baseExposure: 1, participantExposure: -0.5, monochrome })
-    );
-  }
-});
-
-test("the threshold trial can preserve colour or develop the frame in monochrome", () => {
-  const warm = rgba([140, 80, 40]);
-  const black = rgba([0, 0, 0]);
-  const colour = renderThreshold(warm, black, { monochrome: false });
-  const mono = renderThreshold(warm, black, { monochrome: true });
-  assert.deepEqual(colour, [140, 80, 40, 255]);
-  assert.equal(mono[0], mono[1]);
-  assert.equal(mono[1], mono[2]);
-  assert.equal(mono[3], 255);
-});
-
-test("threshold mixing respects pixel chunks and rejects malformed buffers or settings", () => {
-  const settings = { baseExposure: -1, participantExposure: 0.5, monochrome: false };
-  const mix = film.createThresholdMixer(settings);
-  const output = new Uint8ClampedArray(first.length).fill(77);
-  mix(first, second, output, 4, 16);
-  assert.deepEqual(Array.from(output.slice(0, 4)), [77, 77, 77, 77]);
-  assert.ok(output.slice(16).every((byte) => byte === 77));
-  mix(first, second, output, 0, 4);
-  mix(first, second, output, 16, first.length);
-  assert.deepEqual(Array.from(output), renderThreshold(first, second, settings));
-  assert.throws(() => film.createThresholdMixer({ baseExposure: -3.1 }), /exposure must be between/);
-  assert.throws(() => film.createThresholdMixer({ participantExposure: 2.1 }), /exposure must be between/);
-  assert.throws(() => film.createThresholdMixer({ monochrome: "false" }), /Monochrome must be/);
-  assert.throws(() => mix(first, second, new Uint8ClampedArray(4)), /RGBA dimensions/);
-  assert.throws(() => mix(first, second, output, 1, 4), /aligned RGBA boundaries/);
 });

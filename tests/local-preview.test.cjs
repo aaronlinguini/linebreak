@@ -173,10 +173,10 @@ test("the local test page keeps CSS and JavaScript external and loads no archive
     assert.equal(body.trim(), "");
     const reference = attributes.match(/\bsrc="([^"]+)"/);
     assert.ok(reference);
-    assert.ok(fs.existsSync(path.join(root, reference[1].split("?")[0])));
+    assert.ok(fs.existsSync(path.join(root, reference[1])));
     return reference[1];
   });
-  assert.deepEqual(references, ["project-config.js", "scripts.js", "film-renderer.js?v=threshold-exposure-v1", "local-test.js"]);
+  assert.deepEqual(references, ["project-config.js", "scripts.js", "film-renderer.js", "local-test.js"]);
   assert.match(html, /<link\b[^>]*href="local-test\.css"/);
   const publicHtml = fs.readFileSync(path.join(root, "index.html"), "utf8");
   assert.doesNotMatch(publicHtml, /film-renderer\.js|local-test\.js|test-base-exposure/);

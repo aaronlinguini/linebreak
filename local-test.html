@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="local-test.css">
     <script src="project-config.js" defer></script>
     <script src="scripts.js" defer></script>
-    <script src="film-renderer.js?v=threshold-exposure-v1" defer></script>
+    <script src="film-renderer.js" defer></script>
     <script src="local-test.js" defer></script>
   </head>
   <body class="local-test">
@@ -28,7 +28,7 @@
           <button id="test-reference-download" class="save-button" type="button" hidden disabled>Download current</button>
         </section>
         <section class="comparison-panel" aria-labelledby="trial-title">
-          <h2 id="trial-title">Trial · threshold exposure</h2>
+          <h2 id="trial-title">Trial · film curve</h2>
           <div class="image-stage">
             <p id="test-empty" class="empty-state">Choose two photographs.</p>
             <canvas id="test-canvas" width="1" height="1" hidden aria-label="Adjustable trial double exposure"></canvas>
@@ -65,8 +65,7 @@
         <div class="renderer-control">
           <label for="test-renderer">Trial treatment</label>
           <select id="test-renderer">
-            <option value="threshold" selected>Threshold exposure (experimental)</option>
-            <option value="film">Film curve (earlier experiment)</option>
+            <option value="film" selected>Film curve (experimental)</option>
             <option value="linear">Current addition</option>
           </select>
         </div>
