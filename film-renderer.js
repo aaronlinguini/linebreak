@@ -159,7 +159,7 @@ const FilmExposureMath = (() => {
     const value = Math.sqrt(exposure);
     return clamp(value / (smoothParameters.whiteAnchor * (1 + value)));
   }
-  function createSmoothMixer({ baseExposure = 0, participantExposure = 0, monochrome = true } = {}) {
+  function createResponseMixer({ baseExposure = 0, participantExposure = 0, monochrome = true } = {}, estimateExposure, developLuminance, perChannel = false) {
     validateSettings(baseExposure, participantExposure, monochrome);
     const gainA = 2 ** baseExposure;
     const gainB = 2 ** participantExposure;
@@ -168,12 +168,22 @@ const FilmExposureMath = (() => {
       for (let index = start; index < end; index += 4) {
         const ar = smoothLinear[base[index]], ag = smoothLinear[base[index + 1]], ab = smoothLinear[base[index + 2]];
         const br = smoothLinear[participant[index]], bg = smoothLinear[participant[index + 1]], bb = smoothLinear[participant[index + 2]];
+        if (perChannel && !monochrome) {
+          // Treat RGB as three approximate sensitive layers. A bright neutral
+          // exposure then suppresses coloured detail through the same response,
+          // rather than allowing hue to show through a flat luminance plateau.
+          output[index] = encodeSmooth(developLuminance(gainA * estimateExposure(ar) + gainB * estimateExposure(br)));
+          output[index + 1] = encodeSmooth(developLuminance(gainA * estimateExposure(ag) + gainB * estimateExposure(bg)));
+          output[index + 2] = encodeSmooth(developLuminance(gainA * estimateExposure(ab) + gainB * estimateExposure(bb)));
+          output[index + 3] = 255;
+          continue;
+        }
         const luminanceA = 0.2126 * ar + 0.7152 * ag + 0.0722 * ab;
         const luminanceB = 0.2126 * br + 0.7152 * bg + 0.0722 * bb;
-        const exposureA = gainA * smoothExposure(luminanceA);
-        const exposureB = gainB * smoothExposure(luminanceB);
+        const exposureA = gainA * estimateExposure(luminanceA);
+        const exposureB = gainB * estimateExposure(luminanceB);
         const total = exposureA + exposureB;
-        const luminance = smoothLuminance(total);
+        const luminance = developLuminance(total);
         if (monochrome || total === 0) {
           const grey = encodeSmooth(luminance);
           output[index] = output[index + 1] = output[index + 2] = grey;
@@ -186,8 +196,8 @@ const FilmExposureMath = (() => {
           const green = weightA * ag + weightB * bg;
           const blue = weightA * ab + weightB * bb;
           const maximum = Math.max(red, green, blue);
-          // Bring out-of-gamut colour toward neutral using one common factor.
-          // Independent channel clipping would shift hue and flatten details.
+          // Saved smooth treatment: move out-of-gamut colour toward neutral
+          // using one factor, preserving its original output exactly.
           const chroma = maximum > 1 ? (1 - luminance) / (maximum - luminance) : 1;
           output[index] = encodeSmooth(luminance + chroma * (red - luminance));
           output[index + 1] = encodeSmooth(luminance + chroma * (green - luminance));
@@ -197,6 +207,58 @@ const FilmExposureMath = (() => {
       }
     };
   }
+  function createSmoothMixer(settings = {}) {
+    return createResponseMixer(settings, smoothExposure, smoothLuminance);
+  }
+
+  // A separate negative-and-print trial. Input light is an estimate from a
+  // finished JPEG, not the inverse of this output response. Each curve uses
+  // density versus log10 exposure; transmission/reflectance is 10 ** -density.
+  // Generic slopes follow a film/paper system; curve placement is an artistic
+  // choice, not a calibration to the artist's film or scanner.
+  const negativeParameters = Object.freeze({
+    negativeGamma: 0.6, negativeToe: -2.5, negativeShoulder: 0.8, negativeSoftness: 0.12,
+    paperGamma: 3.5, paperToe: -1.10, paperShoulder: -0.45, paperSoftness: 0.08,
+    paperMinimumDensity: 0.08, colourResponse: "per-channel-negative-print"
+  });
+  function densityCurve(logExposure, toe, shoulder, softness, gamma) {
+    return gamma * softness * (
+      softplus((logExposure - toe) / softness) -
+      softplus((logExposure - shoulder) / softness)
+    );
+  }
+  function printReflectance(exposure) {
+    const p = negativeParameters;
+    const negativeDensity = exposure > 0
+      ? densityCurve(Math.log10(exposure), p.negativeToe, p.negativeShoulder, p.negativeSoftness, p.negativeGamma)
+      : 0;
+    // log10(transmission) = -density. This is the paper's exposure, with a
+    // nominal printing-light gain of one. Dense negative areas expose it less.
+    const paperDensity = p.paperMinimumDensity + densityCurve(
+      -negativeDensity, p.paperToe, p.paperShoulder, p.paperSoftness, p.paperGamma
+    );
+    return 10 ** -paperDensity;
+  }
+  const printBlack = printReflectance(0);
+  const PRINT_LOG_MIN = -8;
+  const PRINT_LOG_MAX = Math.log10(8); // Two white inputs at the maximum +2 EV.
+  const printLut = Float64Array.from({ length: 65537 }, (_, index) => {
+    const logExposure = PRINT_LOG_MIN + index / 65536 * (PRINT_LOG_MAX - PRINT_LOG_MIN);
+    return clamp((printReflectance(10 ** logExposure) - printBlack) / (1 - printBlack));
+  });
+  function developedPrintLuminance(exposure) {
+    if (exposure <= 0) return 0;
+    const coordinate = clamp((Math.log10(exposure) - PRINT_LOG_MIN) / (PRINT_LOG_MAX - PRINT_LOG_MIN)) * 65536;
+    const start = Math.floor(coordinate);
+    if (start === 65536) return printLut[start];
+    const fraction = coordinate - start;
+    return printLut[start] * (1 - fraction) + printLut[start + 1] * fraction;
+  }
+  function createNegativeMixer(settings = {}) {
+    // The same bounded, continuous response is applied to each accumulated
+    // colour layer; no independent hard thresholds or gamut clipping are used.
+    return createResponseMixer(settings, (light) => light, developedPrintLuminance, true);
+  }
 
   return Object.freeze({
     version,
@@ -204,6 +266,9 @@ const FilmExposureMath = (() => {
     createSmoothMixer,
     smoothVersion: "smooth-exposure-v1",
     smoothParameters,
+    createNegativeMixer,
+    negativeVersion: "negative-print-v1",
+    negativeParameters,
     parameters: Object.freeze({ logMin: LOG_MIN, logMax: LOG_MAX, toe: TOE, shoulder: SHOULDER, softness: SOFTNESS })
   });
 })();

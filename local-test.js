@@ -19,6 +19,7 @@ function initializeLocalExposureTest() {
   };
   const processor = createExposureProcessor({
     mixerFactory(settings) {
+      if (settings.renderer === "negative") return FilmExposureMath.createNegativeMixer(settings);
       if (settings.renderer === "smooth") return FilmExposureMath.createSmoothMixer(settings);
       if (settings.renderer === "film") return FilmExposureMath.createMixer(settings);
       return ExposureMath.createMixer(settings);
@@ -41,7 +42,7 @@ function initializeLocalExposureTest() {
     ui.participantValue.textContent = evLabel(ui.participantExposure.value);
   }
   function updateTrialTitle(settings = { renderer: ui.renderer.value, baseExposure: Number(ui.baseExposure.value), participantExposure: Number(ui.participantExposure.value) }) {
-    const names = { smooth: "smooth exposure", film: "earlier film curve", linear: "current addition" };
+    const names = { negative: "negative + print", smooth: "smooth exposure", film: "earlier film curve", linear: "current addition" };
     ui.trialTitle.textContent = `Trial · ${names[settings.renderer]} · ${evLabel(settings.baseExposure)} / ${evLabel(settings.participantExposure)}`;
   }
   function settingsFor(renderer, baseExposure, participantExposure) {
@@ -110,6 +111,7 @@ function initializeLocalExposureTest() {
   }
   function renderRecord(settings, result) {
     const models = {
+      negative: { rendererVersion: FilmExposureMath.negativeVersion, modelParameters: { ...FilmExposureMath.negativeParameters } },
       smooth: { rendererVersion: FilmExposureMath.smoothVersion, modelParameters: { ...FilmExposureMath.smoothParameters } },
       film: { rendererVersion: FilmExposureMath.version, modelParameters: { ...FilmExposureMath.parameters } },
       linear: { rendererVersion: "linear-addition-c6a65ba" }
@@ -123,7 +125,7 @@ function initializeLocalExposureTest() {
   }
   async function renderResults(includeReference) {
     // Capture all controls before awaiting; the recipe belongs to these outputs.
-    const referenceSettings = settingsFor("linear", 0, 0);
+    const referenceSettings = settingsFor("smooth", 0, 0);
     const trialSettings = settingsFor(ui.renderer.value, Number(ui.baseExposure.value), Number(ui.participantExposure.value));
     ui.status.textContent = "Developing comparison…";
     if (includeReference || !state.referenceRecord) {
@@ -220,7 +222,7 @@ function initializeLocalExposureTest() {
   ui.monochrome.addEventListener("change", () => changeSettings(true));
   ui.reset.addEventListener("click", () => {
     if (state.working) return;
-    ui.renderer.value = "smooth";
+    ui.renderer.value = "negative";
     ui.baseExposure.value = ui.participantExposure.value = "0";
     return changeSettings();
   });
