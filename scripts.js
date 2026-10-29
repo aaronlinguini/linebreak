@@ -42,12 +42,15 @@ const ExposureMath = (() => {
   }
 
   const linearTable = Float64Array.from({ length: 256 }, (_, index) => srgbToLinear(index / 255));
+  function makeEncoder(contrast) {
+    return Uint8ClampedArray.from({ length: 65536 }, (_, index) =>
+      Math.round(clamp(contrastCurve(linearToSrgb(index / 65535), contrast)) * 255));
+  }
 
   function createMixer(settings) {
     const baseGain = 2 ** settings.baseExposure;
     const participantGain = 2 ** settings.participantExposure;
-    const encode = Uint8ClampedArray.from({ length: 65536 }, (_, index) =>
-      Math.round(clamp(contrastCurve(linearToSrgb(index / 65535), settings.contrast)) * 255));
+    const encode = makeEncoder(settings.contrast);
 
     return function mix(base, participant, output, start = 0, end = base.length) {
       for (let index = start; index < end; index += 4) {
@@ -65,7 +68,58 @@ const ExposureMath = (() => {
     };
   }
 
-  return Object.freeze({ clamp, srgbToLinear, linearToSrgb, contrastCurve, coverCrop, outputSize, selectIndex, createMixer });
+  // Artist trial for finished photographs; these constants are not a calibrated film response.
+  const balancedParameters = Object.freeze({ shadowBoost: 0.65, shadowRange: 0.09, highlightPivot: 0.45, retentionPower: 3.5 });
+  function createBalancedMixer({ baseExposure = 0, participantExposure = 0, contrast = 12, monochrome = false, balanceStrength = 100 } = {}) {
+    if (![baseExposure, participantExposure].every((value) => Number.isFinite(value) && value >= -3 && value <= 2)) {
+      throw new RangeError("Each exposure must be between -3 and +2 EV.");
+    }
+    if (!Number.isFinite(contrast) || contrast < 0 || contrast > 30) throw new RangeError("Contrast must be between 0 and 30.");
+    if (!Number.isFinite(balanceStrength) || balanceStrength < 0 || balanceStrength > 100) throw new RangeError("Balance must be between 0 and 100.");
+    if (typeof monochrome !== "boolean") throw new TypeError("Monochrome must be true or false.");
+    const settings = { baseExposure, participantExposure, contrast, monochrome };
+    // Zero restores the saved additive operation exactly, including rounding.
+    const additive = balanceStrength === 0 ? createMixer(settings) : null;
+    const strength = balanceStrength / 100;
+    const gainA = 2 ** baseExposure;
+    const gainB = 2 ** participantExposure;
+    const encode = additive ? null : makeEncoder(contrast);
+    function combine(a, b) {
+      const brighter = Math.max(a, b);
+      const darker = Math.min(a, b);
+      const p = balancedParameters;
+      const highlightRoom = 1 / (1 + (brighter / p.highlightPivot) ** p.retentionPower);
+      const shadowReveal = p.shadowBoost * Math.exp(-brighter / p.shadowRange);
+      const retained = 1 + strength * (highlightRoom - 1 + shadowReveal);
+      return encode[Math.round(clamp(brighter + darker * retained) * 65535)];
+    }
+    return function mix(base, participant, output, start = 0, end = base.length) {
+      if (base.length !== participant.length || base.length !== output.length || base.length % 4 !== 0) {
+        throw new RangeError("Input and output buffers must have identical RGBA dimensions.");
+      }
+      if (!Number.isInteger(start) || !Number.isInteger(end) || start % 4 !== 0 || end % 4 !== 0 || start < 0 || end < start || end > base.length) {
+        throw new RangeError("Pixel chunks must use aligned RGBA boundaries within the buffers.");
+      }
+      if (additive) { additive(base, participant, output, start, end); return; }
+      for (let index = start; index < end; index += 4) {
+        const ar = linearTable[base[index]] * gainA, ag = linearTable[base[index + 1]] * gainA, ab = linearTable[base[index + 2]] * gainA;
+        const br = linearTable[participant[index]] * gainB, bg = linearTable[participant[index + 1]] * gainB, bb = linearTable[participant[index + 2]] * gainB;
+        if (monochrome) {
+          const a = 0.2126 * ar + 0.7152 * ag + 0.0722 * ab;
+          const b = 0.2126 * br + 0.7152 * bg + 0.0722 * bb;
+          const grey = combine(a, b);
+          output[index] = output[index + 1] = output[index + 2] = grey;
+        } else {
+          output[index] = combine(ar, br);
+          output[index + 1] = combine(ag, bg);
+          output[index + 2] = combine(ab, bb);
+        }
+        output[index + 3] = 255;
+      }
+    };
+  }
+
+  return Object.freeze({ clamp, srgbToLinear, linearToSrgb, contrastCurve, coverCrop, outputSize, selectIndex, createMixer, createBalancedMixer, balancedVersion: "adaptive-addition-v1", balancedParameters });
 })();
 
 // Exposure treatment is the artist's decision. Pairing is selected by Google.

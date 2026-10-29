@@ -14,12 +14,14 @@ function initializeLocalExposureTest() {
     renderer: byId("test-renderer"), baseExposure: byId("test-base-exposure"),
     participantExposure: byId("test-participant-exposure"), monochrome: byId("test-monochrome"),
     contrast: byId("test-contrast"), contrastValue: byId("test-contrast-value"), contrastControl: byId("test-contrast-control"),
+    balance: byId("test-balance"), balanceValue: byId("test-balance-value"), balanceControl: byId("test-balance-control"),
     baseValue: byId("test-base-value"), participantValue: byId("test-participant-value"),
     reset: byId("test-reset"), trialTitle: byId("trial-title"),
     status: byId("test-status"), error: byId("test-error")
   };
   const processor = createExposureProcessor({
     mixerFactory(settings) {
+      if (settings.renderer === "balanced") return ExposureMath.createBalancedMixer(settings);
       if (settings.renderer === "revised") return FilmExposureMath.createRevisedMixer(settings);
       if (settings.renderer === "smooth") return FilmExposureMath.createSmoothMixer(settings);
       if (settings.renderer === "film") return FilmExposureMath.createMixer(settings);
@@ -31,7 +33,7 @@ function initializeLocalExposureTest() {
     resultUrl: null, referenceUrl: null, settingsUrl: null,
     referenceRecord: null, completed: null
   };
-  const controls = [ui.base, ui.participant, ui.baseCamera, ui.participantCamera, ui.renderer, ui.baseExposure, ui.participantExposure, ui.contrast, ui.monochrome, ui.reset];
+  const controls = [ui.base, ui.participant, ui.baseCamera, ui.participantCamera, ui.renderer, ui.baseExposure, ui.participantExposure, ui.contrast, ui.balance, ui.monochrome, ui.reset];
   ui.monochrome.checked = PROJECT_SETTINGS.monochrome;
 
   function evLabel(value) {
@@ -42,20 +44,24 @@ function initializeLocalExposureTest() {
     ui.baseValue.textContent = evLabel(ui.baseExposure.value);
     ui.participantValue.textContent = evLabel(ui.participantExposure.value);
     ui.contrastValue.textContent = ui.contrast.value;
+    ui.balanceValue.textContent = `${ui.balance.value}%`;
   }
-  function updateContrastControl() {
-    ui.contrastControl.hidden = ui.renderer.value !== "linear";
+  function updateTreatmentControls() {
+    ui.contrastControl.hidden = !["linear", "balanced"].includes(ui.renderer.value);
     ui.contrast.disabled = state.working || ui.contrastControl.hidden;
+    ui.balanceControl.hidden = ui.renderer.value !== "balanced";
+    ui.balance.disabled = state.working || ui.balanceControl.hidden;
   }
-  function updateTrialTitle(settings = { renderer: ui.renderer.value, baseExposure: Number(ui.baseExposure.value), participantExposure: Number(ui.participantExposure.value), contrast: Number(ui.contrast.value) }) {
-    const names = { revised: "revised smooth", smooth: "saved smooth exposure", film: "earlier film curve", linear: "current addition" };
-    const contrast = settings.renderer === "linear" ? ` · contrast ${settings.contrast}` : "";
-    ui.trialTitle.textContent = `Trial · ${names[settings.renderer]}${contrast} · ${evLabel(settings.baseExposure)} / ${evLabel(settings.participantExposure)}`;
+  function updateTrialTitle(settings = { renderer: ui.renderer.value, baseExposure: Number(ui.baseExposure.value), participantExposure: Number(ui.participantExposure.value), contrast: Number(ui.contrast.value), balanceStrength: Number(ui.balance.value) }) {
+    const names = { balanced: "dark/light balance", revised: "revised smooth", smooth: "saved smooth exposure", film: "earlier film curve", linear: "current addition" };
+    const contrast = ["linear", "balanced"].includes(settings.renderer) ? ` · contrast ${settings.contrast}` : "";
+    const balance = settings.renderer === "balanced" ? ` · ${settings.balanceStrength}%` : "";
+    ui.trialTitle.textContent = `Trial · ${names[settings.renderer]}${balance}${contrast} · ${evLabel(settings.baseExposure)} / ${evLabel(settings.participantExposure)}`;
   }
-  function settingsFor(renderer, baseExposure, participantExposure, contrast = 0) {
+  function settingsFor(renderer, baseExposure, participantExposure, contrast = 0, balanceStrength = 0) {
     return {
       ...PROJECT_SETTINGS, renderer, baseExposure, participantExposure,
-      contrast, filmContrast: 1, monochrome: ui.monochrome.checked
+      contrast, balanceStrength, filmContrast: 1, monochrome: ui.monochrome.checked
     };
   }
   function releaseUrl(key) {
@@ -87,7 +93,7 @@ function initializeLocalExposureTest() {
   function setWorking(value) {
     state.working = value;
     for (const control of controls) control.disabled = value;
-    updateContrastControl();
+    updateTreatmentControls();
     ui.busy.hidden = !value;
     ui.workspace.setAttribute("aria-busy", String(value));
     updateDownloads();
@@ -119,6 +125,7 @@ function initializeLocalExposureTest() {
   }
   function renderRecord(settings, result) {
     const models = {
+      balanced: { rendererVersion: ExposureMath.balancedVersion, modelParameters: { ...ExposureMath.balancedParameters } },
       revised: { rendererVersion: FilmExposureMath.revisedVersion, modelParameters: { ...FilmExposureMath.revisedParameters } },
       smooth: { rendererVersion: FilmExposureMath.smoothVersion, modelParameters: { ...FilmExposureMath.smoothParameters } },
       film: { rendererVersion: FilmExposureMath.version, modelParameters: { ...FilmExposureMath.parameters } },
@@ -133,8 +140,12 @@ function initializeLocalExposureTest() {
   }
   async function renderResults(includeReference) {
     // Capture all controls before awaiting; the recipe belongs to these outputs.
-    const referenceSettings = settingsFor("linear", 0, 0);
-    const trialSettings = settingsFor(ui.renderer.value, Number(ui.baseExposure.value), Number(ui.participantExposure.value), ui.renderer.value === "linear" ? Number(ui.contrast.value) : 0);
+    const referenceSettings = settingsFor("linear", 0, 0, 12);
+    const trialSettings = settingsFor(
+      ui.renderer.value, Number(ui.baseExposure.value), Number(ui.participantExposure.value),
+      ["linear", "balanced"].includes(ui.renderer.value) ? Number(ui.contrast.value) : 0,
+      ui.renderer.value === "balanced" ? Number(ui.balance.value) : 0
+    );
     ui.status.textContent = "Developing comparison…";
     if (includeReference || !state.referenceRecord) {
       const reference = await processor.develop(state.base, state.participant, ui.referenceCanvas, referenceSettings);
@@ -191,7 +202,7 @@ function initializeLocalExposureTest() {
   async function changeSettings(includeReference = false) {
     if (state.working || state.disposed) return;
     updateReadouts();
-    updateContrastControl();
+    updateTreatmentControls();
     updateTrialTitle();
     clearError();
     clearResults(includeReference);
@@ -223,7 +234,7 @@ function initializeLocalExposureTest() {
   ui.participant.addEventListener("change", () => choosePhoto("participant", ui.participant));
   ui.baseCamera.addEventListener("change", () => choosePhoto("base", ui.baseCamera));
   ui.participantCamera.addEventListener("change", () => choosePhoto("participant", ui.participantCamera));
-  for (const slider of [ui.baseExposure, ui.participantExposure, ui.contrast]) {
+  for (const slider of [ui.baseExposure, ui.participantExposure, ui.contrast, ui.balance]) {
     slider.addEventListener("input", updateReadouts);
     slider.addEventListener("change", () => changeSettings());
   }
@@ -231,7 +242,8 @@ function initializeLocalExposureTest() {
   ui.monochrome.addEventListener("change", () => changeSettings(true));
   ui.reset.addEventListener("click", () => {
     if (state.working) return;
-    ui.renderer.value = "linear";
+    ui.renderer.value = "balanced";
+    ui.balance.value = "100";
     ui.contrast.value = "12";
     ui.baseExposure.value = ui.participantExposure.value = "0";
     return changeSettings();
@@ -253,7 +265,7 @@ function initializeLocalExposureTest() {
     processor.releasePhoto(state.participant);
   });
   updateReadouts();
-  updateContrastControl();
+  updateTreatmentControls();
   updateTrialTitle();
 }
 

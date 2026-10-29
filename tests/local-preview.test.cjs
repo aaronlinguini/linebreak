@@ -176,7 +176,7 @@ test("the local test page keeps CSS and JavaScript external and loads no archive
     assert.ok(fs.existsSync(path.join(root, reference[1].split("?")[0])));
     return reference[1];
   });
-  assert.deepEqual(references, ["project-config.js", "scripts.js", "film-renderer.js?v=smooth-revised-v1", "local-test.js?v=current-contrast-v1"]);
+  assert.deepEqual(references, ["project-config.js", "scripts.js?v=adaptive-addition-v1", "film-renderer.js?v=smooth-revised-v1", "local-test.js?v=adaptive-addition-v1"]);
   assert.match(html, /<link\b[^>]*href="local-test\.css"/);
   const publicHtml = fs.readFileSync(path.join(root, "index.html"), "utf8");
   assert.doesNotMatch(publicHtml, /film-renderer\.js|local-test\.js|test-base-exposure/);
@@ -198,6 +198,7 @@ test("a failed local selection clears the previous result, reports the error, an
   elements.get("test-base-exposure").value = "-1";
   elements.get("test-participant-exposure").value = "-1";
   elements.get("test-contrast").value = "12";
+  elements.get("test-balance").value = "100";
   const revoked = [];
   const released = [];
   let developments = 0;
@@ -207,6 +208,7 @@ test("a failed local selection clears the previous result, reports the error, an
     window: { addEventListener() {} },
     URL: { createObjectURL() { return "blob:local-result"; }, revokeObjectURL(url) { revoked.push(url); } },
     PROJECT_SETTINGS: { baseExposure: 0, participantExposure: 0, contrast: 0, monochrome: false },
+    ExposureMath: { balancedVersion: "adaptive-addition-v1", balancedParameters: {} },
     FilmExposureMath: { version: "assumed-film-v1" },
     createExposureProcessor() {
       return {

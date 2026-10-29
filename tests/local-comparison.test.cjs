@@ -27,6 +27,7 @@ function harness() {
   elements.get("test-base-exposure").value = "0";
   elements.get("test-participant-exposure").value = "0";
   elements.get("test-contrast").value = html.match(/<input\b[^>]*id="test-contrast"[^>]*\bvalue="([^"]+)"/)?.[1] ?? "";
+  elements.get("test-balance").value = html.match(/<input\b[^>]*id="test-balance"[^>]*\bvalue="([^"]+)"/)?.[1] ?? "";
   const renders = [];
   const downloads = [];
   const urls = new Map();
@@ -58,7 +59,12 @@ function harness() {
       createSmoothMixer() { return "smooth"; },
       createMixer() { return "film"; }
     },
-    ExposureMath: { createMixer() { return "linear"; } },
+    ExposureMath: {
+      balancedVersion: "adaptive-addition-v1",
+      balancedParameters: { shadowBoost: 0.65, shadowRange: 0.09, highlightPivot: 0.45, retentionPower: 3.5 },
+      createMixer() { return "linear"; },
+      createBalancedMixer() { return "balanced"; }
+    },
     createExposureProcessor({ mixerFactory }) {
       return {
         async loadPhoto(file) {
@@ -98,11 +104,14 @@ test("trial settings affect only the trial, and downloads identify the completed
   const h = harness();
   await h.pair();
   assert.equal(h.renders.length, 2);
-  assert.deepEqual(h.renders.map(({ renderer, baseExposure, participantExposure }) => [renderer, baseExposure, participantExposure]), [["linear",0,0], ["linear",0,0]]);
+  assert.deepEqual(h.renders.map(({ renderer, baseExposure, participantExposure }) => [renderer, baseExposure, participantExposure]), [["linear",0,0], ["balanced",0,0]]);
   assert.equal(h.elements.get("test-monochrome").checked, true);
-  assert.equal(h.renders[0].contrast, 0);
+  assert.equal(h.renders[0].contrast, 12);
+  assert.equal(h.renders[0].balanceStrength, 0);
   assert.equal(h.renders[1].contrast, 12);
+  assert.equal(h.renders[1].balanceStrength, 100);
   assert.equal(h.elements.get("test-contrast-control").hidden, false);
+  assert.equal(h.elements.get("test-balance-control").hidden, false);
 
   h.elements.get("test-base-exposure").value = "-0.5";
   await h.fire("test-base-exposure");
@@ -113,21 +122,23 @@ test("trial settings affect only the trial, and downloads identify the completed
   assert.equal(recipe.schemaVersion, 1);
   assert.equal(recipe.reference.settings.baseExposure, 0);
   assert.equal(recipe.trial.settings.baseExposure, -0.5);
-  assert.equal(recipe.trial.rendererVersion, "linear-addition-c6a65ba");
-  assert.equal(recipe.reference.settings.contrast, 0);
+  assert.equal(recipe.trial.rendererVersion, "adaptive-addition-v1");
+  assert.equal(recipe.reference.rendererVersion, "linear-addition-c6a65ba");
+  assert.equal(recipe.reference.settings.contrast, 12);
   assert.equal(recipe.trial.settings.contrast, 12);
-  assert.equal(recipe.trial.modelParameters, undefined);
+  assert.equal(recipe.trial.settings.balanceStrength, 100);
+  assert.deepEqual(recipe.trial.modelParameters, { shadowBoost: 0.65, shadowRange: 0.09, highlightPivot: 0.45, retentionPower: 3.5 });
   assert.equal(recipe.sources.base.name, "base.jpg");
   assert.equal(recipe.sources.base.originalWidth, 400);
   assert.equal(recipe.sources.base.workingWidth, 600);
 
   await h.fire("test-download", "click");
-  assert.match(h.downloads.at(-1).filename, /^double-exposure-linear-base-minus0\.5EV-second-0EV-bw-\d+\.jpg$/);
+  assert.match(h.downloads.at(-1).filename, /^double-exposure-balanced-base-minus0\.5EV-second-0EV-bw-\d+\.jpg$/);
   await h.fire("test-reference-download", "click");
   assert.match(h.downloads.at(-1).filename, /^double-exposure-linear-base-0EV-second-0EV-bw-\d+\.jpg$/);
 });
 
-test("contrast changes only the additive trial and zero restores the reference recipe", async () => {
+test("contrast changes only the trial and the saved additive settings match the reference recipe", async () => {
   const h = harness();
   await h.pair();
   const completedTitle = h.elements.get("trial-title").textContent;
@@ -139,16 +150,22 @@ test("contrast changes only the additive trial and zero restores the reference r
   await h.fire("test-contrast");
   assert.equal(h.renders.length, 3, "contrast must not redevelop the fixed reference");
   let recipe = await h.recipe();
-  assert.equal(recipe.reference.settings.contrast, 0);
+  assert.equal(recipe.reference.settings.contrast, 12);
   assert.equal(recipe.trial.settings.contrast, 24);
   assert.match(h.elements.get("trial-title").textContent, /contrast 24/);
   h.elements.get("test-contrast").value = "0";
   await h.fire("test-contrast");
   recipe = await h.recipe();
+  assert.equal(recipe.trial.settings.contrast, 0);
+  assert.equal(recipe.reference.settings.contrast, 12);
+  h.elements.get("test-renderer").value = "linear";
+  h.elements.get("test-contrast").value = "12";
+  await h.fire("test-renderer");
+  recipe = await h.recipe();
   assert.deepEqual(recipe.trial.settings, recipe.reference.settings);
 });
 
-test("the contrast control is available only for additive processing", async () => {
+test("treatment controls apply contrast to both additive methods and balance only to the new method", async () => {
   const h = harness();
   await h.pair();
   for (const renderer of ["smooth", "revised", "film"]) {
@@ -156,13 +173,49 @@ test("the contrast control is available only for additive processing", async () 
     await h.fire("test-renderer");
     assert.equal(h.elements.get("test-contrast-control").hidden, true);
     assert.equal(h.elements.get("test-contrast").disabled, true);
+    assert.equal(h.elements.get("test-balance-control").hidden, true);
+    assert.equal(h.elements.get("test-balance").disabled, true);
     assert.equal(h.renders.at(-1).contrast, 0);
+    assert.equal(h.renders.at(-1).balanceStrength, 0);
   }
   h.elements.get("test-renderer").value = "linear";
   await h.fire("test-renderer");
   assert.equal(h.elements.get("test-contrast-control").hidden, false);
   assert.equal(h.elements.get("test-contrast").disabled, false);
   assert.equal(h.renders.at(-1).contrast, 12);
+  assert.equal(h.elements.get("test-balance-control").hidden, true);
+  assert.equal(h.elements.get("test-balance").disabled, true);
+  assert.equal(h.renders.at(-1).balanceStrength, 0);
+  h.elements.get("test-renderer").value = "balanced";
+  await h.fire("test-renderer");
+  assert.equal(h.elements.get("test-contrast-control").hidden, false);
+  assert.equal(h.elements.get("test-contrast").disabled, false);
+  assert.equal(h.elements.get("test-balance-control").hidden, false);
+  assert.equal(h.elements.get("test-balance").disabled, false);
+  assert.equal(h.renders.at(-1).balanceStrength, 100);
+});
+
+test("the balance slider changes only the trial and records its completed strength", async () => {
+  const h = harness();
+  await h.pair();
+  const completedTitle = h.elements.get("trial-title").textContent;
+  h.elements.get("test-balance").value = "50";
+  await h.fire("test-balance", "input");
+  assert.equal(h.elements.get("test-balance-value").textContent, "50%");
+  assert.equal(h.elements.get("trial-title").textContent, completedTitle);
+  assert.equal(h.renders.length, 2);
+  let recipe = await h.recipe();
+  assert.equal(recipe.trial.settings.balanceStrength, 100);
+  await h.fire("test-balance");
+  assert.equal(h.renders.length, 3, "balance must not redevelop the fixed saved reference");
+  recipe = await h.recipe();
+  assert.equal(recipe.trial.settings.balanceStrength, 50);
+  assert.equal(recipe.reference.settings.balanceStrength, 0);
+  assert.match(h.elements.get("trial-title").textContent, /50%/);
+  h.elements.get("test-balance").value = "0";
+  await h.fire("test-balance");
+  recipe = await h.recipe();
+  assert.deepEqual({ ...recipe.trial.settings, renderer: "linear" }, recipe.reference.settings);
 });
 
 test("moving a slider updates its readout without relabelling or replacing the completed image", async () => {
@@ -178,7 +231,7 @@ test("moving a slider updates its readout without relabelling or replacing the c
   assert.equal(recipe.trial.settings.baseExposure, 0);
 });
 
-test("colour selection regenerates both images, while reset restores trial treatment, contrast and exposure", async () => {
+test("colour selection regenerates both images, while reset restores balance, contrast and exposure", async () => {
   const h = harness();
   await h.pair();
   h.elements.get("test-monochrome").checked = false;
@@ -187,15 +240,18 @@ test("colour selection regenerates both images, while reset restores trial treat
   assert.ok(h.renders.slice(2).every((settings) => settings.monochrome === false));
   h.elements.get("test-renderer").value = "revised";
   h.elements.get("test-contrast").value = "28";
+  h.elements.get("test-balance").value = "25";
   h.elements.get("test-base-exposure").value = "1";
   await h.fire("test-renderer");
   assert.equal(h.renders.at(-1).renderer, "revised");
   assert.equal(h.renders.at(-1).contrast, 0);
   assert.equal(h.elements.get("test-contrast-control").hidden, true);
   await h.fire("test-reset", "click");
-  assert.equal(h.renders.at(-1).renderer, "linear");
+  assert.equal(h.renders.at(-1).renderer, "balanced");
   assert.equal(h.renders.at(-1).contrast, 12);
+  assert.equal(h.renders.at(-1).balanceStrength, 100);
   assert.equal(h.elements.get("test-contrast-control").hidden, false);
+  assert.equal(h.elements.get("test-balance-control").hidden, false);
   assert.equal(h.renders.at(-1).baseExposure, 0);
   assert.equal(h.renders.at(-1).participantExposure, 0);
   assert.equal(h.renders.at(-1).monochrome, false);
@@ -214,6 +270,7 @@ test("an in-flight render disables controls and saves its own settings snapshot"
   assert.equal(h.elements.get("test-participant-camera").disabled, true);
   assert.equal(h.elements.get("test-renderer").disabled, true);
   assert.equal(h.elements.get("test-contrast").disabled, true);
+  assert.equal(h.elements.get("test-balance").disabled, true);
   assert.equal(h.elements.get("test-settings-download").disabled, true);
   h.elements.get("test-base-exposure").value = "2";
   await h.fire("test-base-exposure");
@@ -267,7 +324,7 @@ test("camera captures replace the selected roles through the same comparison pip
   assert.equal(recipe.sources.base.name, "camera-base.jpg");
   assert.equal(recipe.sources.participant.name, "camera-second.jpg");
   assert.equal(h.elements.get("test-participant-camera").value, "");
-  assert.deepEqual(h.renders.slice(-2).map((settings) => settings.renderer), ["linear", "linear"]);
+  assert.deepEqual(h.renders.slice(-2).map((settings) => settings.renderer), ["linear", "balanced"]);
 });
 
 test("the saved smooth treatment remains selectable with its original model record", async () => {

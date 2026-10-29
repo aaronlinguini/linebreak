@@ -222,6 +222,132 @@ test("processing a pixel chunk leaves pixels outside its range untouched", () =>
   assert.deepEqual(Array.from(output.slice(4, 12)), mix(first, second).slice(4, 12));
 });
 
+function mixBalanced(base, participant, overrides = {}, Output = Uint8ClampedArray) {
+  const output = new Output(base.length);
+  math.createBalancedMixer({ baseExposure: 0, participantExposure: 0, contrast: 12, monochrome: false, balanceStrength: 100, ...overrides })(base, participant, output);
+  return Array.from(output);
+}
+
+test("the saved Current + contrast checkpoint retains its exact pixels", () => {
+  // Captured from c1cd211 before the shared encoder was extracted.
+  for (const fixture of [
+    { settings: { baseExposure: 0, participantExposure: 0, contrast: 12, monochrome: false }, output: [209,87,255,255,144,191,241,255,255,255,255,255,134,246,209,255] },
+    { settings: { baseExposure: -0.5, participantExposure: 1, contrast: 24, monochrome: true }, output: [195,195,195,255,198,198,198,255,255,255,255,255,255,255,255,255] },
+    { settings: { baseExposure: 1, participantExposure: -1, contrast: 0, monochrome: false }, output: [146,72,255,255,127,246,198,255,255,255,255,255,160,177,255,255] }
+  ]) assert.deepEqual(mix(first, second, fixture.settings), fixture.output);
+});
+
+test("balance zero reproduces Current + contrast exactly across colours, EV and monochrome", () => {
+  assert.equal(math.balancedVersion, "adaptive-addition-v1");
+  assert.ok(Object.isFrozen(math.balancedParameters));
+  assert.equal(math.balancedParameters.shadowBoost, 0.65);
+  const ramp = Array.from({ length: 256 }, (_, value) => [value, 255-value, value*73%256, 255]).flat();
+  const other = Array.from({ length: 256 }, (_, value) => [255-value, value*31%256, value, 0]).flat();
+  for (const monochrome of [false, true]) {
+    for (const [baseExposure, participantExposure, contrast] of [[0,0,12],[-3,2,0],[1,-0.5,30]]) {
+      const settings = { baseExposure, participantExposure, contrast, monochrome };
+      assert.deepEqual(mixBalanced(ramp, other, { ...settings, balanceStrength: 0 }), mix(ramp, other, settings));
+    }
+  }
+});
+
+test("balanced processing opens dark overlaps and limits bright overlaps at the same contrast", () => {
+  const pair = (a, b, balanced) => (balanced ? mixBalanced : mix)([a,a,a,255], [b,b,b,255], { baseExposure: 0, participantExposure: 0, contrast: 12, monochrome: true })[0];
+  for (const byte of [40,80]) assert.ok(pair(byte,byte,true) > pair(byte,byte,false), "dark overlap must become more visible");
+  assert.ok(Math.abs(pair(128,128,true) - pair(128,128,false)) <= 3, "the accepted middle-tone mixture should remain close");
+  for (const [a,b] of [[185,128],[185,185],[200,200],[220,200]]) {
+    assert.ok(pair(a,b,true) < pair(a,b,false), "bright overlap must add less than the saved treatment");
+  }
+});
+
+test("balanced output is symmetric when source photos and EV settings are exchanged", () => {
+  for (const monochrome of [false,true]) {
+    for (const balanceStrength of [0,40,100]) {
+      assert.deepEqual(
+        mixBalanced(first, second, { baseExposure: -2.3, participantExposure: 0.7, monochrome, balanceStrength }),
+        mixBalanced(second, first, { baseExposure: 0.7, participantExposure: -2.3, monochrome, balanceStrength })
+      );
+    }
+  }
+});
+
+test("a balanced photograph against black retains the saved single-source exposure response", () => {
+  const ramp = Array.from({ length: 256 }, (_, value) => [value, 255-value, value*73%256, 255]).flat();
+  const black = new Uint8ClampedArray(ramp.length);
+  for (const monochrome of [false,true]) {
+    for (const baseExposure of [-3,0,2]) {
+      const settings = { baseExposure, participantExposure: 0, contrast: 12, monochrome };
+      assert.deepEqual(mixBalanced(ramp, black, settings), mix(ramp, black, settings));
+      assert.deepEqual(mixBalanced(black, ramp, { ...settings, baseExposure: 0, participantExposure: baseExposure }), mix(ramp, black, settings));
+    }
+  }
+});
+
+test("every balanced grayscale pair is monotone with gradual neighbouring tones", () => {
+  const base = [], partner = [];
+  for (let secondByte=0; secondByte<256; secondByte++) {
+    for (let firstByte=0; firstByte<256; firstByte++) {
+      base.push(firstByte,firstByte,firstByte,255);
+      partner.push(secondByte,secondByte,secondByte,255);
+    }
+  }
+  for (const balanceStrength of [50,100]) {
+    const output = mixBalanced(base, partner, { monochrome: true, balanceStrength }, Float64Array);
+    assert.ok(output.every((value) => Number.isFinite(value) && value>=0 && value<=255));
+    for (let secondByte=0; secondByte<256; secondByte++) {
+      for (let firstByte=1; firstByte<256; firstByte++) {
+        const index = (secondByte*256+firstByte)*4;
+        const delta = output[index]-output[index-4];
+        assert.ok(delta>=0 && delta<=3, `balance ${balanceStrength}, ${secondByte}+${firstByte} must not reverse or jump`);
+        assert.equal(output[index+3],255);
+      }
+    }
+  }
+});
+
+test("balanced colour ramps stay continuous and retain the known clipped-channel limit", () => {
+  for (const background of [[40,40,40],[185,185,185],[235,235,235],[255,0,0],[0,255,0],[0,0,255]]) {
+    for (let channel=0; channel<3; channel++) {
+      const base = [], ramp = [];
+      for (let byte=0; byte<256; byte++) {
+        const rgb = [20,50,80]; rgb[channel]=byte;
+        base.push(...background,255); ramp.push(...rgb,255);
+      }
+      const output = mixBalanced(base,ramp);
+      for (let index=4; index<output.length; index+=4) {
+        for (let c=0;c<3;c++) assert.ok(Math.abs(output[index+c]-output[index-4+c])<=4, "RGB ramps must not regain the rejected middle-tone jump");
+      }
+    }
+  }
+  assert.deepEqual(mixBalanced([255,255,255,255],[255,0,0,255]),[255,255,255,255]);
+  const clipped = mixBalanced([235,235,235,255],[0,255,0,255]);
+  assert.equal(clipped[1],255, "a source already at display white can still dominate that channel");
+  const milder = mixBalanced([235,235,235,255],[0,200,0,255]);
+  const saved = mix([235,235,235,255],[0,200,0,255],{baseExposure:0,participantExposure:0,contrast:12,monochrome:false});
+  assert.ok(milder[1]<saved[1], "non-clipped coloured detail should have less highlight headroom");
+});
+
+test("balanced mixing validates controls and RGBA chunks, including the zero-balance path", () => {
+  for (const invalid of [NaN,Infinity,-3.1,2.1,"0"]) {
+    assert.throws(()=>math.createBalancedMixer({baseExposure:invalid}),/exposure must be between/);
+    assert.throws(()=>math.createBalancedMixer({participantExposure:invalid}),/exposure must be between/);
+  }
+  for (const invalid of [NaN,Infinity,-1,31,"12"]) assert.throws(()=>math.createBalancedMixer({contrast:invalid}),/Contrast must be between/);
+  for (const invalid of [NaN,Infinity,-1,101,"100"]) assert.throws(()=>math.createBalancedMixer({balanceStrength:invalid}),/Balance must be between/);
+  assert.throws(()=>math.createBalancedMixer({monochrome:"false"}),/Monochrome must be/);
+  for (const balanceStrength of [0,100]) {
+    const settings={baseExposure:-1,participantExposure:0.5,contrast:12,monochrome:false,balanceStrength};
+    const mixer=math.createBalancedMixer(settings), output=new Float64Array(first.length).fill(-7);
+    mixer(first,second,output,4,12);
+    assert.deepEqual(Array.from(output.slice(0,4)),[-7,-7,-7,-7]);
+    assert.deepEqual(Array.from(output.slice(12)),[-7,-7,-7,-7]);
+    mixer(first,second,output,0,4);mixer(first,second,output,12,first.length);
+    assert.deepEqual(Array.from(output),mixBalanced(first,second,settings));
+    assert.throws(()=>mixer(first,second,new Uint8ClampedArray(4)),/RGBA dimensions/);
+    for (const [start,end] of [[1,4],[0,5],[-4,4],[8,4],[0,first.length+4],[NaN,4]]) assert.throws(()=>mixer(first,second,output,start,end),/aligned RGBA boundaries/);
+  }
+});
+
 test("cover cropping is centered for square, wide, and tall output frames", () => {
   assert.deepEqual({ ...math.coverCrop(4000, 3000, 1000, 1000) }, { x: 500, y: 0, width: 3000, height: 3000 });
   assert.deepEqual({ ...math.coverCrop(3000, 4000, 1600, 900) }, { x: 0, y: 1156.25, width: 3000, height: 1687.5 });
