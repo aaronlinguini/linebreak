@@ -159,7 +159,7 @@ const FilmExposureMath = (() => {
     const value = Math.sqrt(exposure);
     return clamp(value / (smoothParameters.whiteAnchor * (1 + value)));
   }
-  function createResponseMixer({ baseExposure = 0, participantExposure = 0, monochrome = true } = {}, estimateExposure, developLuminance, perChannel = false) {
+  function createLuminanceMixer({ baseExposure = 0, participantExposure = 0, monochrome = true } = {}, estimateExposure, developLuminance) {
     validateSettings(baseExposure, participantExposure, monochrome);
     const gainA = 2 ** baseExposure;
     const gainB = 2 ** participantExposure;
@@ -168,16 +168,6 @@ const FilmExposureMath = (() => {
       for (let index = start; index < end; index += 4) {
         const ar = smoothLinear[base[index]], ag = smoothLinear[base[index + 1]], ab = smoothLinear[base[index + 2]];
         const br = smoothLinear[participant[index]], bg = smoothLinear[participant[index + 1]], bb = smoothLinear[participant[index + 2]];
-        if (perChannel && !monochrome) {
-          // Treat RGB as three approximate sensitive layers. A bright neutral
-          // exposure then suppresses coloured detail through the same response,
-          // rather than allowing hue to show through a flat luminance plateau.
-          output[index] = encodeSmooth(developLuminance(gainA * estimateExposure(ar) + gainB * estimateExposure(br)));
-          output[index + 1] = encodeSmooth(developLuminance(gainA * estimateExposure(ag) + gainB * estimateExposure(bg)));
-          output[index + 2] = encodeSmooth(developLuminance(gainA * estimateExposure(ab) + gainB * estimateExposure(bb)));
-          output[index + 3] = 255;
-          continue;
-        }
         const luminanceA = 0.2126 * ar + 0.7152 * ag + 0.0722 * ab;
         const luminanceB = 0.2126 * br + 0.7152 * bg + 0.0722 * bb;
         const exposureA = gainA * estimateExposure(luminanceA);
@@ -196,8 +186,8 @@ const FilmExposureMath = (() => {
           const green = weightA * ag + weightB * bg;
           const blue = weightA * ab + weightB * bb;
           const maximum = Math.max(red, green, blue);
-          // Saved smooth treatment: move out-of-gamut colour toward neutral
-          // using one factor, preserving its original output exactly.
+          // Bring out-of-gamut colour toward neutral using one common factor.
+          // Independent channel clipping would shift hue and flatten details.
           const chroma = maximum > 1 ? (1 - luminance) / (maximum - luminance) : 1;
           output[index] = encodeSmooth(luminance + chroma * (red - luminance));
           output[index + 1] = encodeSmooth(luminance + chroma * (green - luminance));
@@ -208,7 +198,7 @@ const FilmExposureMath = (() => {
     };
   }
   function createSmoothMixer(settings = {}) {
-    return createResponseMixer(settings, smoothExposure, smoothLuminance);
+    return createLuminanceMixer(settings, smoothExposure, smoothLuminance);
   }
 
   // A separate negative-and-print trial. Input light is an estimate from a
@@ -219,7 +209,7 @@ const FilmExposureMath = (() => {
   const negativeParameters = Object.freeze({
     negativeGamma: 0.6, negativeToe: -2.5, negativeShoulder: 0.8, negativeSoftness: 0.12,
     paperGamma: 3.5, paperToe: -1.10, paperShoulder: -0.45, paperSoftness: 0.08,
-    paperMinimumDensity: 0.08, colourResponse: "per-channel-negative-print"
+    paperMinimumDensity: 0.08
   });
   function densityCurve(logExposure, toe, shoulder, softness, gamma) {
     return gamma * softness * (
@@ -255,9 +245,9 @@ const FilmExposureMath = (() => {
     return printLut[start] * (1 - fraction) + printLut[start + 1] * fraction;
   }
   function createNegativeMixer(settings = {}) {
-    // The same bounded, continuous response is applied to each accumulated
-    // colour layer; no independent hard thresholds or gamut clipping are used.
-    return createResponseMixer(settings, (light) => light, developedPrintLuminance, true);
+    // Linear contributions also weight colour, so the print response changes
+    // the shared luminance without clipping RGB channels separately.
+    return createLuminanceMixer(settings, (luminance) => luminance, developedPrintLuminance);
   }
 
   return Object.freeze({
