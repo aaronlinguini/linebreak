@@ -16,7 +16,7 @@ For the silhouette technique, the crucial condition is a bright background and a
 
 For ordinary double exposures on undeveloped film, shooting order generally makes little difference to the blend. In the section "Worrying about the order of the exposures," [ILFORD's guest photographer](https://www.ilfordphoto.com/taking-a-double-exposure/) advises taking either the silhouette or subject first. Order independence follows from the approximate model of adding both exposures before applying the photographic response; it is not a claim that all film chemistry is perfectly independent of time or exposure conditions.
 
-The website therefore reads the light values from both photographs at each matching position after alignment. These local relationships apply in either direction:
+The website therefore reads the light values from both photographs at each matching position after alignment. These local relationships describe the intended behaviour at neutral settings, although the amount of brightening differs by treatment:
 
 | Photograph A at a position | Photograph B at that position | Resulting tendency |
 | --- | --- | --- |
@@ -62,7 +62,17 @@ The final values in a scanned photograph reflect the film, development, scanning
 
 This model accepts both digital photographs and film scans. Neither source is guaranteed to match its assumed response. Its normalized density-shaped curve is used directly as positive brightness; it does not separately reconstruct the negative's transmission and the print or scan. It is not calibrated to a stock, developer, scanner, or capture duration. Colour is an approximation applying the same response separately to RGB channels. A technical caveat is the large exposure jump assigned to pure white compared with almost-white, which deserves review on real clipped highlights.
 
-The fixed reference uses the current addition at zero EV. The adjustable result starts with the experimental curve at zero EV for each photograph, so the first comparison changes only the treatment. Reducing both photographs by one stop can make a bright light-table base less able to hide the other photo and can dim the other photo inside dark film strips. [FILM-EXPERIMENT.md](FILM-EXPERIMENT.md) covers the controls, full proposal, visual comparisons, result records, and exact Git fallback.
+The film curve remains one choice on the local comparison page. Reducing both photographs by one stop can make a bright light-table base less able to hide the other photo and can dim the other photo inside dark film strips.
+
+## The threshold exposure experiment
+
+The local comparison page also offers a separate **Threshold exposure** treatment. It is the default adjustable result beside the fixed current-addition reference, both initially at zero EV. It is designed to test the artist's observation that a nearly black film strip should give the second image room to appear clearly while a bright light table should leave little of that image visible.
+
+At each aligned pixel, the treatment converts each source's sRGB value to linear light and estimates a contribution to one shared exposure. The current experimental points are approximately 20/255 for no contribution and 185/255 for the bright endpoint, with a continuous curve between them. Each image's EV setting scales its estimated contribution. The contributions are added, capped at the bright endpoint, and converted into one finished pixel. Black and white uses each source's linear luminance; colour uses the same response separately on its red, green, and blue channels. The calculation is symmetric when the image positions and EV settings are exchanged.
+
+This makes dark regions much less likely to turn the second photograph gray, and makes light regions lose its detail sooner than the public addition treatment. It does not set a global opacity or cut out a silhouette. It also does not recover the actual light that reached the film: a finished JPEG or film scan has already been altered by capture, development, scanning, and editing. The chosen points are artistic settings for comparison, not a measured characteristic curve or a guarantee that every pair will look like an analogue negative.
+
+[FILM-EXPERIMENT.md](FILM-EXPERIMENT.md) covers the controls, comparisons, result records, and exact Git fallback.
 
 ## Camera modes
 

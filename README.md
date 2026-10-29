@@ -4,7 +4,7 @@ Participants add a photograph to create a double exposure. The Google connection
 
 ## Try it
 
-To test without Google, right-click `local-test.html` in VS Code and choose **Open with Live Server**. Choose your base photo and a second photo. The page shows the current treatment at zero EV beside an adjustable experiment. Try the current addition or experimental film curve, adjust each photograph's exposure separately, and compare black and white with colour. Both results use the same full-frame preparation and JPEG export. Download the results and settings to keep a record; nothing is uploaded or automatically archived there. See [FILM-EXPERIMENT.md](FILM-EXPERIMENT.md) for a useful comparison sequence and how to return to the saved version.
+To test without Google, right-click `local-test.html` in VS Code and choose **Open with Live Server**. Choose your base photo and a second photo. The page shows the current treatment at zero EV beside an adjustable experiment. The experiment starts with Threshold exposure; you can also try the earlier film curve or current addition, adjust each photograph's exposure separately, and compare black and white with colour. Both results use the same full-frame preparation and JPEG export. Download the results and settings to keep a record; nothing is uploaded or automatically archived there. See [FILM-EXPERIMENT.md](FILM-EXPERIMENT.md) for a useful comparison sequence and how to return to the saved version.
 
 There is no frontend installation or build. To test automatic archiving on the main `index.html` page, first deploy and connect the Google archive: follow [GOOGLE-SETUP.md](GOOGLE-SETUP.md).
 
@@ -38,7 +38,7 @@ python3 -m http.server 8000 --bind 127.0.0.1
 - `styles.css`: shared page styling and responsive layouts.
 - `scripts.js`: photo loading, pairing, light processing, and downloads.
 - `local-test.html`, `local-test.js`, and `local-test.css`: browser-only comparison controls and layout without Google.
-- `film-renderer.js`: experimental assumed film-response model, loaded only by the local comparison page.
+- `film-renderer.js`: experimental threshold and assumed film-response models, loaded only by the local comparison page.
 - `project-config.js`: the public Google deployment URL, artist colour option, and connection timeouts.
 - `archive-workflow.js`: original → develop → result archive workflow, consent, another pairing, and retries.
 - `drive-storage.js`: website-side Google connection.
@@ -50,7 +50,9 @@ There are no inline styles, executable script bodies, or inline event handlers i
 
 ## Exposure treatment
 
-The main website's blend remains the restored linear-addition treatment. It works pixel by pixel on the aligned photographs: decode sRGB, scale each channel by `2 ** exposureEV`, add the two photographs, and clip each channel independently at white. At neutral settings, white stays white and black reveals the other photograph. This treatment is symmetric. The local page can compare it with the supplied film-inspired model without replacing the public renderer.
+The main website's blend remains the restored linear-addition treatment. It works pixel by pixel on the aligned photographs: decode sRGB, scale each channel by `2 ** exposureEV`, add the two photographs, and clip each channel independently at white. At neutral settings, white stays white and black reveals the other photograph. This treatment is symmetric. The local page can compare it with the threshold exposure and supplied film-curve experiments without replacing the public renderer.
+
+The threshold experiment estimates a separate light contribution from each matching pixel, adds those contributions on one shared frame, and applies a bright endpoint. Very dark input values contribute little, so the other photograph can remain clear there; sufficiently bright values leave little visible detail from the other photograph. The input is still a finished JPEG or scan, so these visual thresholds are an artistic approximation rather than a measured film response. The local comparison is intended for judging the result with actual photographs before changing the main site.
 
 The later inverse-Reinhard response was removed after review of the artist's analogue examples and website outputs. Numerical boundary checks did not establish a convincing analogue match. This rollback restores the earlier behaviour; it does not claim to finish the film simulation.
 

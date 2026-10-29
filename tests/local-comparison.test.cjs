@@ -20,7 +20,10 @@ function harness() {
       setAttribute() {}
     });
   }
-  elements.get("test-renderer").value = "film";
+  const selectedTreatment = [...html.matchAll(/<option\b[^>]*>/g)]
+    .map(([tag]) => tag)
+    .find((tag) => /\bselected\b/.test(tag));
+  elements.get("test-renderer").value = selectedTreatment?.match(/\bvalue="([^"]+)"/)?.[1] ?? "";
   elements.get("test-base-exposure").value = "0";
   elements.get("test-participant-exposure").value = "0";
   const renders = [];
@@ -46,7 +49,10 @@ function harness() {
       revokeObjectURL(url) { revoked.push(url); }
     },
     PROJECT_SETTINGS: { baseExposure: 0, participantExposure: 0, contrast: 0, monochrome: true },
-    FilmExposureMath: { version: "assumed-film-v1", parameters: { toe: -7, shoulder: 4 } },
+    FilmExposureMath: {
+      version: "assumed-film-v1", parameters: { toe: -7, shoulder: 4 },
+      thresholdVersion: "threshold-exposure-v1", thresholdParameters: { blackPoint: 20, whitePoint: 185, gamma: 1.6 }
+    },
     createExposureProcessor() {
       return {
         async loadPhoto(file) {
@@ -85,7 +91,7 @@ test("trial settings affect only the trial, and downloads identify the completed
   const h = harness();
   await h.pair();
   assert.equal(h.renders.length, 2);
-  assert.deepEqual(h.renders.map(({ renderer, baseExposure, participantExposure }) => [renderer, baseExposure, participantExposure]), [["linear",0,0], ["film",0,0]]);
+  assert.deepEqual(h.renders.map(({ renderer, baseExposure, participantExposure }) => [renderer, baseExposure, participantExposure]), [["linear",0,0], ["threshold",0,0]]);
   assert.equal(h.elements.get("test-monochrome").checked, true);
 
   h.elements.get("test-base-exposure").value = "-0.5";
@@ -97,14 +103,14 @@ test("trial settings affect only the trial, and downloads identify the completed
   assert.equal(recipe.schemaVersion, 1);
   assert.equal(recipe.reference.settings.baseExposure, 0);
   assert.equal(recipe.trial.settings.baseExposure, -0.5);
-  assert.equal(recipe.trial.rendererVersion, "assumed-film-v1");
-  assert.deepEqual(recipe.trial.modelParameters, { toe: -7, shoulder: 4 });
+  assert.equal(recipe.trial.rendererVersion, "threshold-exposure-v1");
+  assert.deepEqual(recipe.trial.modelParameters, { blackPoint: 20, whitePoint: 185, gamma: 1.6 });
   assert.equal(recipe.sources.base.name, "base.jpg");
   assert.equal(recipe.sources.base.originalWidth, 400);
   assert.equal(recipe.sources.base.workingWidth, 600);
 
   await h.fire("test-download", "click");
-  assert.match(h.downloads.at(-1).filename, /^double-exposure-film-base-minus0\.5EV-second-0EV-bw-\d+\.jpg$/);
+  assert.match(h.downloads.at(-1).filename, /^double-exposure-threshold-base-minus0\.5EV-second-0EV-bw-\d+\.jpg$/);
   await h.fire("test-reference-download", "click");
   assert.match(h.downloads.at(-1).filename, /^double-exposure-linear-base-0EV-second-0EV-bw-\d+\.jpg$/);
 });
@@ -134,7 +140,7 @@ test("colour selection regenerates both images, while reset restores only trial 
   await h.fire("test-renderer");
   assert.equal(h.renders.at(-1).renderer, "linear");
   await h.fire("test-reset", "click");
-  assert.equal(h.renders.at(-1).renderer, "film");
+  assert.equal(h.renders.at(-1).renderer, "threshold");
   assert.equal(h.renders.at(-1).baseExposure, 0);
   assert.equal(h.renders.at(-1).participantExposure, 0);
   assert.equal(h.renders.at(-1).monochrome, false);
@@ -205,7 +211,19 @@ test("camera captures replace the selected roles through the same comparison pip
   assert.equal(recipe.sources.base.name, "camera-base.jpg");
   assert.equal(recipe.sources.participant.name, "camera-second.jpg");
   assert.equal(h.elements.get("test-participant-camera").value, "");
-  assert.deepEqual(h.renders.slice(-2).map((settings) => settings.renderer), ["linear", "film"]);
+  assert.deepEqual(h.renders.slice(-2).map((settings) => settings.renderer), ["linear", "threshold"]);
+});
+
+test("earlier film curve remains selectable and its recipe identifies the older model", async () => {
+  const h = harness();
+  await h.pair();
+  h.elements.get("test-renderer").value = "film";
+  await h.fire("test-renderer");
+  assert.equal(h.renders.at(-1).renderer, "film");
+  const recipe = await h.recipe();
+  assert.equal(recipe.reference.renderer, "linear");
+  assert.equal(recipe.trial.rendererVersion, "assumed-film-v1");
+  assert.deepEqual(recipe.trial.modelParameters, { toe: -7, shoulder: 4 });
 });
 
 test("cancelling a camera choice preserves the completed comparison", async () => {
