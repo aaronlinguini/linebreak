@@ -4,7 +4,7 @@ Participants add a photograph to create a double exposure. The Google connection
 
 ## Try it
 
-To test without Google, right-click `local-test.html` in VS Code and choose **Open with Live Server**. Choose your base photo and a second photo. The left image is the saved **Smooth exposure** treatment at zero EV. The adjustable right image starts with **Negative + print**; Smooth exposure, the earlier film curve, and current addition remain selectable. Adjust each photograph's exposure separately and compare black and white with colour. Both results use the same full-frame preparation and JPEG export. Download the results and settings to keep a record; nothing is uploaded or automatically archived there. See [FILM-EXPERIMENT.md](FILM-EXPERIMENT.md) for the comparison sequence and saved checkpoints.
+To test without Google, right-click `local-test.html` in VS Code and choose **Open with Live Server**. Choose your base photo and a second photo. The page shows the current treatment at zero EV beside an adjustable experiment. The trial starts with **Smooth exposure**; the earlier film curve and current addition remain available. Adjust each photograph's exposure separately and compare black and white with colour. Both results use the same full-frame preparation and JPEG export. Download the results and settings to keep a record; nothing is uploaded or automatically archived there. See [FILM-EXPERIMENT.md](FILM-EXPERIMENT.md) for a useful comparison sequence and how to return to the saved version.
 
 There is no frontend installation or build. To test automatic archiving on the main `index.html` page, first deploy and connect the Google archive: follow [GOOGLE-SETUP.md](GOOGLE-SETUP.md).
 
@@ -38,7 +38,7 @@ python3 -m http.server 8000 --bind 127.0.0.1
 - `styles.css`: shared page styling and responsive layouts.
 - `scripts.js`: photo loading, pairing, light processing, and downloads.
 - `local-test.html`, `local-test.js`, and `local-test.css`: browser-only comparison controls and layout without Google.
-- `film-renderer.js`: experimental negative-and-print, smooth-exposure, and assumed film-response models, loaded only by the local comparison page.
+- `film-renderer.js`: experimental smooth-exposure and assumed film-response models, loaded only by the local comparison page.
 - `project-config.js`: the public Google deployment URL, artist colour option, and connection timeouts.
 - `archive-workflow.js`: original → develop → result archive workflow, consent, another pairing, and retries.
 - `drive-storage.js`: website-side Google connection.
@@ -50,9 +50,7 @@ There are no inline styles, executable script bodies, or inline event handlers i
 
 ## Exposure treatment
 
-The main website's blend remains the restored linear-addition treatment. It works pixel by pixel on the aligned photographs: decode sRGB, scale each channel by `2 ** exposureEV`, add the two photographs, and clip each channel independently at white. At neutral settings, white stays white and black reveals the other photograph. This treatment is symmetric. The local page compares the experimental treatments without replacing the public renderer.
-
-The negative-and-print trial adds the two estimated linear-light exposures before applying a negative density curve. It converts density to transmission, simulates exposure of photographic paper, then converts paper density to reflected brightness. This separates the input estimate from the final response: a source combined with black can change tonality, and highlight detail can become indistinguishable while the finished area remains light gray. Colour develops each summed linear RGB channel through the same continuous negative-and-print response; black and white uses linear luminance before that response. This can change hue smoothly, but has no separate channel cutoff in the middle tones. The curve placements and paper white point are artistic choices; this is not a calibrated reconstruction of the artist's film, paper, or scan.
+The main website's blend remains the restored linear-addition treatment. It works pixel by pixel on the aligned photographs: decode sRGB, scale each channel by `2 ** exposureEV`, add the two photographs, and clip each channel independently at white. At neutral settings, white stays white and black reveals the other photograph. This treatment is symmetric. The local page compares it with the smooth-exposure trial and supplied film-inspired model without replacing the public renderer.
 
 The smooth trial estimates an exposure from each pixel's linear luminance, applies the two EV settings, adds those estimates, and develops one output luminance through a continuous response. Dark pixels have less influence beside a brighter photograph, reducing the gray veil. Colour uses that shared luminance response with exposure-weighted colour and a common gamut correction, rather than clipping RGB channels at separate thresholds. The treatment accepts digital photographs and scans, but it is an artistic approximation of finished images, not a calibrated film stock.
 
@@ -93,8 +91,6 @@ Git history starts with the current restored project. The `baseline` tag names t
 The exact state before the film comparison experiment is commit `54a56dd` on `main`, including portrait rotation and the artist's enabled black-and-white setting. The experiment is on `codex/film-comparison`. [The experiment guide](FILM-EXPERIMENT.md#return-to-the-saved-version) explains switching between those saved versions. The older `baseline` tag predates the rotation and colour-option changes.
 
 The version immediately before the smooth-exposure change is also named **`exposure-checkpoint-2026-10-29`** (commit `f03ce10`). It preserves the restored film-curve/current-addition comparison. The smooth trial is saved as a separate commit so it can be undone directly while retaining the checkpoint and history.
-
-The version immediately before the negative-and-print trial is named **`smooth-exposure-checkpoint`** (commit `5887061`). It preserves the entire previous project, including the smooth renderer and its original comparison page. The new trial is another separate commit, so it can be reverted directly without reconstructing that version from memory.
 
 In VS Code, open **Source Control** to see changed files and saved history. To save a version manually, stage the intended files, enter a short description, and commit. Saving a file alone does not create a Git version.
 

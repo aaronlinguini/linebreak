@@ -159,7 +159,7 @@ const FilmExposureMath = (() => {
     const value = Math.sqrt(exposure);
     return clamp(value / (smoothParameters.whiteAnchor * (1 + value)));
   }
-  function createLuminanceMixer({ baseExposure = 0, participantExposure = 0, monochrome = true } = {}, estimateExposure, developLuminance) {
+  function createSmoothMixer({ baseExposure = 0, participantExposure = 0, monochrome = true } = {}) {
     validateSettings(baseExposure, participantExposure, monochrome);
     const gainA = 2 ** baseExposure;
     const gainB = 2 ** participantExposure;
@@ -170,10 +170,10 @@ const FilmExposureMath = (() => {
         const br = smoothLinear[participant[index]], bg = smoothLinear[participant[index + 1]], bb = smoothLinear[participant[index + 2]];
         const luminanceA = 0.2126 * ar + 0.7152 * ag + 0.0722 * ab;
         const luminanceB = 0.2126 * br + 0.7152 * bg + 0.0722 * bb;
-        const exposureA = gainA * estimateExposure(luminanceA);
-        const exposureB = gainB * estimateExposure(luminanceB);
+        const exposureA = gainA * smoothExposure(luminanceA);
+        const exposureB = gainB * smoothExposure(luminanceB);
         const total = exposureA + exposureB;
-        const luminance = developLuminance(total);
+        const luminance = smoothLuminance(total);
         if (monochrome || total === 0) {
           const grey = encodeSmooth(luminance);
           output[index] = output[index + 1] = output[index + 2] = grey;
@@ -197,58 +197,6 @@ const FilmExposureMath = (() => {
       }
     };
   }
-  function createSmoothMixer(settings = {}) {
-    return createLuminanceMixer(settings, smoothExposure, smoothLuminance);
-  }
-
-  // A separate negative-and-print trial. Input light is an estimate from a
-  // finished JPEG, not the inverse of this output response. Each curve uses
-  // density versus log10 exposure; transmission/reflectance is 10 ** -density.
-  // Generic slopes follow a film/paper system; curve placement is an artistic
-  // choice, not a calibration to the artist's film or scanner.
-  const negativeParameters = Object.freeze({
-    negativeGamma: 0.6, negativeToe: -2.5, negativeShoulder: 0.8, negativeSoftness: 0.12,
-    paperGamma: 3.5, paperToe: -1.10, paperShoulder: -0.45, paperSoftness: 0.08,
-    paperMinimumDensity: 0.08
-  });
-  function densityCurve(logExposure, toe, shoulder, softness, gamma) {
-    return gamma * softness * (
-      softplus((logExposure - toe) / softness) -
-      softplus((logExposure - shoulder) / softness)
-    );
-  }
-  function printReflectance(exposure) {
-    const p = negativeParameters;
-    const negativeDensity = exposure > 0
-      ? densityCurve(Math.log10(exposure), p.negativeToe, p.negativeShoulder, p.negativeSoftness, p.negativeGamma)
-      : 0;
-    // log10(transmission) = -density. This is the paper's exposure, with a
-    // nominal printing-light gain of one. Dense negative areas expose it less.
-    const paperDensity = p.paperMinimumDensity + densityCurve(
-      -negativeDensity, p.paperToe, p.paperShoulder, p.paperSoftness, p.paperGamma
-    );
-    return 10 ** -paperDensity;
-  }
-  const printBlack = printReflectance(0);
-  const PRINT_LOG_MIN = -8;
-  const PRINT_LOG_MAX = Math.log10(8); // Two white inputs at the maximum +2 EV.
-  const printLut = Float64Array.from({ length: 65537 }, (_, index) => {
-    const logExposure = PRINT_LOG_MIN + index / 65536 * (PRINT_LOG_MAX - PRINT_LOG_MIN);
-    return clamp((printReflectance(10 ** logExposure) - printBlack) / (1 - printBlack));
-  });
-  function developedPrintLuminance(exposure) {
-    if (exposure <= 0) return 0;
-    const coordinate = clamp((Math.log10(exposure) - PRINT_LOG_MIN) / (PRINT_LOG_MAX - PRINT_LOG_MIN)) * 65536;
-    const start = Math.floor(coordinate);
-    if (start === 65536) return printLut[start];
-    const fraction = coordinate - start;
-    return printLut[start] * (1 - fraction) + printLut[start + 1] * fraction;
-  }
-  function createNegativeMixer(settings = {}) {
-    // Linear contributions also weight colour, so the print response changes
-    // the shared luminance without clipping RGB channels separately.
-    return createLuminanceMixer(settings, (luminance) => luminance, developedPrintLuminance);
-  }
 
   return Object.freeze({
     version,
@@ -256,9 +204,6 @@ const FilmExposureMath = (() => {
     createSmoothMixer,
     smoothVersion: "smooth-exposure-v1",
     smoothParameters,
-    createNegativeMixer,
-    negativeVersion: "negative-print-v1",
-    negativeParameters,
     parameters: Object.freeze({ logMin: LOG_MIN, logMax: LOG_MAX, toe: TOE, shoulder: SHOULDER, softness: SOFTNESS })
   });
 })();

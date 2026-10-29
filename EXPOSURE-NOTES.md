@@ -31,7 +31,7 @@ The public mixer calculates continuous light contributions per colour channel; t
 
 ## The current restored baseline
 
-The inverse-Reinhard response experiment was rolled back after reviewing the artist's actual analogue double exposures and website results. Its mathematical checks passed, but it did not produce the intended photographic appearance. The main website still uses the previous linear-addition treatment, available as Current addition on the local comparison page:
+The inverse-Reinhard response experiment was rolled back after reviewing the artist's actual analogue double exposures and website results. Its mathematical checks passed, but it did not produce the intended photographic appearance. The main website still uses the previous linear-addition treatment, which is also the fixed reference on the local comparison page:
 
 ```text
 A = inverse_sRGB(base channel)
@@ -62,23 +62,11 @@ The final values in a scanned photograph reflect the film, development, scanning
 
 This model accepts both digital photographs and film scans. Neither source is guaranteed to match its assumed response. Its normalized density-shaped curve is used directly as positive brightness; it does not separately reconstruct the negative's transmission and the print or scan. It is not calibrated to a stock, developer, scanner, or capture duration. Colour is an approximation applying the same response separately to RGB channels. A technical caveat is the large exposure jump assigned to pure white compared with almost-white, which deserves review on real clipped highlights.
 
-The supplied film curve remains selectable beside the saved smooth-exposure reference. Reducing both photographs by one stop can make a bright light-table base less able to hide the other photo and can dim the other photo inside dark film strips.
-
-## The negative-and-print trial
-
-The default adjustable treatment is **Negative + print**, with the previous Smooth exposure treatment fixed on the left at 0/0 EV. This trial uses each source's linear RGB channels as approximate colour exposures, or linear luminance for black and white, scales those exposures by their EV values, and adds them. It then applies separate negative and photographic paper response curves: negative density `Dnegative` gives transmission `T = 10^(-Dnegative)`; transmitted light exposes the paper; and the finished positive brightness comes from `R = 10^(-Dpaper)`.
-
-Those stages matter because loss of detail depends on the slopes of both responses. Bright bone can occupy a region where different added portrait exposures produce nearly indistinguishable final tones, even when the positive remains gray. The model subtracts its zero-exposure black response, but retains the chosen paper white point. A paper minimum density of 0.08 gives a grayscale ceiling near 235/255, with continuous transitions rather than a cutoff in the middle tones.
-
-The generic negative slope of 0.6 and paper slope of 3.5 are informed by the negative/paper ranges in [Kodak's sensitometry workbook](https://www.kodak.com/content/products-brochures/Film/Basic-Photographic-Sensitometry-Workbook.pdf), especially its density and transmission discussion, characteristic curves, and negative/paper system. Toe and shoulder positions, print exposure, and paper white point are artistic settings. This does not assume that normal bright regions have reached the negative's maximum density, nor that the artist's scanned examples passed through photographic paper.
-
-The source estimate and the finished response are not inverses. Combining a source with black therefore changes that source's tonality. This is a deliberate difference from the saved smooth trial. Colour applies the same continuous negative-and-print response to each summed linear RGB channel; the recorded choice is `colourResponse: "per-channel-negative-print"`. Hue can change smoothly because each channel reaches a different point on the curve. There is no separate middle-tone channel cutoff or abrupt 185-to-255 jump. The three-channel response does not reconstruct actual colour-film layer sensitivities or processing. Monochrome combines channels into linear luminance before the response, and the saved Smooth exposure treatment retains its previous colour handling. Finished JPEGs and scans still do not reveal their actual scene exposure, so this remains a structured visual approximation rather than a calibrated film or paper stock.
-
-The skull comparisons also contain a spatial difference: the uploaded skull is larger, placing the portrait's moustache and mouth in different regions than in the analogue frames. A placement comparison must be kept separate from the response change. The exact previous project is saved as **`smooth-exposure-checkpoint`** at **`5887061`**; the older **`exposure-checkpoint-2026-10-29`** at **`f03ce10`** remains available.
+The supplied film curve remains selectable beside the fixed current-addition reference. Reducing both photographs by one stop can make a bright light-table base less able to hide the other photo and can dim the other photo inside dark film strips.
 
 ## The smooth-exposure trial
 
-The saved **Smooth exposure** treatment is the fixed reference on the local page at zero EV for each photograph, and remains selectable on the adjustable side. At each pixel it estimates exposure from linear luminance `Y` using `E(Y) = (0.98Y / (1 − 0.98Y))²`. Each photograph's EV scales its estimated exposure; the two estimates are added and developed using `Yout = min(1, √E / (0.98 × (1 + √E)))`. The 0.98 anchor keeps the white endpoint finite. The response reaches white continuously and uses every grayscale output value when a source is combined with black.
+The default adjustable treatment on the local page is now **Smooth exposure**, starting at zero EV for each photograph. At each pixel it estimates exposure from linear luminance `Y` using `E(Y) = (0.98Y / (1 − 0.98Y))²`. Each photograph's EV scales its estimated exposure; the two estimates are added and developed using `Yout = min(1, √E / (0.98 × (1 + √E)))`. The 0.98 anchor keeps the white endpoint finite. The response reaches white continuously and uses every grayscale output value when a source is combined with black.
 
 The purpose is to preserve more separation in dark areas. A dark pixel has little influence beside a brighter pixel: gray 35 plus gray 128 stays about 128, two gray-128 pixels become about 144, and gray 185 plus gray 128 becomes about 187 at 0/0 EV. Both photographs contribute according to the same rule, with no shooting-order priority or global opacity reduction. These values describe the chosen model, not measured film behaviour.
 
