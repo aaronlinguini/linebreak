@@ -1,6 +1,6 @@
 # Trying the film response
 
-This page compares Revised smooth, the saved smooth-exposure treatment, and the supplied film-inspired proposal with the current website treatment. It does not replace the public renderer or change the Google archive connection.
+This page compares Current addition with adjustable contrast, Revised smooth, the saved smooth-exposure treatment, and the supplied film-inspired proposal. It does not replace the public renderer or change the Google archive connection.
 
 The exact supplied [proposal](references/supplied-proposal.md) and [original film.js code](references/supplied-film.cjs) are preserved as reference material. The proposal's installation instructions describe the other prototype; use the local comparison instructions below for this website.
 
@@ -9,10 +9,11 @@ The exact supplied [proposal](references/supplied-proposal.md) and [original fil
 Open `local-test.html` with VS Code's Live Server and choose two photographs. Both outputs use the same photographs, portrait rotation, full-frame fitting, dimensions, and JPEG export.
 
 - The reference is the current addition at **0 EV for both photographs**.
-- The adjustable result starts with **Revised smooth**, at **0 EV for each photograph**. This holds exposure fixed when comparing the treatments and avoids dimming the second image by default.
-- Choose Revised smooth, Saved smooth exposure, the earlier Film curve, or Current addition, then move the base and participant exposure sliders separately. The range is −3 to +2 EV in half-stop steps. −1 EV halves that photograph's estimated exposure; +1 EV doubles it.
+- The adjustable result starts with **Current + contrast**, at **0 EV for each photograph** and **contrast 12**. It uses the same additive blend as the left reference, with a separate tonal adjustment.
+- Choose Current + contrast, Revised smooth, Saved smooth exposure, or the earlier Film curve, then move the base and participant exposure sliders separately. The range is −3 to +2 EV in half-stop steps. −1 EV halves that photograph's estimated exposure; +1 EV doubles it.
 - The black-and-white control starts from the artist's configuration and can be changed temporarily for the comparison. It affects both outputs.
-- Reset restores Revised smooth and 0/0 EV. Download either result and the settings record before changing photographs if you want to keep the comparison.
+- The Contrast slider appears only for Current + contrast and ranges from 0 to 30. Zero matches Current at the same EV and colour settings. It changes only the right preview.
+- Reset restores Current + contrast, contrast 12, and 0/0 EV. Download either result and the settings record before changing photographs if you want to keep the comparison.
 
 Nothing on this page is uploaded or automatically archived. Original files are unchanged.
 
@@ -22,8 +23,9 @@ Keep the same photo pair and colour choice while trying these combinations:
 
 | Adjustable renderer | Base EV | Participant EV | What it helps assess |
 | --- | ---: | ---: | --- |
-| Current addition | 0 | 0 | Agreement with the fixed reference |
-| Current addition | −1 | −1 | Exposure reduction alone |
+| Current + contrast, contrast 0 | 0 | 0 | Agreement with the fixed reference |
+| Current + contrast, contrast 12 | 0 | 0 | Same overlap information with a modest tonal contrast adjustment |
+| Current + contrast, contrast 0 | −1 | −1 | Exposure reduction alone |
 | Film curve | 0 | 0 | Response change at the reference exposure |
 | Film curve | −1 | −1 | Response change at the same reduced exposure |
 | Revised smooth | 0 | 0 | Shadow/midtone detail and reduced contribution in bright overlaps |
@@ -34,6 +36,14 @@ Keep the same photo pair and colour choice while trying these combinations:
 Then try −0.5 EV or adjust the photographs independently. Reduced exposure also darkens areas where only one photograph contributes, so −1/−1 is a starting point rather than a universal correction. Automatic brightness normalization is not enabled: it could brighten intentionally dark silhouettes.
 
 Use several pairs: a silhouette, two scenes with many midtones, almost-white and clipped-white highlights, colour photographs, and a digital photograph paired with a scan. Judge shadow depth, how much detail survives in bright areas, colour, and overall contrast. Numerical tests alone cannot establish a convincing analogue appearance. The supplied model has not been calibrated to the artist's film stock or scanning process.
+
+## Current addition with adjustable contrast
+
+This trial reuses `ExposureMath.createMixer` and its existing contrast curve; neither image engine is changed. Each matching pixel is still combined by the Current additive method. The Contrast slider then changes the finished channel values through a continuous curve that fixes black, white, and middle gray. Positive values darken tones below middle gray and lighten tones above it. The default is 12, with a local-page range of 0–30. This gives the artist a separate contrast adjustment without choosing a smooth overlap rule that suppresses more of one source's detail.
+
+At contrast zero and matching exposure/colour settings, the trial reproduces the left Current reference. The fixed reference always uses contrast zero. Contrast is saved as `settings.contrast` in the downloaded recipe, using the existing `linear-addition-c6a65ba` renderer version. Switching to a smooth or film treatment hides the contrast control and gives that treatment neutral contrast; its own algorithm is preserved.
+
+Contrast can make existing differences more visible, but it also compresses subtle shadow/highlight tones and cannot reconstruct highlights already clipped by additive processing. This is a visual contrast adjustment, not a new analogue-film model. It retains source-order symmetry, and all four treatments remain available for comparison. The public page has no new slider.
 
 ## The revised smooth trial
 
@@ -83,6 +93,8 @@ The constants describe a visual trial for finished photographs. They are not mea
 Stock-specific calibration would require measured response data and controlled reference images. Exposure-duration and reciprocity effects cannot be reconstructed from the brightness of an arbitrary finished upload. They are not simulated by these generic curves. A gallery or a different hosting system would not by itself improve the exposure calculation.
 
 ## Return to the saved version
+
+The exact version before Current + contrast is named **`before-current-contrast-trial`**, pointing to **`67ec935`**. It preserves the revised-smooth/current comparison. This contrast-control change is a separate commit, so it can be undone directly after preserving any later uncommitted edits.
 
 The exact version before Revised smooth is named **`before-shadow-highlight-revision`**, pointing to commit **`0d5a8ba`**. Its tree also matches **`smooth-exposure-checkpoint`** at **`5887061`**, and preserves the original smooth/current comparison page. Revised smooth is recorded in a separate commit so it can be undone directly. Preserve later uncommitted work before reverting or restoring files.
 

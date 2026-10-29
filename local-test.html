@@ -10,7 +10,7 @@
     <script src="project-config.js" defer></script>
     <script src="scripts.js" defer></script>
     <script src="film-renderer.js?v=smooth-revised-v1" defer></script>
-    <script src="local-test.js?v=smooth-revised-v1" defer></script>
+    <script src="local-test.js?v=current-contrast-v1" defer></script>
   </head>
   <body class="local-test">
     <header class="site-header">
@@ -28,7 +28,7 @@
           <button id="test-reference-download" class="save-button" type="button" hidden disabled>Download current</button>
         </section>
         <section class="comparison-panel" aria-labelledby="trial-title">
-          <h2 id="trial-title">Trial · revised smooth</h2>
+          <h2 id="trial-title">Trial · current addition · contrast 12</h2>
           <div class="image-stage">
             <p id="test-empty" class="empty-state">Choose two photographs.</p>
             <canvas id="test-canvas" width="1" height="1" hidden aria-label="Adjustable trial double exposure"></canvas>
@@ -65,11 +65,15 @@
         <div class="renderer-control">
           <label for="test-renderer">Trial treatment</label>
           <select id="test-renderer">
-            <option value="revised" selected>Revised smooth (trial)</option>
+            <option value="linear" selected>Current + contrast</option>
+            <option value="revised">Revised smooth</option>
             <option value="smooth">Saved smooth exposure</option>
             <option value="film">Earlier film curve</option>
-            <option value="linear">Current addition</option>
           </select>
+        </div>
+        <div id="test-contrast-control" class="exposure-control">
+          <label for="test-contrast">Contrast <output id="test-contrast-value" for="test-contrast">12</output></label>
+          <input id="test-contrast" type="range" min="0" max="30" step="1" value="12">
         </div>
         <div class="exposure-control">
           <label for="test-base-exposure">Base exposure <output id="test-base-value" for="test-base-exposure">0 EV</output></label>

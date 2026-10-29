@@ -64,9 +64,17 @@ This model accepts both digital photographs and film scans. Neither source is gu
 
 The supplied film curve remains selectable beside the fixed current-addition reference. Reducing both photographs by one stop can make a bright light-table base less able to hide the other photo and can dim the other photo inside dark film strips.
 
+## Current addition with adjustable contrast
+
+The default adjustable treatment is **Current + contrast**, beside the unchanged Current addition reference. Both use the existing additive pixel calculation in `scripts.js`. The right preview starts at contrast 12, with an artist-only slider from 0 to 30; the left remains at contrast zero. At zero contrast and matching EV/colour settings, they produce the same pixels. The renderer version remains `linear-addition-c6a65ba`, and the recipe records the selected value in `settings.contrast`.
+
+The existing display-space contrast curve fixes black, white, and middle gray. Positive contrast makes darker tones darker and lighter tones lighter after addition; it does not use the smooth treatments' stronger local source suppression. This preserves Current's overlap operation while allowing its contrast to be judged separately. The adjustment can still compress subtle tones and cannot recover a channel already clipped by addition. It is an artistic tonal adjustment rather than a calibrated film response. Other treatments use neutral contrast and keep their existing algorithms. The public page remains unchanged.
+
+The exact version before this change is saved as **`before-current-contrast-trial`** at **`67ec935`**. The contrast trial is a separate change that can be undone directly.
+
 ## The revised smooth trial
 
-The default adjustable treatment is **Revised smooth**, beside the unchanged Current addition reference. It first applies the saved smooth single-source EV response separately to each luminance. If `M` is the brighter adjusted pixel and `m` the darker, it uses `h = 1 / (1 + (M / 0.23)^3.5)` and `Yout = min(1, M + m × h)`. This increases the contribution in dark and lower-midtone overlaps and limits it gradually in bright overlaps. The names brighter/darker do not give either source priority; swapping aligned inputs with their EV settings preserves the result.
+The selectable **Revised smooth** treatment remains beside the unchanged Current addition reference. It first applies the saved smooth single-source EV response separately to each luminance. If `M` is the brighter adjusted pixel and `m` the darker, it uses `h = 1 / (1 + (M / 0.23)^3.5)` and `Yout = min(1, M + m × h)`. This increases the contribution in dark and lower-midtone overlaps and limits it gradually in bright overlaps. The names brighter/darker do not give either source priority; swapping aligned inputs with their EV settings preserves the result.
 
 For example, 40 + 40 changes from the saved smooth's 48 to 58, 80 + 128 from 130 to 140, and 128 + 128 from 144 to 157. Two bright values of 185 now produce 191 instead of 199; 200 + 200 produces 203 instead of 212. Colour dominance changes continuously, with more balanced weights in shadows and stronger brightness dominance in highlights. When both sources carry light, colour differences fade locally according to the remaining highlight headroom: `(1 − M)² / ((1 − M)² + m²)`. A source against black keeps its colour, while a bright neutral base can suppress a coloured overlay. Remaining excess RGB values are scaled together to fit the display; this can lower saturated colours' brightness. Black and white uses the luminances directly.
 
