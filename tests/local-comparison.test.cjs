@@ -52,6 +52,8 @@ function harness() {
     FilmExposureMath: {
       version: "assumed-film-v1", parameters: { toe: -7, shoulder: 4 },
       smoothVersion: "smooth-exposure-v1", smoothParameters: { exposurePower: 2, whiteAnchor: 0.98 },
+      revisedVersion: "smooth-revised-v1", revisedParameters: { overlapPivot: 0.23, retentionPower: 3.5, maximumColourPower: 7 },
+      createRevisedMixer() { return "revised"; },
       createSmoothMixer() { return "smooth"; },
       createMixer() { return "film"; }
     },
@@ -95,7 +97,7 @@ test("trial settings affect only the trial, and downloads identify the completed
   const h = harness();
   await h.pair();
   assert.equal(h.renders.length, 2);
-  assert.deepEqual(h.renders.map(({ renderer, baseExposure, participantExposure }) => [renderer, baseExposure, participantExposure]), [["linear",0,0], ["smooth",0,0]]);
+  assert.deepEqual(h.renders.map(({ renderer, baseExposure, participantExposure }) => [renderer, baseExposure, participantExposure]), [["linear",0,0], ["revised",0,0]]);
   assert.equal(h.elements.get("test-monochrome").checked, true);
 
   h.elements.get("test-base-exposure").value = "-0.5";
@@ -107,14 +109,14 @@ test("trial settings affect only the trial, and downloads identify the completed
   assert.equal(recipe.schemaVersion, 1);
   assert.equal(recipe.reference.settings.baseExposure, 0);
   assert.equal(recipe.trial.settings.baseExposure, -0.5);
-  assert.equal(recipe.trial.rendererVersion, "smooth-exposure-v1");
-  assert.deepEqual(recipe.trial.modelParameters, { exposurePower: 2, whiteAnchor: 0.98 });
+  assert.equal(recipe.trial.rendererVersion, "smooth-revised-v1");
+  assert.deepEqual(recipe.trial.modelParameters, { overlapPivot: 0.23, retentionPower: 3.5, maximumColourPower: 7 });
   assert.equal(recipe.sources.base.name, "base.jpg");
   assert.equal(recipe.sources.base.originalWidth, 400);
   assert.equal(recipe.sources.base.workingWidth, 600);
 
   await h.fire("test-download", "click");
-  assert.match(h.downloads.at(-1).filename, /^double-exposure-smooth-base-minus0\.5EV-second-0EV-bw-\d+\.jpg$/);
+  assert.match(h.downloads.at(-1).filename, /^double-exposure-revised-base-minus0\.5EV-second-0EV-bw-\d+\.jpg$/);
   await h.fire("test-reference-download", "click");
   assert.match(h.downloads.at(-1).filename, /^double-exposure-linear-base-0EV-second-0EV-bw-\d+\.jpg$/);
 });
@@ -144,7 +146,7 @@ test("colour selection regenerates both images, while reset restores only trial 
   await h.fire("test-renderer");
   assert.equal(h.renders.at(-1).renderer, "linear");
   await h.fire("test-reset", "click");
-  assert.equal(h.renders.at(-1).renderer, "smooth");
+  assert.equal(h.renders.at(-1).renderer, "revised");
   assert.equal(h.renders.at(-1).baseExposure, 0);
   assert.equal(h.renders.at(-1).participantExposure, 0);
   assert.equal(h.renders.at(-1).monochrome, false);
@@ -215,7 +217,19 @@ test("camera captures replace the selected roles through the same comparison pip
   assert.equal(recipe.sources.base.name, "camera-base.jpg");
   assert.equal(recipe.sources.participant.name, "camera-second.jpg");
   assert.equal(h.elements.get("test-participant-camera").value, "");
-  assert.deepEqual(h.renders.slice(-2).map((settings) => settings.renderer), ["linear", "smooth"]);
+  assert.deepEqual(h.renders.slice(-2).map((settings) => settings.renderer), ["linear", "revised"]);
+});
+
+test("the saved smooth treatment remains selectable with its original model record", async () => {
+  const h = harness();
+  await h.pair();
+  h.elements.get("test-renderer").value = "smooth";
+  await h.fire("test-renderer");
+  assert.equal(h.renders.at(-1).renderer, "smooth");
+  const recipe = await h.recipe();
+  assert.equal(recipe.reference.renderer, "linear");
+  assert.equal(recipe.trial.rendererVersion, "smooth-exposure-v1");
+  assert.deepEqual(recipe.trial.modelParameters, { exposurePower: 2, whiteAnchor: 0.98 });
 });
 
 test("the earlier film curve remains selectable and keeps its own model record", async () => {

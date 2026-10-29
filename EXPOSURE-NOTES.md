@@ -27,7 +27,7 @@ The website therefore reads the light values from both photographs at each match
 | White | Any tone | White, at the current project settings |
 | Any tone | White | White, at the current project settings |
 
-The public mixer calculates continuous light contributions per colour channel; the smooth trial uses luminance for its exposure calculation and combines colour afterward. Neither needs to label whole objects or pick a winning photograph. Numerical checks give the same result when the two aligned inputs and their EV settings are swapped. The base photograph defines the output frame; both full photographs fit inside it with black padding where needed. Swapping photographs with different aspect ratios can therefore change framing even though the pixel calculation is symmetric. Portraits rotate clockwise before fitting.
+The public mixer calculates continuous light contributions per colour channel; the saved smooth trial uses luminance for its exposure calculation and combines colour afterward; Revised smooth adjusts the local overlap after the saved single-source EV response. None needs to label whole objects or give a photograph priority. Numerical checks give the same result when the two aligned inputs and their EV settings are swapped. The base photograph defines the output frame; both full photographs fit inside it with black padding where needed. Swapping photographs with different aspect ratios can therefore change framing even though the pixel calculation is symmetric. Portraits rotate clockwise before fitting.
 
 ## The current restored baseline
 
@@ -64,9 +64,17 @@ This model accepts both digital photographs and film scans. Neither source is gu
 
 The supplied film curve remains selectable beside the fixed current-addition reference. Reducing both photographs by one stop can make a bright light-table base less able to hide the other photo and can dim the other photo inside dark film strips.
 
-## The smooth-exposure trial
+## The revised smooth trial
 
-The default adjustable treatment on the local page is now **Smooth exposure**, starting at zero EV for each photograph. At each pixel it estimates exposure from linear luminance `Y` using `E(Y) = (0.98Y / (1 − 0.98Y))²`. Each photograph's EV scales its estimated exposure; the two estimates are added and developed using `Yout = min(1, √E / (0.98 × (1 + √E)))`. The 0.98 anchor keeps the white endpoint finite. The response reaches white continuously and uses every grayscale output value when a source is combined with black.
+The default adjustable treatment is **Revised smooth**, beside the unchanged Current addition reference. It first applies the saved smooth single-source EV response separately to each luminance. If `M` is the brighter adjusted pixel and `m` the darker, it uses `h = 1 / (1 + (M / 0.23)^3.5)` and `Yout = min(1, M + m × h)`. This increases the contribution in dark and lower-midtone overlaps and limits it gradually in bright overlaps. The names brighter/darker do not give either source priority; swapping aligned inputs with their EV settings preserves the result.
+
+For example, 40 + 40 changes from the saved smooth's 48 to 58, 80 + 128 from 130 to 140, and 128 + 128 from 144 to 157. Two bright values of 185 now produce 191 instead of 199; 200 + 200 produces 203 instead of 212. Colour dominance changes continuously, with more balanced weights in shadows and stronger brightness dominance in highlights. When both sources carry light, colour differences fade locally according to the remaining highlight headroom: `(1 − M)² / ((1 − M)² + m²)`. A source against black keeps its colour, while a bright neutral base can suppress a coloured overlay. Remaining excess RGB values are scaled together to fit the display; this can lower saturated colours' brightness. Black and white uses the luminances directly.
+
+This is a visual overlap adjustment rather than a calibrated emulsion response or a physical sum of latent exposure. It preserves a single source against black at zero EV, while two half-exposure copies need not reconstruct the original tones. The previous code is preserved at `0d5a8ba`, whose tree matches `smooth-exposure-checkpoint` at `5887061`; the saved smooth option and its pixel results remain unchanged.
+
+## The saved smooth-exposure trial
+
+The saved **Smooth exposure** treatment remains selectable, starting at zero EV for each photograph. At each pixel it estimates exposure from linear luminance `Y` using `E(Y) = (0.98Y / (1 − 0.98Y))²`. Each photograph's EV scales its estimated exposure; the two estimates are added and developed using `Yout = min(1, √E / (0.98 × (1 + √E)))`. The 0.98 anchor keeps the white endpoint finite. The response reaches white continuously and uses every grayscale output value when a source is combined with black.
 
 The purpose is to preserve more separation in dark areas. A dark pixel has little influence beside a brighter pixel: gray 35 plus gray 128 stays about 128, two gray-128 pixels become about 144, and gray 185 plus gray 128 becomes about 187 at 0/0 EV. Both photographs contribute according to the same rule, with no shooting-order priority or global opacity reduction. These values describe the chosen model, not measured film behaviour.
 

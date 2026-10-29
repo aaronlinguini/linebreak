@@ -24,6 +24,11 @@ function renderSmooth(first, second, settings = {}) {
   film.createSmoothMixer(settings)(first, second, output);
   return Array.from(output);
 }
+function renderRevised(first, second, settings = {}) {
+  const output = new Uint8ClampedArray(first.length);
+  film.createRevisedMixer(settings)(first, second, output);
+  return Array.from(output);
+}
 
 test("the experimental module loads in a plain browser scope without Node or DOM globals", () => {
   assert.equal(film.version, "assumed-film-v1");
@@ -225,6 +230,130 @@ test("smooth mixing validates settings and writes only the requested pixel chunk
   assert.throws(() => mix([0, 0, 0], [0, 0, 0], [0, 0, 0]), /RGBA dimensions/);
   assert.throws(() => mix(first, second, new Uint8ClampedArray(4)), /RGBA dimensions/);
   for (const [start, end] of [[1, 4], [0, 5], [-4, 4], [8, 4], [0, first.length + 4], [NaN, 4]]) {
+    assert.throws(() => mix(first, second, output, start, end), /aligned RGBA boundaries/);
+  }
+});
+
+// Recorded directly from checkpoint 5887061; the older selectable treatment
+// must remain unchanged while the revised overlap response is evaluated.
+for (const fixture of [
+  { settings: { baseExposure: 0, participantExposure: 0, monochrome: false }, rgb: [128,128,128,39,39,39,144,144,144,212,212,212,255,255,255,254,254,254,250,0,133,58,254,0,255,255,2,219,100,35,219,100,35] },
+  { settings: { baseExposure: -0.5, participantExposure: 1, monochrome: false }, rgb: [144,144,144,42,42,42,152,152,152,217,217,217,255,255,255,253,253,253,227,0,193,93,246,0,255,255,160,246,113,26,206,95,54] },
+  { settings: { baseExposure: 1, participantExposure: -0.5, monochrome: true }, rgb: [120,120,120,42,42,42,152,152,152,217,217,217,255,255,255,255,255,255,144,144,144,229,229,229,245,245,245,128,128,128,152,152,152] }
+]) {
+  test(`saved smooth checkpoint output remains unchanged at ${fixture.settings.baseExposure}/${fixture.settings.participantExposure} EV in ${fixture.settings.monochrome ? "monochrome" : "colour"}`, () => {
+    assert.deepEqual(renderSmooth(first, second, fixture.settings), Array.from(rgba(fixture.rgb)));
+  });
+}
+
+test("revised overlap preserves single-source detail and the saved monochrome EV response", () => {
+  assert.equal(film.revisedVersion, "smooth-revised-v1");
+  assert.ok(Object.isFrozen(film.revisedParameters));
+  const ramp = rgba(Array.from({ length: 256 }, (_, byte) => [byte,byte,byte]).flat());
+  const black = new Uint8ClampedArray(ramp.length);
+  for (const monochrome of [true, false]) {
+    assert.deepEqual(renderRevised(ramp, black, { monochrome }), Array.from(ramp));
+    assert.deepEqual(renderRevised(black, ramp, { monochrome }), Array.from(ramp));
+  }
+  const colours = rgba([0,0,0,20,80,120,220,100,40,0,255,80,255,255,255]);
+  assert.deepEqual(renderRevised(colours, new Uint8ClampedArray(colours.length), { monochrome: false }), Array.from(colours));
+  for (const ev of [-3, -1, -0.5, 1, 2]) {
+    assert.deepEqual(
+      renderRevised(ramp, black, { baseExposure: ev }),
+      renderSmooth(ramp, black, { baseExposure: ev }),
+      "the revision should change overlap rather than re-tone a source on its own"
+    );
+  }
+});
+
+test("revised overlap opens shadows and midtones while retaining less extra light in highlights", () => {
+  const gray = (value) => rgba([value,value,value]);
+  for (const [a,b] of [[40,40], [80,80], [80,128], [128,128]]) {
+    assert.ok(renderRevised(gray(a), gray(b))[0] > renderSmooth(gray(a), gray(b))[0] + 4,
+      `the revised overlap must reveal more of a second dark or middle tone (${a}, ${b})`);
+  }
+  const mid = renderRevised(gray(128), gray(128))[0];
+  assert.ok(mid > 144 && mid < 176, "midtone overlap should fall between saved smooth and current full addition");
+  for (const value of [185, 200, 220]) {
+    const output = renderRevised(gray(value), gray(value))[0];
+    assert.ok(output >= value);
+    assert.ok(output < renderSmooth(gray(value), gray(value))[0], "bright overlap must add less than the saved experiment");
+  }
+});
+
+test("every revised grayscale pair stays monotone without a tonal cutoff or reversal", () => {
+  const ramp = rgba(Array.from({ length: 256 }, (_, byte) => [byte,byte,byte]).flat());
+  for (let other = 0; other <= 255; other++) {
+    const fixed = rgba(Array.from({ length: 256 }, () => [other,other,other]).flat());
+    const output = renderRevised(ramp, fixed);
+    let previous = output[0];
+    for (let index = 4; index < output.length; index += 4) {
+      assert.ok(output[index] >= previous, `a brighter pixel must not reverse the response (${other}, ${index/4})`);
+      assert.ok(output[index] - previous <= 2, `adjacent input tones must not cause a clipping jump (${other}, ${index/4})`);
+      previous = output[index];
+    }
+    assert.ok(output.every((byte,index) => index % 4 !== 3 || byte === 255));
+  }
+});
+
+test("the revised blend gives neither photograph shooting-order priority", () => {
+  for (const monochrome of [true, false]) {
+    for (const [aEV,bEV] of [[0,0], [-0.5,1], [2,-3]]) {
+      assert.deepEqual(
+        renderRevised(first, second, { baseExposure: aEV, participantExposure: bEV, monochrome }),
+        renderRevised(second, first, { baseExposure: bEV, participantExposure: aEV, monochrome })
+      );
+    }
+  }
+});
+
+test("revised colour transitions avoid abrupt gamut lifting and suppress colour through bright neutral areas", () => {
+  const primaries = [[255,0,0], [0,255,0], [0,0,255]];
+  for (const fixed of [...primaries, [100,100,100], [200,40,20]]) {
+    for (let channel = 0; channel < 3; channel++) {
+      let previous;
+      for (let value = 0; value <= 255; value++) {
+        const source = [0,0,0];
+        source[channel] = value;
+        const output = renderRevised(rgba(source), rgba(fixed), { monochrome: false });
+        if (previous) for (let c = 0; c < 3; c++) {
+          assert.ok(Math.abs(output[c] - previous[c]) <= 8, "a single input step must not suddenly lift weak channels into a visible colour patch");
+        }
+        previous = output;
+      }
+    }
+  }
+  for (const colour of primaries) {
+    assert.deepEqual(renderRevised(rgba([255,255,255]), rgba(colour), { monochrome: false }), [255,255,255,255]);
+    const highlight = renderRevised(rgba([235,235,235]), rgba(colour), { monochrome: false }).slice(0,3);
+    assert.ok(Math.max(...highlight) - Math.min(...highlight) <= 8, "a bright neutral region must suppress the other image's colour as well as its luminance");
+  }
+  const green = rgba([0,255,0]);
+  const spread = (output) => Math.max(...output.slice(0,3)) - Math.min(...output.slice(0,3));
+  const darkOverlap = renderRevised(rgba([40,40,40]), green, { monochrome: false });
+  const brightOverlap = renderRevised(rgba([200,200,200]), green, { monochrome: false });
+  const savedBright = renderSmooth(rgba([200,200,200]), green, { monochrome: false });
+  assert.ok(spread(darkOverlap) > 200, "opening shadow overlap must not turn the other photograph's colour gray");
+  assert.ok(spread(brightOverlap) < spread(savedBright) / 2, "the revision must reduce coloured detail in lights compared with saved smooth");
+});
+
+test("revised mixing validates settings and limits output writes to the requested RGBA chunk", () => {
+  const settings = { baseExposure: -1, participantExposure: 0.5, monochrome: false };
+  const mix = film.createRevisedMixer(settings);
+  const output = new Uint8ClampedArray(first.length).fill(77);
+  mix(first, second, output, 4, 16);
+  assert.deepEqual(Array.from(output.slice(0,4)), [77,77,77,77]);
+  assert.ok(output.slice(16).every(byte => byte === 77));
+  mix(first, second, output, 0, 4);
+  mix(first, second, output, 16, first.length);
+  assert.deepEqual(Array.from(output), renderRevised(first, second, settings));
+  for (const invalid of [NaN, Infinity, -3.1, 2.1, "0"]) {
+    assert.throws(() => film.createRevisedMixer({ baseExposure: invalid }), /exposure must be between/);
+    assert.throws(() => film.createRevisedMixer({ participantExposure: invalid }), /exposure must be between/);
+  }
+  assert.throws(() => film.createRevisedMixer({ monochrome: "false" }), /Monochrome must be/);
+  assert.throws(() => mix(first, second, new Uint8ClampedArray(4)), /RGBA dimensions/);
+  for (const [start,end] of [[1,4], [0,5], [-4,4], [8,4], [0, first.length+4], [NaN,4]]) {
     assert.throws(() => mix(first, second, output, start, end), /aligned RGBA boundaries/);
   }
 });

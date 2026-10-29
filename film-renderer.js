@@ -198,12 +198,70 @@ const FilmExposureMath = (() => {
     };
   }
 
+  // Revise overlap strength without re-toning either source on its own.
+  // Dark overlaps approach addition. Bright overlaps leave less headroom for
+  // the weaker source. A power below four keeps this response monotonic.
+  const revisedParameters = Object.freeze({ overlapPivot: 0.23, retentionPower: 3.5, maximumColourPower: 7 });
+  function createRevisedMixer({ baseExposure = 0, participantExposure = 0, monochrome = true } = {}) {
+    validateSettings(baseExposure, participantExposure, monochrome);
+    const gainA = 2 ** baseExposure;
+    const gainB = 2 ** participantExposure;
+    return function mix(base, participant, output, start = 0, end = base.length) {
+      validateBuffers(base, participant, output, start, end);
+      for (let index = start; index < end; index += 4) {
+        const ar = smoothLinear[base[index]], ag = smoothLinear[base[index + 1]], ab = smoothLinear[base[index + 2]];
+        const br = smoothLinear[participant[index]], bg = smoothLinear[participant[index + 1]], bb = smoothLinear[participant[index + 2]];
+        const originalA = 0.2126 * ar + 0.7152 * ag + 0.0722 * ab;
+        const originalB = 0.2126 * br + 0.7152 * bg + 0.0722 * bb;
+        // Retain the saved treatment's single-source luminance/EV response.
+        const a = smoothLuminance(gainA * smoothExposure(originalA));
+        const b = smoothLuminance(gainB * smoothExposure(originalB));
+        const brighter = Math.max(a, b);
+        const darker = Math.min(a, b);
+        const retention = 1 / (1 + (brighter / revisedParameters.overlapPivot) ** revisedParameters.retentionPower);
+        const luminance = clamp(brighter + darker * retention);
+        if (monochrome || luminance === 0) {
+          const grey = encodeSmooth(luminance);
+          output[index] = output[index + 1] = output[index + 2] = grey;
+        } else {
+          // Colour dominance changes continuously too. Equal-brightness colours
+          // blend evenly, avoiding a hue jump when the brighter source changes.
+          const power = 1 + (revisedParameters.maximumColourPower - 1) * (1 - retention);
+          const contributionA = a ** power;
+          const contributionB = b ** power;
+          const total = contributionA + contributionB;
+          const weightA = originalA > 0 ? luminance * contributionA / (total * originalA) : 0;
+          const weightB = originalB > 0 ? luminance * contributionB / (total * originalB) : 0;
+          // Colour detail also needs highlight headroom. Where both sources
+          // carry light, move colour toward the combined neutral tone as that
+          // headroom closes. A source against black retains its original colour.
+          const room = 1 - brighter;
+          const colourRetention = darker > 0 ? room * room / (room * room + darker * darker) : 1;
+          const red = luminance + colourRetention * (weightA * ar + weightB * br - luminance);
+          const green = luminance + colourRetention * (weightA * ag + weightB * bg - luminance);
+          const blue = luminance + colourRetention * (weightA * ab + weightB * bb - luminance);
+          const maximum = Math.max(red, green, blue);
+          // Fit colour with one common scale. Adding neutral gray here can
+          // suddenly lift weak channels when a saturated colour reaches white.
+          const scale = Math.max(1, maximum);
+          output[index] = encodeSmooth(red / scale);
+          output[index + 1] = encodeSmooth(green / scale);
+          output[index + 2] = encodeSmooth(blue / scale);
+        }
+        output[index + 3] = 255;
+      }
+    };
+  }
+
   return Object.freeze({
     version,
     createMixer,
     createSmoothMixer,
     smoothVersion: "smooth-exposure-v1",
     smoothParameters,
+    createRevisedMixer,
+    revisedVersion: "smooth-revised-v1",
+    revisedParameters,
     parameters: Object.freeze({ logMin: LOG_MIN, logMax: LOG_MAX, toe: TOE, shoulder: SHOULDER, softness: SOFTNESS })
   });
 })();
