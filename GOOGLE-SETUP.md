@@ -2,9 +2,20 @@
 
 The image effect already works without Google in `local-test.html`. The Google connection supplies base photographs and saves originals, finished exposures, consent, and duplicate checks. It runs on Google's infrastructure; you do not rent a server or connect your Google account to an AI assistant.
 
-The public website exists at [Double exposure](https://aaronlinguini.github.io/double-exposure-online-project/), with [a separate public repository](https://github.com/aaronlinguini/double-exposure-online-project). **On October 30, 2026, the five limited-access files were installed and saved in the existing Google Apps Script project, then read back after reloading and verified against the local files.** Drive v3 and Sheets v4 appear in Services. The four old folder-ID properties were backed up and removed; `SITE_URL`, `ALLOWED_ORIGINS`, and `UPLOADS_PAUSED=true` were retained. No spreadsheet ID existed before setup. The first run stopped at **Authorization required**. A subsequent `setupProject` run completed successfully at **1:07:41 PM**, creating the new project folders and index spreadsheet and printing their links. Google accepted the available authorization; the assistant did not approve a permission prompt. **Keep the newly generated `EXPOSURE_*_ID` properties.** Deployment, artist imports, and the real archive check remain pending. `project-config.js` still has an empty endpoint, and uploads remain disabled until setup is finished. Automated tests simulate Google services and do not replace the manual live check below.
+The [project website](https://aaronlinguini.github.io/double-exposure-online-project/) uses [a separate public repository](https://github.com/aaronlinguini/double-exposure-online-project). On October 30, 2026, the five limited-access files were installed in the existing Apps Script project and verified against the local files after reloading. Drive v3 and Sheets v4 are enabled. Setup completed at **1:07:41 PM**, creating the app's folders and index spreadsheet. **Version 1 was deployed successfully at 1:19 PM**, executing as the owner with **Anyone** access explicitly approved by the user. **Keep the current `EXPOSURE_*_ID` properties; do not repeat the old-folder migration.**
 
-The pre-install Google files, old Script Properties, and installation verification are backed up locally under the Git-ignored `secrets/google-before-limited-access-2026-10-30/` directory. The new setup links are saved in the Git-ignored `secrets/google-archive-links-2026-10-30.json`. Existing Drive folders and their contents were not changed. The obsolete permission-request tab for the older code was closed without approval. For this existing project, continue at section 5; sections 2–4 remain instructions for a fresh installation or migration.
+The deployed endpoint is [the Google web app](https://script.google.com/macros/s/AKfycbw89JT4EFAoXcpYM3M8ywS3LSF2jsAUOr3Pc5SlNls-BG_S128SweTPooYdDuPnbuM2/exec). The current version accepts base photos through the [private artist import page](https://script.google.com/macros/s/AKfycbw89JT4EFAoXcpYM3M8ywS3LSF2jsAUOr3Pc5SlNls-BG_S128SweTPooYdDuPnbuM2/exec?view=artist). **The user instead prefers dragging files directly into the Drive folder. That workflow change is pending an access decision; it is not implemented, and no broader permission has been requested or granted by the assistant.** Direct folder intake would require a revised reader and authorization, such as Drive-wide read-only access for this account, or running the program in a separate project account with access only to the shared base-photo folder and its own project files. The current limited-access grant does not automatically authorize files dropped into Drive.
+
+Verified deployment checks:
+
+- In signed-in Chrome, the artist page reported **Collection ready**, initially **0 photographs**, and showed the correct project folder links.
+- In an actual **Chrome Incognito** session, the artist page denied access with **Open the artist import page while signed into the account that deployed this project.** The in-app browser was also signed in and was not used as evidence of anonymous access.
+- `project-config.js` contains the deployed endpoint. Only that file changed in public GitHub commit [`f78b742c33036a64ded4d2cf5ee6f80775bf4b89`](https://github.com/aaronlinguini/double-exposure-online-project/commit/f78b742c33036a64ded4d2cf5ee6f80775bf4b89). [GitHub Pages run 41098445169](https://github.com/aaronlinguini/double-exposure-online-project/actions/runs/41098445169) completed successfully. The existing nine-file publication checks passed **8/8**.
+- `UPLOADS_PAUSED=true` is retained. The public Incognito page reported submissions temporarily unavailable; that visible message alone does not establish a particular server error code.
+
+Artist imports and real original/result uploads, duplicate handling, consent, another pairing, and phone/tablet checks remain pending. Automated tests simulate Google services and do not replace those live checks.
+
+The pre-install Google files, old Script Properties, and installation verification are backed up locally under the Git-ignored `secrets/google-before-limited-access-2026-10-30/` directory. The new setup links are saved in the Git-ignored `secrets/google-archive-links-2026-10-30.json`. Existing Drive folders and their contents were not changed. The obsolete permission-request tab for the older code was closed without approval. Resolve the requested folder-intake workflow before proceeding with photo intake. The instructions below describe the currently deployed import-page implementation; setup and deployment instructions remain references for a fresh installation or a later update.
 
 ## What permission the program requests
 
@@ -108,6 +119,8 @@ Google may still display an unverified-app notice. It means Google has not verif
 
 ## 5. Deploy, then import your base photographs
 
+**Current project: deployment is already complete. The private import page supports the current per-file workflow; direct Drive-folder intake is pending the access decision above. Do not create another deployment for initial setup.** The deployment instructions below describe a fresh project.
+
 In Apps Script, choose **Deploy → New deployment → Web app**:
 
 - **Execute as:** Me, the archive owner.
@@ -130,6 +143,8 @@ Accepted formats are JPEG, PNG, WebP, and AVIF, up to 30 MB each. Export HEIC an
 Import at least one photo different from the participant's upload; two distinct bases are needed to test **Try another pairing**. Keep the archive folders and spreadsheet private. Eligible source photographs are supplied through the visitor API to make new exposures, even though there is no public gallery.
 
 ## 6. Connect the public website
+
+**Current project: the endpoint is already configured and published.** These instructions are for a future endpoint change or a fresh project.
 
 Set `googleScriptUrl` in `project-config.js` to your deployed `/exec` URL. Preserve the other options:
 
