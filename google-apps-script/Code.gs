@@ -9,6 +9,11 @@
  *                 origins are allowed for development; wildcards are not).
  * INCLUDE_PARTICIPANT_PHOTOS: "false" disables all participant bases. Otherwise
  *                           only completed, individually opted-in originals join.
+ * UPLOADS_PAUSED: "true" temporarily closes the visitor API; absent/"false" opens it.
+ * REQUESTS_PER_MINUTE / SUBMISSIONS_PER_DAY / UPLOAD_BYTES_PER_DAY: optional
+ * positive integer limits, shared by all visitors (defaults 120 / 200 / 1 GiB).
+ * EXPOSURE_REQUEST_WINDOW is internal request accounting. The private Usage
+ * sheet reserves each submission and new file once; do not edit its records.
  * EXPOSURE_*_ID properties are populated by setupProject_.
  *
  * Sources columns: sourceId, sha256, nameJson, mimeType, byteLength, kind,
@@ -33,6 +38,7 @@ var EXPOSURE_CONFIG_ = Object.freeze({
   sheetName: "Double exposure index",
   maxOriginalBytes: 30 * 1024 * 1024,
   maxResultBytes: 12 * 1024 * 1024,
+  usageHeaders: ["key", "day", "kind", "bytes"],
   sourcesHeaders: ["sourceId", "sha256", "nameJson", "mimeType", "byteLength", "kind", "eligible", "createdAt"],
   submissionsHeaders: ["submissionId", "token", "originalId", "originalSha256", "baseId", "status", "resultId", "resultSha256", "width", "height", "settingsJson", "createdAt", "completedAt", "allowReuse", "parentSubmissionId"]
 });
@@ -72,6 +78,7 @@ function exposureApi(request) {
     var payload = request.payload === undefined ? {} : request.payload;
     if (!isObject_(payload)) throw apiError_("INVALID_REQUEST", "The archive request is invalid.");
     var data = withLock_(function () {
+      guardVisitorRequest_();
       var project = project_();
       if (request.action === "bootstrap") return bootstrap_(project);
       if (request.action === "begin") return begin_(project, payload);
@@ -140,6 +147,7 @@ function setupProject_() {
     DriveApp.getFileById(spreadsheet.getId()).moveTo(root);
     setupSheet_(spreadsheet, "Sources", EXPOSURE_CONFIG_.sourcesHeaders);
     setupSheet_(spreadsheet, "Submissions", EXPOSURE_CONFIG_.submissionsHeaders);
+    setupSheet_(spreadsheet, "Usage", EXPOSURE_CONFIG_.usageHeaders);
     var links = { root: root.getUrl(), artist: artist.getUrl(), originals: originals.getUrl(), results: results.getUrl(), sheet: spreadsheet.getUrl() };
     console.log(JSON.stringify(links));
     return links;
@@ -265,6 +273,7 @@ function begin_(project, payload) {
     throw apiError_("SUBMISSION_CONFLICT", "This submission already belongs to a different photograph. Start a new submission.");
   }
   if (!submission) {
+    reserveUsage_(project, "submission:" + submissionId, "submission", 0);
     var source = previous
       ? findRecord_(readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders), "sourceId", previous.originalId)
       : saveOriginal_(project, original);
@@ -341,7 +350,7 @@ function complete_(project, payload) {
       writeRecord_(project.submissions, EXPOSURE_CONFIG_.submissionsHeaders, submission);
     }
     var filename = "result-" + submissionId + "-" + result.hash + ".jpg";
-    var file = recoverOrCreate_(project.results, filename, result);
+    var file = recoverOrCreate_(project, project.results, filename, result);
     submission.resultId = file.getId();
     submission.status = "complete";
     if (!submission.completedAt) submission.completedAt = now_();
@@ -373,7 +382,7 @@ function saveOriginal_(project, image) {
     return existing;
   }
   var filename = "source-" + image.hash + "." + extension_(image.mimeType);
-  var file = recoverOrCreate_(project.originals, filename, image);
+  var file = recoverOrCreate_(project, project.originals, filename, image);
   var source = {
     sourceId: file.getId(), sha256: image.hash, nameJson: JSON.stringify(image.name), mimeType: image.mimeType,
     byteLength: image.bytes.length, kind: "participant", eligible: false, createdAt: now_()
@@ -382,7 +391,7 @@ function saveOriginal_(project, image) {
   return source;
 }
 
-function recoverOrCreate_(folder, filename, image) {
+function recoverOrCreate_(project, folder, filename, image) {
   var files = folder.getFilesByName(filename);
   if (files.hasNext()) {
     var file = files.next();
@@ -392,6 +401,9 @@ function recoverOrCreate_(folder, filename, image) {
     }
     return file;
   }
+  // Reserve before Drive writes. A retry reuses this key, including when the
+  // previous attempt stopped after reservation or after creating the file.
+  reserveUsage_(project, "file:" + folder.getId() + ":" + filename, "file", image.bytes.length);
   return folder.createFile(Utilities.newBlob(image.bytes, image.mimeType, filename));
 }
 
@@ -490,7 +502,95 @@ function project_() {
   if (!sources || !submissions) throw apiError_("NOT_CONFIGURED", "The archive index has not been set up yet.");
   validateHeaders_(sources, EXPOSURE_CONFIG_.sourcesHeaders);
   ensureSubmissionHeaders_(submissions);
-  return { artist: DriveApp.getFolderById(ids[0]), originals: DriveApp.getFolderById(ids[1]), results: DriveApp.getFolderById(ids[2]), sources: sources, submissions: submissions };
+  // Add the ledger when an older deployment first opens its existing index.
+  var usage = setupSheet_(spreadsheet, "Usage", EXPOSURE_CONFIG_.usageHeaders);
+  return { artist: DriveApp.getFolderById(ids[0]), originals: DriveApp.getFolderById(ids[1]), results: DriveApp.getFolderById(ids[2]), sources: sources, submissions: submissions, usage: usage };
+}
+
+function archiveLimits_() {
+  var properties = PropertiesService.getScriptProperties();
+  function positive(key, fallback) {
+    var raw = properties.getProperty(key);
+    if (raw === null) return fallback;
+    var value = Number(raw);
+    if (!/^\d+$/.test(String(raw).trim()) || !Number.isSafeInteger(value) || value < 1) {
+      throw apiError_("LIMIT_CONFIGURATION", "The archive limits need the artist's attention.");
+    }
+    return value;
+  }
+  var paused = properties.getProperty("UPLOADS_PAUSED");
+  if (paused !== null && ["true", "false"].indexOf(String(paused).trim().toLowerCase()) < 0) {
+    throw apiError_("LIMIT_CONFIGURATION", "The archive limits need the artist's attention.");
+  }
+  return { paused: String(paused).trim().toLowerCase() === "true",
+    requests: positive("REQUESTS_PER_MINUTE", 120),
+    submissions: positive("SUBMISSIONS_PER_DAY", 200),
+    bytes: positive("UPLOAD_BYTES_PER_DAY", 1024 * 1024 * 1024) };
+}
+
+// Called under the script lock before reading or decoding visitor data. The
+// fixed UTC minute is a global budget, not a per-person or per-IP rate limit.
+function guardVisitorRequest_() {
+  var limits = archiveLimits_();
+  if (limits.paused) throw apiError_("UPLOADS_PAUSED", "The artist has temporarily paused uploads. Please try again later.");
+  var properties = PropertiesService.getScriptProperties();
+  var minute = Math.floor(Date.now() / 60000);
+  var raw = properties.getProperty("EXPOSURE_REQUEST_WINDOW");
+  var state = { minute: minute, count: 0 };
+  if (raw !== null) {
+    try { state = JSON.parse(raw); } catch (error) { state = null; }
+    if (!isObject_(state) || !Number.isSafeInteger(state.minute) || state.minute < 0 || state.minute > minute ||
+        !Number.isSafeInteger(state.count) || state.count < 0) {
+      throw apiError_("LIMIT_CONFIGURATION", "The archive limits need the artist's attention.");
+    }
+    if (state.minute < minute) state = { minute: minute, count: 0 };
+  }
+  if (state.count >= limits.requests) throw apiError_("RATE_LIMITED", "The archive is receiving too many requests. Please retry in a minute.");
+  state.count++;
+  properties.setProperty("EXPOSURE_REQUEST_WINDOW", JSON.stringify(state));
+}
+
+function reserveUsage_(project, key, kind, bytes) {
+  var records = readRecords_(project.usage, EXPOSURE_CONFIG_.usageHeaders);
+  var today = now_().slice(0, 10);
+  var usedBytes = 0;
+  var usedSubmissions = 0;
+  var existing = null;
+  var seen = {};
+  records.forEach(function (record) {
+    if (typeof record.key !== "string" || !record.key || seen[record.key] ||
+        typeof record.day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(record.day) || record.day > today ||
+        !Number.isFinite(Date.parse(record.day)) || new Date(record.day).toISOString().slice(0, 10) !== record.day ||
+        ["submission", "file"].indexOf(record.kind) < 0 || !Number.isSafeInteger(record.bytes) || record.bytes < 0 ||
+        (record.kind === "submission" && record.bytes !== 0) || (record.kind === "file" && record.bytes < 1)) {
+      throw apiError_("LIMIT_CONFIGURATION", "The archive usage records need the artist's attention.");
+    }
+    seen[record.key] = true;
+    if (record.key === key) existing = record;
+    if (record.day === today) {
+      usedBytes += record.bytes;
+      if (record.kind === "submission") usedSubmissions++;
+    }
+  });
+  if (!Number.isSafeInteger(usedBytes)) throw apiError_("LIMIT_CONFIGURATION", "The archive usage records need the artist's attention.");
+  if (existing) {
+    if (existing.kind !== kind || existing.bytes !== bytes) throw apiError_("LIMIT_CONFIGURATION", "The archive usage records need the artist's attention.");
+    if (existing.day === today) return;
+  }
+  var limits = archiveLimits_();
+  if ((kind === "submission" && usedSubmissions >= limits.submissions) || bytes > limits.bytes - usedBytes) {
+    throw apiError_("DAILY_LIMIT_REACHED", "Today's archive intake limit has been reached. Please try again tomorrow.");
+  }
+  // Keep ISO day labels as text instead of letting Sheets infer a local date.
+  var reservation = existing || { key: key, kind: kind, bytes: bytes };
+  // This helper runs only before a new submission/file write. A recovered
+  // existing file bypasses it. Move an unused older reservation to today so
+  // delayed attempts cannot spend several days' allowances in one day.
+  reservation.day = today;
+  project.usage.getRange(reservation._row || project.usage.getLastRow() + 1, 2).setNumberFormat("@");
+  writeRecord_(project.usage, EXPOSURE_CONFIG_.usageHeaders, reservation);
+  // Persist this reservation before a Drive write or a later index operation.
+  SpreadsheetApp.flush();
 }
 
 function setupFolder_(root, properties, key, name) {

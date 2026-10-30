@@ -19,12 +19,13 @@ const submissionId = (number) => `11111111-1111-4111-8111-${String(number).padSt
 // exercise its actual public API rather than a second implementation of it.
 function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "owner@example.test" } = {}) {
   let nextId = 0;
+  let timestamp = Date.parse("2026-10-29T12:00:00Z");
   const files = new Map();
   const folders = new Map();
   const books = new Map();
   const properties = new Map([["SITE_URL", "https://artist.example/exposures/"]]);
   const logs = [];
-  const failures = { sheetWrite: null };
+  const failures = { sheetWrite: null, fileCreate: false };
   const iterator = (values) => { let index = 0; return { hasNext: () => index < values.length, next: () => values[index++] }; };
   const id = (kind) => `${kind}-${++nextId}`;
 
@@ -72,7 +73,10 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
     getName() { return this.name; }
     getUrl() { return `https://drive.google.com/drive/folders/${this.id}`; }
     createFolder(name) { return new Folder(name, this); }
-    createFile(blob) { return new File(blob, this); }
+    createFile(blob) {
+      if (failures.fileCreate) { failures.fileCreate = false; throw new Error("Simulated Drive write failure"); }
+      return new File(blob, this);
+    }
     getFiles() { return iterator(this.files.filter((file) => !file.trashed)); }
     getFilesByName(name) { return iterator(this.files.filter((file) => !file.trashed && file.getName() === name)); }
     getFoldersByName(name) { return iterator(this.folders.filter((folder) => folder.name === name)); }
@@ -126,6 +130,10 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
   const lock = { held: false, count: 0, waitLock() { assert.equal(this.held, false, "nested script lock"); this.held = true; this.count++; }, tryLock() { this.waitLock(); return true; }, releaseLock() { this.held = false; }, hasLock() { return this.held; } };
   const htmlOutput = (content) => ({ getContent: () => content, setTitle() { return this; }, setXFrameOptionsMode(mode) { this.frameMode = mode; return this; } });
   const sandbox = vm.createContext({
+    Date: class extends Date {
+      constructor(...args) { super(...(args.length ? args : [timestamp])); }
+      static now() { return timestamp; }
+    },
     console: { log: (...values) => logs.push(values.join(" ")) },
     Logger: { log: (...values) => logs.push(values.join(" ")) },
     DriveApp: {
@@ -177,7 +185,9 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
   const completePayload = (begun, marker = 90) => ({ submissionId: begun.submissionId, token: begun.token, result: original(marker, `${begun.submissionId}.jpg`), width: 640, height: 480, settings: { baseExposure: -1, participantExposure: -1, contrast: 0, monochrome: false } });
   const setup = () => sandbox.setupProject();
   const refresh = () => sandbox.refreshArtistCollection();
-  return { sandbox, properties, files, folders, books, logs, failures, lock, source, api, data, folder, seed, begin, completePayload, setup, refresh, Blob };
+  const advance = (milliseconds) => { timestamp += milliseconds; };
+  const usage = () => clone([...books.values()][0].getSheetByName("Usage").rows.slice(1));
+  return { sandbox, properties, files, folders, books, logs, failures, lock, source, api, data, folder, seed, begin, completePayload, setup, refresh, advance, usage, Blob };
 }
 
 test("owner setup is repeatable and creates distinct private storage roles", () => {
@@ -348,6 +358,8 @@ for (const boundary of ["source", "pending", "paired"]) {
     const resumed = backend.begin(1, 22);
     assert.equal(resumed.originalId, backend.folder("Participant").files[0].getId());
     assert.equal(backend.folder("Participant").files.length, 1);
+    assert.equal(backend.usage().length, 2, "the same submission and original keep one reservation each");
+    assert.equal(backend.usage().reduce((sum, row) => sum + row[3], 0), jpeg(22).length);
     assert.equal(backend.data("bootstrap").totalEligible, 1);
     assert.equal(backend.lock.held, false);
   });
@@ -368,6 +380,8 @@ for (const boundary of ["saving", "complete", "eligible"]) {
     assert.equal(saved.saved, true);
     assert.equal(backend.folder("Double exposure").files.length, 1);
     assert.deepEqual(backend.files.get(saved.resultId).blob.bytes, jpeg(90));
+    assert.equal(backend.usage().length, 3, "an interrupted completion must not duplicate its byte reservation");
+    assert.equal(backend.usage().reduce((sum, row) => sum + row[3], 0), jpeg(22).length + jpeg(90).length);
     assert.equal(backend.data("bootstrap").totalEligible, 2);
     assert.equal(backend.lock.held, false);
   });
@@ -519,4 +533,155 @@ test("the bridge is served only to permitted origins and escapes its metadata", 
     const output = backend.sandbox.doGet({ parameter: { origin, channel } });
     assert.doesNotMatch(output.getContent(), /drive-bridge\.js/);
   }
+});
+
+test("global request limits persist across calls and reopen at the next UTC minute", () => {
+  const backend = makeBackend(); backend.setup();
+  backend.properties.set("REQUESTS_PER_MINUTE", "2");
+  backend.data("bootstrap");
+  backend.data("bootstrap");
+  assert.equal(backend.api("bootstrap").error.code, "RATE_LIMITED");
+  assert.equal(JSON.parse(backend.properties.get("EXPOSURE_REQUEST_WINDOW")).count, 2);
+  backend.advance(60000);
+  backend.data("bootstrap");
+  assert.equal(JSON.parse(backend.properties.get("EXPOSURE_REQUEST_WINDOW")).count, 1);
+  assert.equal(backend.lock.held, false);
+});
+
+test("the pause switch blocks visitor writes while owner setup and import remain usable", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed();
+  backend.properties.set("UPLOADS_PAUSED", "true");
+  backend.setup(); backend.refresh();
+  assert.equal(backend.api("bootstrap").error.code, "UPLOADS_PAUSED");
+  assert.equal(backend.api("begin", { submissionId: submissionId(1), original: original(22) }).error.code, "UPLOADS_PAUSED");
+  assert.equal(backend.folder("Participant").files.length, 0);
+  assert.equal(backend.usage().length, 0);
+  backend.properties.set("UPLOADS_PAUSED", "false");
+  backend.begin(1, 22);
+  backend.properties.set("UPLOADS_PAUSED", "true");
+  assert.equal(backend.api("complete", {}).error.code, "UPLOADS_PAUSED");
+  assert.equal(backend.folder("Double exposure").files.length, 0);
+});
+
+test("daily submission caps count another pairing but never charge a stable retry twice", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.seed(2); backend.refresh();
+  backend.properties.set("SUBMISSIONS_PER_DAY", "1");
+  const first = backend.begin(1, 22);
+  assert.deepEqual(backend.begin(1, 22), first);
+  backend.data("complete", backend.completePayload(first));
+  const request = { submissionId: submissionId(2), reuse: { submissionId: first.submissionId, token: first.token } };
+  assert.equal(backend.api("begin", request).error.code, "DAILY_LIMIT_REACHED");
+  assert.equal(backend.folder("Participant").files.length, 1);
+  assert.equal(backend.usage().filter((row) => row[2] === "submission").length, 1);
+  backend.advance(86400000);
+  const second = backend.data("begin", request);
+  assert.equal(second.originalId, first.originalId);
+  assert.notEqual(second.base.id, first.base.id);
+  assert.equal(backend.folder("Participant").files.length, 1);
+  assert.equal(backend.usage().filter((row) => row[2] === "submission").length, 2);
+});
+
+test("daily byte caps count only newly stored files and reset without deleting archive files", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(); backend.refresh();
+  const bytes = jpeg(22).length;
+  backend.properties.set("UPLOAD_BYTES_PER_DAY", String(bytes * 2));
+  const first = backend.begin(1, 22);
+  const firstRequest = backend.completePayload(first);
+  backend.data("complete", firstRequest);
+  backend.data("complete", firstRequest);
+  const second = backend.begin(2, 22);
+  assert.equal(second.originalId, first.originalId, "an identical new submission reuses its original at the byte limit");
+  const failed = backend.api("complete", backend.completePayload(second, 91));
+  assert.equal(failed.error.code, "DAILY_LIMIT_REACHED");
+  assert.equal(failed.error.originalSaved, true);
+  assert.equal(backend.folder("Participant").files.length, 1);
+  assert.equal(backend.folder("Double exposure").files.length, 1);
+  assert.equal(backend.usage().reduce((sum, row) => sum + row[3], 0), bytes * 2);
+  backend.advance(86400000);
+  backend.data("complete", backend.completePayload(second, 91));
+  assert.equal(backend.folder("Double exposure").files.length, 2);
+  assert.equal(backend.usage().reduce((sum, row) => sum + row[3], 0), bytes * 3);
+  assert.equal(backend.usage().filter((row) => row[1] === "2026-10-30").reduce((sum, row) => sum + row[3], 0), bytes);
+});
+
+test("failed Drive creation retains one reservation that a retry can reuse at the byte cap", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(); backend.refresh();
+  backend.properties.set("UPLOAD_BYTES_PER_DAY", String(jpeg(22).length));
+  backend.failures.fileCreate = true;
+  assert.equal(backend.api("begin", { submissionId: submissionId(1), original: original(22) }).ok, false);
+  assert.equal(backend.folder("Participant").files.length, 0);
+  const reserved = backend.usage();
+  assert.equal(reserved.length, 2);
+  backend.begin(1, 22);
+  assert.deepEqual(backend.usage(), reserved);
+  assert.equal(backend.folder("Participant").files.length, 1);
+});
+
+test("a failed quota reservation never proceeds to a Drive write", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(); backend.refresh();
+  backend.failures.sheetWrite = (sheet, values) => sheet.name === "Usage" && values.some((row) => row.includes("file"));
+  assert.equal(backend.api("begin", { submissionId: submissionId(1), original: original(22) }).ok, false);
+  assert.equal(backend.folder("Participant").files.length, 0);
+  assert.equal(backend.usage().length, 1, "the submission reservation remains conservative");
+  backend.begin(1, 22);
+  assert.equal(backend.folder("Participant").files.length, 1);
+  assert.equal(backend.usage().length, 2);
+});
+
+test("an unused reservation from yesterday must fit today's limit before creating its file", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(); backend.refresh();
+  const bytes = jpeg(22).length;
+  backend.properties.set("UPLOAD_BYTES_PER_DAY", String(bytes));
+  backend.failures.fileCreate = true;
+  const delayed = { submissionId: submissionId(1), original: original(22) };
+  assert.equal(backend.api("begin", delayed).ok, false);
+  backend.advance(86400000);
+  backend.begin(2, 23);
+  assert.equal(backend.api("begin", delayed).error.code, "DAILY_LIMIT_REACHED");
+  assert.equal(backend.folder("Participant").files.length, 1);
+  backend.properties.set("UPLOAD_BYTES_PER_DAY", String(bytes * 2));
+  backend.data("begin", delayed);
+  assert.equal(backend.folder("Participant").files.length, 2);
+  assert.equal(backend.usage().filter((row) => row[2] === "file").length, 2, "move the old reservation rather than add another charge");
+  assert.equal(backend.usage().filter((row) => row[1] === "2026-10-30").reduce((sum, row) => sum + row[3], 0), bytes * 2);
+});
+
+test("malformed limit settings or persisted request state fail closed", () => {
+  for (const [key, value] of [
+    ["REQUESTS_PER_MINUTE", "0"], ["SUBMISSIONS_PER_DAY", "-1"], ["UPLOAD_BYTES_PER_DAY", ""],
+    ["UPLOAD_BYTES_PER_DAY", "1.5"], ["REQUESTS_PER_MINUTE", "9007199254740992"], ["UPLOADS_PAUSED", "maybe"],
+    ["EXPOSURE_REQUEST_WINDOW", "bad json"], ["EXPOSURE_REQUEST_WINDOW", '{"minute":0,"count":-1}'],
+    ["EXPOSURE_REQUEST_WINDOW", '{"minute":9007199254740991,"count":0}']
+  ]) {
+    const backend = makeBackend(); backend.setup(); backend.seed(); backend.refresh();
+    backend.properties.set(key, value);
+    assert.equal(backend.api("begin", { submissionId: submissionId(1), original: original(22) }).error.code, "LIMIT_CONFIGURATION", `${key}=${value}`);
+    assert.equal(backend.folder("Participant").files.length, 0);
+    assert.equal(backend.lock.held, false);
+  }
+});
+
+test("malformed usage records cannot turn into a fresh daily allowance", () => {
+  for (const record of [
+    ["file:old", "2026-10-29", "file", -1], ["file:old", "2026-02-31", "file", 1],
+    ["file:old", "2026-10-30", "file", 1], ["submission:old", "2026-10-29", "submission", 1],
+    ["file:old", "2026-10-29", "file", "9"]
+  ]) {
+    const backend = makeBackend(); backend.setup(); backend.seed(); backend.refresh();
+    [...backend.books.values()][0].getSheetByName("Usage").rows.push(record);
+    assert.equal(backend.api("begin", { submissionId: submissionId(1), original: original(22) }).error.code, "LIMIT_CONFIGURATION");
+    assert.equal(backend.folder("Participant").files.length, 0);
+  }
+});
+
+test("older indexes gain a usage ledger without changing their sources or submissions", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(); backend.refresh();
+  const first = backend.begin(1, 22);
+  const book = [...backend.books.values()][0];
+  const before = clone(book.getSheetByName("Submissions").rows);
+  book.deleteSheet(book.getSheetByName("Usage"));
+  backend.data("bootstrap");
+  assert.deepEqual(book.getSheetByName("Submissions").rows, before);
+  assert.deepEqual(backend.begin(1, 22), first);
+  assert.equal(backend.usage().length, 0, "migration does not retroactively charge existing files");
 });
