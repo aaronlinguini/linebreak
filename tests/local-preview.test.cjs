@@ -176,7 +176,7 @@ test("the local test page keeps CSS and JavaScript external and loads no archive
     assert.ok(fs.existsSync(path.join(root, reference[1].split("?")[0])));
     return reference[1];
   });
-  assert.deepEqual(references, ["project-config.js", "scripts.js?v=result-rotation-v1", "film-renderer.js?v=smooth-revised-v1", "tone-adjustments.js?v=tone-curve-v1", "local-test.js?v=visible-tones-rotation-v1"]);
+  assert.deepEqual(references, ["project-config.js", "scripts.js?v=result-rotation-v1", "film-renderer.js?v=smooth-revised-v1", "tone-adjustments.js?v=tone-curve-v1", "local-test.js?v=live-tones-v1"]);
   assert.match(html, /<link\b[^>]*href="local-test\.css(?:\?[^"]*)?"/);
   const publicHtml = fs.readFileSync(path.join(root, "index.html"), "utf8");
   assert.doesNotMatch(publicHtml, /film-renderer\.js|local-test\.js|test-base-exposure/);
@@ -211,14 +211,31 @@ test("tone sliders remain visible, labelled, neutral and excluded from the publi
 });
 
 test("a failed local selection clears the previous result, reports the error, and allows another try", async () => {
+  class LocalImageData {
+    constructor(dataOrWidth, widthOrHeight, height) {
+      this.width = typeof dataOrWidth === "number" ? dataOrWidth : widthOrHeight;
+      this.height = typeof dataOrWidth === "number" ? widthOrHeight : height;
+      this.data = typeof dataOrWidth === "number" ? new Uint8ClampedArray(this.width * this.height * 4) : new Uint8ClampedArray(dataOrWidth);
+    }
+  }
+  const makeCanvas = (element = {}) => {
+    element.width = 4; element.height = 2;
+    let pixels = new LocalImageData(4, 2);
+    element.getContext = () => ({ getImageData: () => new LocalImageData(pixels.data, element.width, element.height), putImageData(image) { pixels = image; } });
+    element.toBlob = (callback) => callback(new Blob(["jpeg"]));
+    return element;
+  };
   const listeners = new Map();
   const elements = new Map();
   const html = fs.readFileSync(path.join(root, "local-test.html"), "utf8");
   for (const [, id] of html.matchAll(/\bid="([^"]+)"/g)) {
-    elements.set(id, {
+    elements.set(id, id.endsWith("canvas") ? makeCanvas({
       hidden: true, disabled: false, value: "", textContent: "", files: [],
       addEventListener(type, handler) { listeners.set(`${id}:${type}`, handler); },
       setAttribute() {}
+    }) : {
+      hidden: true, disabled: false, value: "", textContent: "", files: [],
+      addEventListener(type, handler) { listeners.set(`${id}:${type}`, handler); }, setAttribute() {}
     });
   }
   elements.get("test-renderer").value = "film";
@@ -230,8 +247,8 @@ test("a failed local selection clears the previous result, reports the error, an
   const released = [];
   let developments = 0;
   const sandbox = vm.createContext({
-    Error, Blob, Date,
-    document: { getElementById(id) { return elements.get(id); } },
+    Error, Blob, Date, Uint8ClampedArray, ImageData: LocalImageData, setTimeout, clearTimeout,
+    document: { getElementById(id) { return elements.get(id); }, createElement(tag) { assert.equal(tag, "canvas"); return makeCanvas(); } },
     window: { addEventListener() {} },
     URL: { createObjectURL() { return "blob:local-result"; }, revokeObjectURL(url) { revoked.push(url); } },
     PROJECT_SETTINGS: { baseExposure: 0, participantExposure: 0, contrast: 0, monochrome: false },
@@ -245,7 +262,7 @@ test("a failed local selection clears the previous result, reports the error, an
           return { name: file.name };
         },
         releasePhoto(photo) { if (photo) released.push(photo); },
-        async develop() { developments++; return { blob: {} }; }
+        async develop(base, participant, canvas) { developments++; canvas.width = 4; canvas.height = 2; return { blob: new Blob(["jpeg"]), width: 4, height: 2 }; }
       };
     }
   });

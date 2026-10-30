@@ -11,55 +11,75 @@ const source = fs.readFileSync(path.join(root, "local-test.js"), "utf8");
 const html = fs.readFileSync(path.join(root, "local-test.html"), "utf8");
 
 function harness() {
-  const elements = new Map();
-  const listeners = new Map();
-  for (const [, id] of html.matchAll(/\bid="([^"]+)"/g)) {
-    elements.set(id, {
-      hidden: true, disabled: false, value: "", checked: false, textContent: "", files: [],
-      addEventListener(type, handler) { listeners.set(`${id}:${type}`, handler); },
-      setAttribute() {}
+  const elements = new Map(), listeners = new Map(), timers = new Map();
+  const renders = [], processing = [], rotations = [], downloads = [];
+  const urls = new Map(), revoked = [], pageListeners = new Map(), encodings = [];
+  let nextUrl = 0, nextTimer = 0, nextGate, rotationGate, rotationError = null, holdEncoding = false;
+  class FakeImageData {
+    constructor(dataOrWidth, widthOrHeight, height) {
+      if (typeof dataOrWidth === "number") {
+        this.width = dataOrWidth; this.height = widthOrHeight;
+        this.data = new Uint8ClampedArray(this.width * this.height * 4);
+      } else {
+        this.width = widthOrHeight; this.height = height;
+        this.data = new Uint8ClampedArray(dataOrWidth);
+      }
+    }
+  }
+  function canvas(element = {}) {
+    let width = 1, height = 1, pixels = new Uint8ClampedArray(4);
+    Object.defineProperties(element, {
+      width: { get: () => width, set(value) { width = value; pixels = new Uint8ClampedArray(width * height * 4); } },
+      height: { get: () => height, set(value) { height = value; pixels = new Uint8ClampedArray(width * height * 4); } }
     });
-  }
-  const selectedTreatment = [...html.matchAll(/<option\b[^>]*>/g)]
-    .map(([tag]) => tag)
-    .find((tag) => /\bselected\b/.test(tag));
-  elements.get("test-renderer").value = selectedTreatment?.match(/\bvalue="([^"]+)"/)?.[1] ?? "";
-  elements.get("test-base-exposure").value = "0";
-  elements.get("test-participant-exposure").value = "0";
-  elements.get("test-contrast").value = html.match(/<input\b[^>]*id="test-contrast"[^>]*\bvalue="([^"]+)"/)?.[1] ?? "";
-  elements.get("test-balance").value = html.match(/<input\b[^>]*id="test-balance"[^>]*\bvalue="([^"]+)"/)?.[1] ?? "";
-  const toneKeys = ["shadows", "highlights", "mids", "whites", "blacks"];
-  for (const key of toneKeys) elements.get(`test-${key}`).value = "0";
-  const renders = [];
-  const processing = [];
-  const toneRequests = [];
-  const rotations = [];
-  let rotationError = null;
-  let rotationGate;
-  const mixers = [];
-  function makeMixer(renderer) {
-    const mix = (base, participant, output, start = 0, end = output.length) => {
-      processing.push({ kind: "mix", renderer, start, end });
-      output.fill(10, start, end);
+    const context = {
+      getImageData() { return new FakeImageData(pixels, width, height); },
+      putImageData(image) { pixels = new Uint8ClampedArray(image.data); },
+      drawImage(source) { pixels = source.getContext("2d").getImageData().data; }
     };
-    mixers.push(mix);
-    return mix;
+    element.getContext = () => context;
+    element.toBlob = (callback, type, quality) => {
+      const snapshot = { pixels: Array.from(pixels), width, height };
+      const blob = new Blob([JSON.stringify(snapshot)], { type });
+      const request = { snapshot, quality, callback: () => callback(blob) };
+      encodings.push(request);
+      if (!holdEncoding) request.callback();
+    };
+    return element;
   }
-  const downloads = [];
-  const urls = new Map();
-  const revoked = [];
-  const pageListeners = new Map();
-  let nextUrl = 0;
-  let nextGate;
+  for (const [, id] of html.matchAll(/\bid="([^"]+)"/g)) {
+    const element = {
+      hidden: true, disabled: false, value: "", checked: false, textContent: "", files: [],
+      addEventListener(type, handler) { listeners.set(`${id}:${type}`, handler); }, setAttribute() {}
+    };
+    elements.set(id, id.endsWith("canvas") ? canvas(element) : element);
+  }
+  const selected = [...html.matchAll(/<option\b[^>]*>/g)].map(([tag]) => tag).find((tag) => /\bselected\b/.test(tag));
+  elements.get("test-renderer").value = selected?.match(/\bvalue="([^"]+)"/)?.[1] ?? "";
+  for (const id of ["test-base-exposure", "test-participant-exposure", "test-contrast", "test-balance", ...["shadows","highlights","mids","whites","blacks"].map((key) => `test-${key}`)]) {
+    elements.get(id).value = html.match(new RegExp(`<input\\b[^>]*id="${id}"[^>]*\\bvalue="([^"]+)"`))?.[1] ?? "0";
+  }
+  const gradient = Array.from({ length: 24 }, (_, index) => {
+    const byte = [0,12,32,56,96,128,160,200,224,242,252,255][index % 12];
+    return [byte,byte,byte,255];
+  }).flat();
+  function makeMixer(renderer) {
+    return (base, participant, output, start = 0, end = output.length) => {
+      processing.push({ renderer, start, end });
+      output.set(gradient.slice(start, end), start);
+    };
+  }
   const sandbox = vm.createContext({
-    Error, Blob, Date,
+    Error, Blob, Date, Uint8ClampedArray, ImageData: FakeImageData,
+    setTimeout(callback) { const id = ++nextTimer; timers.set(id, callback); return id; },
+    clearTimeout(id) { timers.delete(id); },
     document: {
       getElementById(id) { return elements.get(id); },
       createElement(tag) {
+        if (tag === "canvas") return canvas();
         assert.equal(tag, "a");
         return { click() { downloads.push({ href: this.href, filename: this.download }); }, remove() {} };
-      },
-      body: { append() {} }
+      }, body: { append() {} }
     },
     window: { addEventListener(type, handler) { pageListeners.set(type, handler); } },
     URL: {
@@ -72,77 +92,69 @@ function harness() {
       smoothVersion: "smooth-exposure-v1", smoothParameters: { exposurePower: 2, whiteAnchor: 0.98 },
       revisedVersion: "smooth-revised-v1", revisedParameters: { overlapPivot: 0.23, retentionPower: 3.5, maximumColourPower: 7 },
       createRevisedMixer() { return makeMixer("revised"); },
-      createSmoothMixer() { return makeMixer("smooth"); },
-      createMixer() { return makeMixer("film"); }
+      createSmoothMixer() { return makeMixer("smooth"); }, createMixer() { return makeMixer("film"); }
     },
     ExposureMath: {
-      balancedVersion: "overlap-suppression-v2",
-      balancedParameters: { maximumPower: 4 },
-      createMixer() { return makeMixer("linear"); },
-      createBalancedMixer() { return makeMixer("balanced"); }
+      balancedVersion: "overlap-suppression-v2", balancedParameters: { maximumPower: 4 },
+      createMixer() { return makeMixer("linear"); }, createBalancedMixer() { return makeMixer("balanced"); }
     },
-    ToneAdjustments: {
-      version: "tone-curve-v1",
-      createMapper(tones) {
-        toneRequests.push(tones ? JSON.parse(JSON.stringify(tones)) : null);
-        if (!tones || Object.values(tones).every((value) => value === 0)) return null;
-        const snapshot = JSON.parse(JSON.stringify(tones));
-        return (output, start, end) => {
-          assert.equal(output[start], 10, "tone adjustments must follow the selected mixer");
-          processing.push({ kind: "tone", tones: snapshot, start, end });
-          output.fill(11, start, end);
-        };
-      }
-    },
-    async rotateExposureCanvas(canvas, quarterTurns = 1) {
-      rotations.push({ canvas, quarterTurns });
+    async rotateExposureCanvas(target, quarterTurns = 1) {
+      rotations.push({ canvas: target, quarterTurns });
       const gate = rotationGate; rotationGate = null;
       if (gate) await gate;
       if (rotationError) throw rotationError;
-      if (quarterTurns % 2) [canvas.width, canvas.height] = [canvas.height, canvas.width];
-      return { blob: new Blob([`rotated-${quarterTurns}`]), width: canvas.width, height: canvas.height };
+      let image = target.getContext("2d").getImageData();
+      for (let turn = 0; turn < quarterTurns % 4; turn++) {
+        const rotated = new FakeImageData(image.height, image.width);
+        for (let y = 0; y < image.height; y++) for (let x = 0; x < image.width; x++) {
+          const sourceIndex = (y * image.width + x) * 4;
+          const destination = (x * image.height + image.height - 1 - y) * 4;
+          rotated.data.set(image.data.slice(sourceIndex, sourceIndex + 4), destination);
+        }
+        image = rotated;
+      }
+      target.width = image.width; target.height = image.height;
+      target.getContext("2d").putImageData(image);
+      const blob = new Blob([JSON.stringify({ pixels: Array.from(image.data), width: image.width, height: image.height })], { type: "image/jpeg" });
+      return { blob, width: image.width, height: image.height };
     },
     createExposureProcessor({ mixerFactory }) {
       return {
         async loadPhoto(file) {
           if (file.invalid) throw new Error("Unreadable photo.");
           return { name: file.name, width: 600, height: 400, originalWidth: 400, originalHeight: 600 };
-        },
-        releasePhoto() {},
-        async develop(base, participant, canvas, settings) {
-          const mixer = mixerFactory(settings);
-          const neutral = !settings.tones || Object.values(settings.tones).every((value) => value === 0);
-          if (neutral) assert.equal(mixer, mixers.at(-1), "neutral tones must bypass the postprocessing wrapper");
-          const output = new Uint8ClampedArray(12);
-          mixer(new Uint8ClampedArray(12), new Uint8ClampedArray(12), output, 4, 8);
-          assert.equal(processing.filter(({ kind }) => kind === "mix").at(-1).renderer, settings.renderer);
-          assert.deepEqual(Array.from(output.slice(0, 4)), [0,0,0,0]);
-          assert.deepEqual(Array.from(output.slice(8)), [0,0,0,0]);
+        }, releasePhoto() {},
+        async develop(base, participant, target, settings) {
+          const output = new Uint8ClampedArray(gradient.length);
+          mixerFactory(settings)(output, output, output, 0, output.length);
+          assert.equal(processing.at(-1).renderer, settings.renderer);
           renders.push(JSON.parse(JSON.stringify(settings)));
-          const gate = nextGate;
-          nextGate = null;
+          const gate = nextGate; nextGate = null;
           if (gate) await gate;
-          canvas.width = 600; canvas.height = 400;
-          return { blob: new Blob(["jpeg"]), width: 600, height: 400 };
+          target.width = 6; target.height = 4;
+          target.getContext("2d").putImageData(new FakeImageData(output, 6, 4));
+          return { blob: new Blob([JSON.stringify({ pixels: Array.from(output), width: 6, height: 4 })], { type: "image/jpeg" }), width: 6, height: 4 };
         }
       };
     }
   });
+  vm.runInContext(fs.readFileSync(path.join(root, "tone-adjustments.js"), "utf8"), sandbox);
   vm.runInContext(source, sandbox);
   async function fire(id, type = "change") { return listeners.get(`${id}:${type}`)(); }
-  async function select(id, name) {
-    elements.get(id).files = [{ name, type: "image/jpeg", size: 100 }];
-    return fire(id);
-  }
-  async function pair() {
-    await select("test-base", "base.jpg");
-    await select("test-participant", "second.jpg");
-  }
+  async function select(id, name) { elements.get(id).files = [{ name, type: "image/jpeg", size: 100 }]; return fire(id); }
+  async function pair() { await select("test-base", "base.jpg"); await select("test-participant", "second.jpg"); }
   async function recipe() {
+    assert.equal(elements.get("test-settings-download").disabled, false, "only completed exports may be downloaded");
     await fire("test-settings-download", "click");
     return JSON.parse(await urls.get(downloads.at(-1).href).text());
   }
-  return { elements, renders, processing, toneRequests, rotations, downloads, urls, revoked, fire, select, pair, recipe, pageListeners, blockNext(gate) { nextGate = gate; }, blockRotation(gate) { rotationGate = gate; }, failRotation(error) { rotationError = error; } };
+  const pixels = () => Array.from(elements.get("test-canvas").getContext("2d").getImageData().data);
+  async function flushTimers() { for (const [id, callback] of [...timers]) { timers.delete(id); callback(); } await new Promise(setImmediate); }
+  return { elements, renders, processing, rotations, downloads, urls, revoked, fire, select, pair, recipe, pixels, pageListeners, gradient, encodings, flushTimers,
+    holdEncoding(value = true) { holdEncoding = value; }, releaseEncoding(index) { encodings[index].callback(); },
+    async settle() { await new Promise(setImmediate); },
+    blockNext(gate) { nextGate = gate; }, blockRotation(gate) { rotationGate = gate; }, failRotation(error) { rotationError = error; }
+  };
 }
 
 test("trial settings affect only the trial, and downloads identify the completed treatment", async () => {
@@ -271,81 +283,166 @@ test("neutral tone controls preserve the original mixer and leave the reference 
   const zero = { shadows: 0, highlights: 0, mids: 0, whites: 0, blacks: 0 };
   assert.equal(h.renders[0].tones, undefined);
   assert.deepEqual(h.renders[1].tones, zero);
-  assert.equal(h.processing.filter(({ kind }) => kind === "tone").length, 0);
+  assert.deepEqual(h.pixels(), h.gradient, "neutral finishing must preserve every original output byte");
   const recipe = await h.recipe();
   assert.equal(recipe.reference.settings.tones, undefined);
   assert.equal(recipe.reference.postProcessing, undefined);
   assert.deepEqual(recipe.trial.postProcessing, { version: "tone-curve-v1", tones: zero });
 });
 
-test("tone readouts wait for commit and postprocessing runs after each selected mixer on the same chunk", async () => {
+test("every tone slider repaints real pixels on input without recomposing or accumulating changes", async () => {
+  const h = harness();
+  assert.equal(h.elements.get("test-mids").disabled, true);
+  await h.pair();
+  const neutral = h.pixels();
+  for (const key of ["shadows", "highlights", "mids", "whites", "blacks"]) {
+    h.elements.get(`test-${key}`).value = "70";
+    await h.fire(`test-${key}`, "input");
+    assert.notDeepEqual(h.pixels(), neutral, `${key} input must immediately change visible pixels`);
+    const once = h.pixels();
+    await h.fire(`test-${key}`, "input");
+    assert.deepEqual(h.pixels(), once, "repeated input must start from the neutral cache");
+    assert.equal(h.elements.get(`test-${key}-value`).textContent, "+70");
+    assert.equal(h.elements.get(`test-${key}`).disabled, false);
+    assert.equal(h.elements.get("test-download").disabled, true);
+    assert.equal(h.elements.get("test-settings-download").disabled, true);
+    assert.equal(h.elements.get("test-rotate").disabled, true);
+    await h.fire(`test-${key}`);
+    assert.equal((await h.recipe()).trial.settings.tones[key], 70);
+    assert.equal(h.renders.length, 2, "finishing controls must not rerun either exposure");
+    await h.fire("test-tones-reset", "click");
+    assert.deepEqual(h.pixels(), neutral, "neutral reset must restore exact cached pixels");
+    assert.equal(h.renders.length, 2);
+  }
+});
+
+test("live tone finishing remains separate from every selected exposure mixer", async () => {
   const h = harness();
   await h.pair();
-  const title = h.elements.get("trial-title").textContent;
-  h.elements.get("test-shadows").value = "30";
-  await h.fire("test-shadows", "input");
-  assert.equal(h.elements.get("test-shadows-value").textContent, "+30");
-  assert.equal(h.elements.get("trial-title").textContent, title);
-  assert.equal(h.renders.length, 2);
-  assert.equal((await h.recipe()).trial.settings.tones.shadows, 0);
   for (const renderer of ["balanced", "linear", "revised", "smooth", "film"]) {
     h.elements.get("test-renderer").value = renderer;
     await h.fire("test-renderer");
-    const [mix, tones] = h.processing.slice(-2);
-    assert.deepEqual(mix, { kind: "mix", renderer, start: 4, end: 8 });
-    assert.equal(tones.kind, "tone");
-    assert.equal(tones.start, mix.start);
-    assert.equal(tones.end, mix.end);
-    assert.equal(tones.tones.shadows, 30);
+    const renders = h.renders.length;
+    h.elements.get("test-mids").value = "50";
+    await h.fire("test-mids");
     const recipe = await h.recipe();
-    assert.equal(recipe.trial.postProcessing.tones.shadows, 30);
+    assert.equal(recipe.trial.renderer, renderer);
+    assert.equal(recipe.trial.postProcessing.tones.mids, 50);
     assert.equal(recipe.reference.postProcessing, undefined);
+    assert.equal(h.renders.length, renders);
+    await h.fire("test-tones-reset", "click");
   }
-  assert.equal(h.renders.filter(({ tones }) => !tones).length, 1, "tone changes must not regenerate the reference");
 });
 
-test("reset tones clears only the five finishing controls and preserves the selected blend", async () => {
+test("reset tones restores the original pixels and JPEG while preserving blend and orientation", async () => {
   const h = harness();
   await h.pair();
   h.elements.get("test-balance").value = "35";
   h.elements.get("test-contrast").value = "18";
   h.elements.get("test-base-exposure").value = "-0.5";
   h.elements.get("test-participant-exposure").value = "0.5";
-  for (const [key, value] of Object.entries({ shadows: 30, highlights: -20, mids: 10, whites: -15, blacks: 5 })) {
-    h.elements.get(`test-${key}`).value = String(value);
-  }
-  await h.fire("test-shadows");
-  const { tones: beforeTones, ...beforeBlend } = h.renders.at(-1);
-  const rendersBeforeReset = h.renders.length;
-  await h.fire("test-tones-reset", "click");
-  const { tones, ...afterBlend } = h.renders.at(-1);
-  assert.deepEqual(afterBlend, beforeBlend);
-  assert.deepEqual(tones, { shadows: 0, highlights: 0, mids: 0, whites: 0, blacks: 0 });
-  assert.equal(h.renders.length, rendersBeforeReset + 1);
-  for (const key of Object.keys(tones)) assert.equal(h.elements.get(`test-${key}-value`).textContent, "0");
-});
-
-test("tone settings remain attached to their rendered image while a render is in flight", async () => {
-  const h = harness();
-  await h.pair();
-  let resume;
-  h.blockNext(new Promise((resolve) => { resume = resolve; }));
-  h.elements.get("test-shadows").value = "30";
-  const pending = h.fire("test-shadows");
-  for (const key of ["shadows", "highlights", "mids", "whites", "blacks"]) {
-    assert.equal(h.elements.get(`test-${key}`).disabled, true);
-  }
-  assert.equal(h.elements.get("test-tones-reset").disabled, true);
+  await h.fire("test-base-exposure");
+  await h.fire("test-rotate", "click");
+  const before = await h.recipe(), neutral = h.pixels();
+  await h.fire("test-download", "click");
+  const neutralBlob = h.urls.get(h.downloads.at(-1).href);
   h.elements.get("test-shadows").value = "70";
   await h.fire("test-shadows");
-  assert.equal(h.renders.length, 3);
-  resume();
+  const rendersBeforeReset = h.renders.length;
+  await h.fire("test-tones-reset", "click");
+  const after = await h.recipe();
+  assert.deepEqual(after.trial.settings, before.trial.settings);
+  assert.equal(after.trial.rotationDegrees, 90);
+  assert.deepEqual(h.pixels(), neutral);
+  assert.equal(h.renders.length, rendersBeforeReset);
+  await h.fire("test-download", "click");
+  assert.equal(h.urls.get(h.downloads.at(-1).href), neutralBlob, "neutral export should reuse the original JPEG bytes");
+  for (const key of ["shadows", "highlights", "mids", "whites", "blacks"]) assert.equal(h.elements.get(`test-${key}-value`).textContent, "0");
+});
+
+test("debounced tone exports ignore stale JPEG callbacks and keep downloads aligned with visible pixels", async () => {
+  const h = harness();
+  await h.pair();
+  h.holdEncoding();
+  h.elements.get("test-mids").value = "20";
+  const first = h.fire("test-mids");
+  const firstEncoding = h.encodings.length - 1;
+  h.elements.get("test-mids").value = "80";
+  await h.fire("test-mids", "input");
+  assert.equal(h.elements.get("test-mids").disabled, false);
+  assert.equal(h.elements.get("test-download").disabled, true);
+  const visible = h.pixels();
+  await h.flushTimers();
+  const latestEncoding = h.encodings.length - 1;
+  assert.ok(latestEncoding > firstEncoding);
+  h.releaseEncoding(latestEncoding);
+  await h.settle();
+  const latest = await h.recipe();
+  assert.equal(latest.trial.settings.tones.mids, 80);
+  assert.equal(latest.trial.postProcessing.tones.mids, 80);
+  await h.fire("test-download", "click");
+  const latestUrl = h.downloads.at(-1).href;
+  assert.deepEqual(JSON.parse(await h.urls.get(latestUrl).text()).pixels, visible);
+  h.releaseEncoding(firstEncoding);
+  await first;
+  const afterStale = await h.recipe();
+  assert.deepEqual(afterStale.trial, latest.trial);
+  await h.fire("test-download", "click");
+  assert.equal(h.downloads.at(-1).href, latestUrl);
+  assert.equal(h.renders.length, 2);
+});
+
+test("replacing a photo invalidates a pending tone export and the previous neutral cache", async () => {
+  const h = harness();
+  await h.pair();
+  h.holdEncoding();
+  h.elements.get("test-mids").value = "40";
+  const oldExport = h.fire("test-mids");
+  const oldEncoding = h.encodings.length - 1;
+  h.holdEncoding(false);
+  await h.select("test-participant", "replacement.jpg");
+  const replacement = await h.recipe();
+  assert.equal(replacement.sources.participant.name, "replacement.jpg");
+  const pixels = h.pixels();
+  h.releaseEncoding(oldEncoding);
+  await oldExport;
+  assert.deepEqual((await h.recipe()).trial, replacement.trial);
+  assert.equal((await h.recipe()).sources.participant.name, "replacement.jpg");
+  assert.deepEqual(h.pixels(), pixels);
+});
+
+test("leaving during a tone export cannot restore a stale preview or download", async () => {
+  const h = harness();
+  await h.pair();
+  h.holdEncoding();
+  h.elements.get("test-mids").value = "40";
+  const pending = h.fire("test-mids");
+  const encoding = h.encodings.length - 1;
+  h.pageListeners.get("pagehide")({ persisted: false });
+  const revoked = h.revoked.length;
+  h.releaseEncoding(encoding);
   await pending;
-  const recipe = await h.recipe();
-  assert.equal(recipe.trial.settings.tones.shadows, 30);
-  assert.equal(recipe.trial.postProcessing.tones.shadows, 30);
-  assert.equal(h.elements.get("test-shadows").disabled, false);
-  assert.equal(h.elements.get("test-tones-reset").disabled, false);
+  assert.equal(h.elements.get("test-canvas").hidden, true);
+  assert.equal(h.elements.get("test-download").hidden, true);
+  assert.equal(h.elements.get("test-settings-download").hidden, true);
+  assert.equal(h.revoked.length, revoked);
+});
+
+test("rotating adjusted output rebuilds the neutral cache before subsequent live tone edits", async () => {
+  const h = harness();
+  await h.pair();
+  h.elements.get("test-mids").value = "60";
+  await h.fire("test-mids");
+  await h.fire("test-rotate", "click");
+  const adjusted = h.pixels();
+  assert.equal((await h.recipe()).trial.rotationDegrees, 90);
+  h.elements.get("test-mids").value = "60";
+  await h.fire("test-mids", "input");
+  assert.deepEqual(h.pixels(), adjusted, "rotation must not bake existing tones into the new neutral cache");
+  await h.fire("test-tones-reset", "click");
+  assert.notDeepEqual(h.pixels(), adjusted);
+  assert.equal((await h.recipe()).trial.rotationDegrees, 90);
+  assert.equal(h.renders.length, 2);
 });
 
 test("moving a slider updates its readout without relabelling or replacing the completed image", async () => {
@@ -522,11 +619,11 @@ test("rotation updates the trial preview, download and recipe without recomposin
   await h.fire("test-rotate", "click");
   assert.equal(h.renders.length, 2, "rotation must not recompute either exposure");
   assert.equal(h.rotations.length, 1);
-  assert.equal(h.rotations[0].canvas, h.elements.get("test-canvas"));
+  assert.notEqual(h.rotations[0].canvas, h.elements.get("test-canvas"), "rotation should prepare offscreen before committing the preview");
   const after = await h.recipe();
   assert.equal(after.trial.rotationDegrees, 90);
-  assert.equal(after.trial.width, 400);
-  assert.equal(after.trial.height, 600);
+  assert.equal(after.trial.width, 4);
+  assert.equal(after.trial.height, 6);
   assert.deepEqual(after.trial.settings, before.trial.settings);
   assert.deepEqual(after.reference, before.reference);
   await h.fire("test-download", "click");
@@ -535,8 +632,8 @@ test("rotation updates the trial preview, download and recipe without recomposin
   for (let turn = 0; turn < 3; turn++) await h.fire("test-rotate", "click");
   const restored = await h.recipe();
   assert.equal(restored.trial.rotationDegrees, 0);
-  assert.equal(restored.trial.width, 600);
-  assert.equal(restored.trial.height, 400);
+  assert.equal(restored.trial.width, 6);
+  assert.equal(restored.trial.height, 4);
   assert.equal(h.renders.length, 2);
 });
 

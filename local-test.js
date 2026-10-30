@@ -34,20 +34,15 @@ function initializeLocalExposureTest() {
         film: FilmExposureMath.createMixer,
         linear: ExposureMath.createMixer
       };
-      const mix = (factories[settings.renderer] || ExposureMath.createMixer)(settings);
-      const adjustTones = settings.tones ? ToneAdjustments.createMapper(settings.tones) : null;
-      // Neutral controls return the original mixer, with no extra pixel pass.
-      if (!adjustTones) return mix;
-      return (base, participant, output, start = 0, end = base.length) => {
-        mix(base, participant, output, start, end);
-        adjustTones(output, start, end);
-      };
+      return (factories[settings.renderer] || ExposureMath.createMixer)(settings);
     }
   });
   const state = {
     base: null, participant: null, working: false, disposed: false,
     resultUrl: null, referenceUrl: null, settingsUrl: null,
-    referenceRecord: null, completed: null, rotationQuarterTurns: 0
+    referenceRecord: null, completed: null, rotationQuarterTurns: 0,
+    neutralPixels: null, neutralBlob: null, neutralSettings: null,
+    exportPending: false, exportRevision: 0, exportTimer: null
   };
   const controls = [ui.base, ui.participant, ui.baseCamera, ui.participantCamera, ui.renderer, ui.baseExposure, ui.participantExposure, ui.contrast, ui.balance, ui.monochrome, ui.reset, ui.tonesReset, ui.rotate, ...toneInputs];
   ui.monochrome.checked = PROJECT_SETTINGS.monochrome;
@@ -69,6 +64,8 @@ function initializeLocalExposureTest() {
     ui.contrast.disabled = state.working || ui.contrastControl.hidden;
     ui.balanceControl.hidden = ui.renderer.value !== "balanced";
     ui.balance.disabled = state.working || ui.balanceControl.hidden;
+    for (const input of toneInputs) input.disabled = state.working || !state.neutralPixels;
+    ui.tonesReset.disabled = state.working || !state.neutralPixels;
   }
   function updateTrialTitle(settings = { renderer: ui.renderer.value, baseExposure: Number(ui.baseExposure.value), participantExposure: Number(ui.participantExposure.value), contrast: Number(ui.contrast.value), balanceStrength: Number(ui.balance.value), tones: readTones() }, rotationDegrees = state.rotationQuarterTurns * 90) {
     const names = { balanced: "reduced overlap", revised: "revised smooth", smooth: "saved smooth exposure", film: "earlier film curve", linear: "current addition" };
@@ -91,17 +88,20 @@ function initializeLocalExposureTest() {
   function updateDownloads() {
     for (const [button, url] of [[ui.download, state.resultUrl], [ui.referenceDownload, state.referenceUrl], [ui.settingsDownload, state.settingsUrl]]) {
       button.hidden = !url;
-      button.disabled = state.working || !url;
+      button.disabled = state.working || !url || (button !== ui.referenceDownload && state.exportPending);
     }
     ui.rotate.hidden = !state.resultUrl;
-    ui.rotate.disabled = state.working || !state.resultUrl;
+    ui.rotate.disabled = state.working || state.exportPending || !state.resultUrl;
   }
-  function refreshSettingsDownload() {
-    const nextUrl = URL.createObjectURL(new Blob([JSON.stringify(state.completed, null, 2)], { type: "application/json" }));
-    releaseUrl("settingsUrl");
-    state.settingsUrl = nextUrl;
+  function invalidateToneExport() {
+    if (state.exportTimer !== null) clearTimeout(state.exportTimer);
+    state.exportTimer = null;
+    state.exportRevision++;
+    state.exportPending = false;
   }
   function clearResults(includeReference = true) {
+    invalidateToneExport();
+    state.neutralPixels = state.neutralBlob = state.neutralSettings = null;
     releaseUrl("resultUrl");
     releaseUrl("settingsUrl");
     state.completed = null;
@@ -116,6 +116,7 @@ function initializeLocalExposureTest() {
       ui.referenceEmpty.hidden = false;
     }
     updateDownloads();
+    updateTreatmentControls();
   }
   function setWorking(value) {
     state.working = value;
@@ -167,6 +168,90 @@ function initializeLocalExposureTest() {
       format: "image/jpeg", quality: 0.95
     };
   }
+  function recipeFor(settings, pixels, rotationQuarterTurns = state.rotationQuarterTurns) {
+    return {
+      schemaVersion: 1,
+      generatedAt: new Date().toISOString(),
+      sources: { base: state.base.sourceRecord, participant: state.participant.sourceRecord },
+      preparation: { portraitRotation: "90-degrees-clockwise", fit: "contain-with-black-padding", maxEdge: 2400 },
+      reference: state.referenceRecord,
+      trial: renderRecord(settings, pixels, rotationQuarterTurns)
+    };
+  }
+  function tonePixels(tones, neutralPixels = state.neutralPixels) {
+    const adjust = ToneAdjustments.createMapper(tones);
+    if (!adjust) return { pixels: neutralPixels, neutral: true };
+    const pixels = new ImageData(new Uint8ClampedArray(neutralPixels.data), neutralPixels.width, neutralPixels.height);
+    adjust(pixels.data);
+    return { pixels, neutral: false };
+  }
+  async function canvasBlob(canvas) {
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.95));
+    if (!blob) throw new Error("The image download could not be prepared. Please retry.");
+    return blob;
+  }
+  function saveDownload(blob, recipe) {
+    const nextResultUrl = URL.createObjectURL(blob);
+    let nextSettingsUrl;
+    try {
+      nextSettingsUrl = URL.createObjectURL(new Blob([JSON.stringify(recipe, null, 2)], { type: "application/json" }));
+    } catch (error) {
+      URL.revokeObjectURL(nextResultUrl);
+      throw error;
+    }
+    releaseUrl("resultUrl");
+    releaseUrl("settingsUrl");
+    state.resultUrl = nextResultUrl;
+    state.settingsUrl = nextSettingsUrl;
+    state.completed = recipe;
+    state.exportPending = false;
+    updateDownloads();
+  }
+  async function exportTonePreview(revision, neutral, recipe) {
+    if (state.disposed || revision !== state.exportRevision) return;
+    try {
+      const blob = neutral ? state.neutralBlob : await canvasBlob(ui.canvas);
+      if (state.disposed || revision !== state.exportRevision) return;
+      saveDownload(blob, recipe);
+      ui.status.textContent = "Ready. Compare the images or adjust the trial.";
+    } catch (error) {
+      if (state.disposed || revision !== state.exportRevision) return;
+      ui.error.textContent = error instanceof Error ? error.message : "The image download could not be prepared.";
+      ui.error.hidden = false;
+      // Keep the painted preview, but never offer an older download as current.
+      state.exportPending = true;
+      updateDownloads();
+      ui.status.textContent = "Preview updated. Adjust a tone or reset tones to retry preparing its download.";
+    }
+  }
+  function showTonePreview(tones, immediate = false) {
+    if (state.exportTimer !== null) clearTimeout(state.exportTimer);
+    state.exportTimer = null;
+    const revision = ++state.exportRevision;
+    const { pixels, neutral } = tonePixels(tones);
+    ui.canvas.getContext("2d").putImageData(pixels, 0, 0);
+    const settings = { ...state.neutralSettings, tones: { ...tones } };
+    const recipe = recipeFor(settings, pixels);
+    state.completed = recipe;
+    state.exportPending = true;
+    ui.canvas.hidden = false;
+    ui.empty.hidden = true;
+    updateTrialTitle(settings);
+    updateDownloads();
+    ui.status.textContent = "Preview updated. Preparing download…";
+    if (immediate || neutral) return exportTonePreview(revision, neutral, recipe);
+    state.exportTimer = setTimeout(() => {
+      state.exportTimer = null;
+      void exportTonePreview(revision, neutral, recipe);
+    }, 120);
+    return Promise.resolve();
+  }
+  function changeTones(immediate = false) {
+    updateReadouts();
+    if (state.working || state.disposed || !state.neutralPixels) return;
+    clearError();
+    return showTonePreview(readTones(), immediate);
+  }
   async function renderResults(includeReference) {
     // Capture all controls before awaiting; the recipe belongs to these outputs.
     const referenceSettings = settingsFor("linear", 0, 0, 12);
@@ -192,20 +277,10 @@ function initializeLocalExposureTest() {
     if (state.disposed) return;
     if (rotationQuarterTurns) trial = await rotateExposureCanvas(ui.canvas, rotationQuarterTurns);
     if (state.disposed) return;
-    state.resultUrl = URL.createObjectURL(trial.blob);
-    state.completed = {
-      schemaVersion: 1,
-      generatedAt: new Date().toISOString(),
-      sources: { base: state.base.sourceRecord, participant: state.participant.sourceRecord },
-      preparation: { portraitRotation: "90-degrees-clockwise", fit: "contain-with-black-padding", maxEdge: 2400 },
-      reference: state.referenceRecord,
-      trial: renderRecord(trialSettings, trial, rotationQuarterTurns)
-    };
-    refreshSettingsDownload();
-    updateTrialTitle(trialSettings, rotationQuarterTurns * 90);
-    ui.canvas.hidden = false;
-    ui.empty.hidden = true;
-    ui.status.textContent = "Ready. Compare the images or adjust the trial.";
+    state.neutralPixels = ui.canvas.getContext("2d").getImageData(0, 0, trial.width, trial.height);
+    state.neutralBlob = trial.blob;
+    state.neutralSettings = { ...trialSettings };
+    await showTonePreview(trialSettings.tones, true);
   }
   async function choosePhoto(key, input) {
     const file = input.files?.[0];
@@ -270,36 +345,52 @@ function initializeLocalExposureTest() {
   ui.participant.addEventListener("change", () => choosePhoto("participant", ui.participant));
   ui.baseCamera.addEventListener("change", () => choosePhoto("base", ui.baseCamera));
   ui.participantCamera.addEventListener("change", () => choosePhoto("participant", ui.participantCamera));
-  for (const slider of [ui.baseExposure, ui.participantExposure, ui.contrast, ui.balance, ...toneInputs]) {
+  for (const slider of [ui.baseExposure, ui.participantExposure, ui.contrast, ui.balance]) {
     slider.addEventListener("input", updateReadouts);
     slider.addEventListener("change", () => changeSettings());
+  }
+  for (const input of toneInputs) {
+    input.addEventListener("input", () => changeTones());
+    input.addEventListener("change", () => changeTones(true));
   }
   ui.renderer.addEventListener("change", () => changeSettings());
   ui.monochrome.addEventListener("change", () => changeSettings(true));
   ui.tonesReset.addEventListener("click", () => {
-    if (state.working) return;
+    if (state.working || !state.neutralPixels) return;
     for (const { input } of toneControls) input.value = "0";
-    return changeSettings();
+    return changeTones(true);
   });
   ui.rotate.addEventListener("click", async () => {
-    if (!state.completed || state.working || state.disposed) return;
+    if (!state.completed || state.working || state.exportPending || state.disposed || !state.neutralPixels) return;
     clearError();
     setWorking(true);
     ui.status.textContent = "Rotating…";
+    const prepared = document.createElement("canvas");
     try {
-      const result = await rotateExposureCanvas(ui.canvas);
+      prepared.width = state.neutralPixels.width;
+      prepared.height = state.neutralPixels.height;
+      const preparedContext = prepared.getContext("2d");
+      preparedContext.putImageData(state.neutralPixels, 0, 0);
+      const result = await rotateExposureCanvas(prepared);
       if (state.disposed) return;
-      const nextUrl = URL.createObjectURL(result.blob);
-      releaseUrl("resultUrl");
-      state.resultUrl = nextUrl;
-      state.rotationQuarterTurns = (state.rotationQuarterTurns + 1) % 4;
-      state.completed = {
-        ...state.completed,
-        generatedAt: new Date().toISOString(),
-        trial: { ...state.completed.trial, width: result.width, height: result.height, rotationDegrees: state.rotationQuarterTurns * 90 }
-      };
-      refreshSettingsDownload();
-      updateTrialTitle(state.completed.trial.settings);
+      const neutralPixels = preparedContext.getImageData(0, 0, result.width, result.height);
+      const settings = state.completed.trial.settings;
+      const { pixels, neutral } = tonePixels(settings.tones, neutralPixels);
+      preparedContext.putImageData(pixels, 0, 0);
+      const blob = neutral ? result.blob : await canvasBlob(prepared);
+      if (state.disposed) return;
+      const rotationQuarterTurns = (state.rotationQuarterTurns + 1) % 4;
+      const recipe = recipeFor(settings, pixels, rotationQuarterTurns);
+      // Prepare the complete export before changing the preview or its cache.
+      saveDownload(blob, recipe);
+      invalidateToneExport();
+      state.neutralPixels = neutralPixels;
+      state.neutralBlob = result.blob;
+      state.rotationQuarterTurns = rotationQuarterTurns;
+      ui.canvas.width = pixels.width;
+      ui.canvas.height = pixels.height;
+      ui.canvas.getContext("2d").putImageData(pixels, 0, 0);
+      updateTrialTitle(settings);
       ui.status.textContent = "Trial rotated. Downloads use this orientation.";
     } catch (error) {
       if (!state.disposed) {
@@ -307,7 +398,10 @@ function initializeLocalExposureTest() {
         ui.error.hidden = false;
         ui.status.textContent = "Your previous result is still available. Try rotating again.";
       }
-    } finally { setWorking(false); }
+    } finally {
+      prepared.width = prepared.height = 1;
+      setWorking(false);
+    }
   });
   ui.reset.addEventListener("click", () => {
     if (state.working) return;
@@ -320,13 +414,13 @@ function initializeLocalExposureTest() {
     return changeSettings();
   });
   ui.download.addEventListener("click", () => {
-    if (state.completed) download(state.resultUrl, resultFilename(state.completed.trial));
+    if (state.completed && !state.exportPending) download(state.resultUrl, resultFilename(state.completed.trial));
   });
   ui.referenceDownload.addEventListener("click", () => {
     if (state.completed) download(state.referenceUrl, resultFilename(state.completed.reference));
   });
   ui.settingsDownload.addEventListener("click", () => {
-    if (state.completed) download(state.settingsUrl, `double-exposure-comparison-${state.completed.generatedAt.replace(/\D/g, "")}-settings.json`);
+    if (state.completed && !state.exportPending) download(state.settingsUrl, `double-exposure-comparison-${state.completed.generatedAt.replace(/\D/g, "")}-settings.json`);
   });
   window.addEventListener("pagehide", (event) => {
     if (event.persisted) return;

@@ -71,13 +71,13 @@ Positive values brighten a range and negative values darken it. A smooth, monoto
 
 The finishing stage measures weighted brightness from the encoded sRGB output, not linear scene luminance. Colour follows one shared movement toward black or white, keeping neutral grays neutral and channels within range; brightening can reduce saturation. This is separate from the Reduced overlap mixer's RGB-first monochrome conversion.
 
-**Reset tones** returns only the five tone controls to zero and preserves treatment, Haze reduction, EV, contrast, and colour choices. **Reset trial** restores the approved starting treatment at Haze reduction 20%, contrast 12, 0/0 EV, and zero tones, while preserving the colour checkbox. The controls work with all local treatments. A slider updates its readout while moving; releasing it generates the trial. The settings download records `settings.tones` and a separate `postProcessing` entry with version `tone-curve-v1` and the five values from the completed render. The reference has no tone settings or postprocessing entry.
+**Reset tones** returns only the five tone controls to zero and preserves treatment, Haze reduction, EV, contrast, and colour choices. **Reset trial** restores the approved starting treatment at Haze reduction 20%, contrast 12, 0/0 EV, and zero tones, while preserving the colour checkbox. The controls work with all local treatments. A tone slider repaints the trial and updates its readout while moving, without recomposing the photographs. Each edit starts from the cached neutral image rather than the previously adjusted result. The JPEG export is debounced briefly during dragging and committed immediately on release; download and rotation controls wait until the export matches the visible preview. The settings download records `settings.tones` and a separate `postProcessing` entry with version `tone-curve-v1` and the five values matching the completed export. Stale JPEG callbacks cannot replace a newer edit. The reference has no tone settings or postprocessing entry.
 
 `tone-adjustments.js` is loaded only by the local comparison page. It is excluded from the seven public website files and does not alter archive rendering.
 
 ## Finished-image rotation
 
-**Rotate 90°** beside the right result rotates the finished trial clockwise without developing another pair. The preview and JPEG download use the selected orientation. The fixed left reference is untouched. Rotation survives tone, EV, colour, and treatment edits and Reset tones; selecting a new photo or Reset trial returns to zero. The recipe records `trial.rotationDegrees` (0, 90, 180, or 270), width, and height. Nothing is uploaded from the local page.
+**Rotate 90°** beside the right result rotates the cached neutral result clockwise, reapplies the current tone controls, then commits the trial preview and export together without developing another pair. The preview and JPEG download use the selected orientation. The fixed left reference is untouched. Rotation survives tone, EV, colour, and treatment edits and Reset tones; selecting a new photo or Reset trial returns to zero. The recipe records `trial.rotationDegrees` (0, 90, 180, or 270), width, and height. Nothing is uploaded from the local page.
 
 The public page also offers Rotate 90° for the preview and download. Its archive retains the originally created orientation; clicking Rotate does not create another archive copy.
 
@@ -129,6 +129,8 @@ The constants describe a visual trial for finished photographs. They are not mea
 Stock-specific calibration would require measured response data and controlled reference images. Exposure-duration and reciprocity effects cannot be reconstructed from the brightness of an arbitrary finished upload. They are not simulated by these generic curves. A gallery or a different hosting system would not by itself improve the exposure calculation.
 
 ## Return to the saved version
+
+The exact version before live tone previews is named **`before-live-tone-preview`**, pointing to **`6991e63`**. It preserves the previous release-to-render interaction. The live-preview revision changes caching and export coordination, not the tone curve or exposure calculation.
 
 The version before visible tone controls and finished-image rotation is saved as **`before-result-rotation`** at **`747fcaf`**. The new revision can be undone directly after preserving later edits.
 
