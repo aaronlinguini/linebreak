@@ -56,10 +56,13 @@
             <input id="visitor-monochrome" type="checkbox" disabled>
             Black and white
           </label>
-          <label class="library-choice" for="allow-reuse">
-            <input id="allow-reuse" type="checkbox" aria-describedby="archive-note">
-            <span>Add my uploaded photo to the library of base photos upon which new double exposures can be made. Your uploaded photo will only be added to the base-photo library if you check this box.</span>
-          </label>
+          <div class="library-option">
+            <label class="library-choice" for="allow-reuse">
+              <input id="allow-reuse" type="checkbox" aria-describedby="library-note">
+              <span>Add my uploaded photo to the library of base photos upon which new double exposures can be made.</span>
+            </label>
+            <p id="library-note" class="library-note">Your uploaded photo will only be added to the base-photo library if you check this box.</p>
+          </div>
         </div>
       </div>
 

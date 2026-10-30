@@ -127,6 +127,7 @@ h1 { margin: 0; font-size: 13px; font-weight: 400; letter-spacing: .025em; }
 .output-options input { flex-shrink: 0; width: 18px; height: 18px; margin: 0; accent-color: var(--foreground); }
 .output-options .library-choice { align-items: flex-start; }
 .library-choice input { margin-top: 2px; }
+.library-note { margin: 4px 0 0 28px; color: var(--muted); font-size: 12px; }
 
 .file-picker { position: relative; }
 .file-input {
