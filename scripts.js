@@ -437,6 +437,7 @@ function initializeExposureStudio() {
       state.ready = collection.totalEligible > 0;
     } catch (error) {
       state.ready = false;
+      console.warn("Photo collection unavailable:", error.code || error.name, error.message);
     } finally {
       state.connecting = false;
       if (!state.working && !workflow.pending && !state.hasResult) restoreConnectionStatus();
