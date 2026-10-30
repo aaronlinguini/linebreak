@@ -100,15 +100,19 @@ h1 { margin: 0; font-size: 13px; font-weight: 400; letter-spacing: .025em; }
 
 .choice-separator { color: var(--muted); font-size: 12px; }
 
+.output-options { display: flex; justify-content: center; margin-top: 16px; }
+.output-options label { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; }
+.output-options input { width: 18px; height: 18px; margin: 0; accent-color: var(--foreground); }
+.output-options + .source-actions { padding-top: 12px; }
+
 .sharing-choice {
   max-width: 520px;
   margin: 24px auto 0;
   padding: 20px;
   border: 1px solid #353535;
 }
-.sharing-choice p { margin: 0 0 14px; color: var(--muted); font-size: 12px; }
 .sharing-choice label { display: flex; align-items: center; gap: 10px; min-height: 44px; }
-.sharing-choice input { width: 18px; height: 18px; margin: 0; accent-color: var(--foreground); }
+.sharing-choice input { flex-shrink: 0; width: 18px; height: 18px; margin: 0; accent-color: var(--foreground); }
 .sharing-choice .actions { padding-top: 15px; }
 
 .file-picker { position: relative; }

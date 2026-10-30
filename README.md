@@ -21,7 +21,7 @@ To test on a real phone or tablet, use the published HTTPS URL or Live Server's 
 Before public use, check both library selection and native camera capture on an actual iPhone/iPad and Android device, including cancellation and a portrait photograph. Desktop viewport checks verify layout, not a physical device's camera chooser or HEIC conversion.
 
 1. Drag chosen base photos directly into the new [My_photos folder](https://drive.google.com/drive/folders/1KTwgNyGgTgv8HwT1MrBaJeWk-JJIupKY), signed into **aaron.double.exposure.project@gmail.com**. With visitor uploads enabled, the program indexes new or changed images in bounded batches when the site connects or begins a pairing, reusing a completed scan for up to one minute. The optional owner page can check the collection while submissions are paused; its upload control is a fallback, not a required intake step. The folder and new deployment are ready, but real photo-workflow testing remains pending.
-2. On the website, choose **Upload a photo** or **Take a photo**. Review the selected photo, choose whether it may be used in future pairings, then press **Create double exposure**. The future-use checkbox starts unchecked.
+2. On the website, choose **Upload a photo** or **Take a photo**. Set **Black and white** before pressing **Create double exposure**. Separately, decide whether the submitted original may join the base-photo library for future double exposures; that consent checkbox starts unchecked.
 3. Wait for **Double exposure saved.** Downloading a copy is optional. If another eligible base is available, **Try another pairing** creates another result using the same original without saving another original. Identical finished JPEGs reuse one archived result file. **Start over** clears the page; it does not delete archived files.
 
 The public page stays minimal and black, with no exposure sliders or collection-management panel. A private Google Sheet records consent, source IDs, and each result. The future-use checkbox starts unchecked and controls entry into the shared base-photo pool; it does not turn off the private original archive. Server-computed SHA-256 checks reuse identical original files across artist and participant records and identical results across repeated tests or pairings. An existing artist photo is reused without renaming or moving it. No image pairs with identical bytes, and pending saves keep their assigned base. Renaming a file does not bypass this check. Edited, resized, or re-exported files can have different bytes and are not guaranteed to match. Copies manually dragged into Drive are detected and indexed once, but the program does not silently delete those externally created files.
@@ -72,7 +72,7 @@ The saved smooth treatment estimates an exposure from each pixel's linear lumina
 
 The later inverse-Reinhard response was removed after review of the artist's analogue examples and website outputs. Numerical boundary checks did not establish a convincing analogue match. This rollback restores the earlier behaviour; it does not claim to finish the film simulation.
 
-`PROJECT_SETTINGS` in `scripts.js` defines the artist's treatment. Google selects a random eligible source; a second pairing avoids the immediately previous base. The participant interface has no exposure sliders, contrast controls, or colour options. The main treatment uses contrast 12 and zero exposure adjustment per photograph; the colour option comes from `project-config.js`.
+`PROJECT_SETTINGS` in `scripts.js` defines the artist's treatment. Google selects a random eligible source; a second pairing avoids the immediately previous base. The participant interface has no exposure sliders or contrast controls. Its **Black and white** checkbox lets visitors choose the output colour mode before creating an exposure. The Saved Current calculation remains at contrast 12 and zero exposure adjustment per photograph.
 
 A rendered JPEG does not retain its original scene exposure or a measured film/development/scan response. See [EXPOSURE-NOTES.md](EXPOSURE-NOTES.md) for the current model and limitations.
 
@@ -94,14 +94,16 @@ The controls affect only the finished right preview, after exposure processing a
 
 On the local test, rotation turns the neutral cached result before applying the current tone controls. This keeps later live edits independent of previous adjustments. The selected rotation persists when tone, exposure, colour, or treatment settings change. Reset tones keeps the rotation. Reset trial or selecting a new photograph returns it to zero. Settings downloads record `trial.rotationDegrees` and the rotated output dimensions; the left reference stays unchanged.
 
-## Artist colour option
+## Artist default and visitor colour choice
 
 In `project-config.js`, change `forceBlackAndWhite`:
 
-- `true`: make every finished double exposure black and white.
-- `false`: preserve the photographs' existing colours, including photographs that are already black and white.
+- `true`: start the visitor's **Black and white** checkbox checked.
+- `false`: start it unchecked, preserving the photographs' existing colours, including photographs that are already black and white.
 
-The saved artist setting is currently `true`. Reload after changing the configuration. It controls the main site and the initial colour choice on the local test page; the local comparison also has its own temporary colour toggle. The archived original uploads retain their original colours and orientation.
+The saved artist setting is still `true`. Reload after changing the configuration. It supplies the initial colour choice on both pages; visitors can change the public checkbox before **Create double exposure**, and the local comparison keeps its existing temporary toggle.
+
+The public colour checkbox is disabled during work and hidden while a save is pending or a completed exposure is shown. Each exposure freezes its selected mode for rendering, archiving, retries, and further pairings, so its preview, downloaded JPEG, and archived JPEG use the same colour mode. **Start over** lets the visitor choose a mode for a new exposure. This affects the finished output only: original upload bytes, orientation, and future-use consent remain independent and unchanged.
 
 ## Checks
 

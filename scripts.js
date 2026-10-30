@@ -126,7 +126,8 @@ const ExposureMath = (() => {
   return Object.freeze({ clamp, srgbToLinear, linearToSrgb, contrastCurve, coverCrop, outputSize, selectIndex, createMixer, createBalancedMixer, balancedVersion: "overlap-suppression-v2", balancedParameters });
 })();
 
-// Exposure treatment is the artist's decision. Pairing is selected by Google.
+// The artist sets the default colour choice; visitors choose it before creating
+// an exposure. The Saved Current mixer and exposure settings stay fixed.
 const PROJECT_SETTINGS = Object.freeze({
   baseExposure: 0, participantExposure: 0, contrast: 12,
   monochrome: typeof EXPOSURE_CONFIG !== "undefined" && EXPOSURE_CONFIG.forceBlackAndWhite === true
@@ -326,6 +327,7 @@ function initializeExposureStudio() {
     workspace: byId("workspace"), canvas: byId("canvas"),
     resultEmpty: byId("result-empty"), participantPreview: byId("participant-preview"),
     sourceActions: byId("source-actions"), sharingChoice: byId("sharing-choice"),
+    outputOptions: byId("output-options"), monochrome: byId("visitor-monochrome"),
     resultActions: byId("result-actions"), allowReuse: byId("allow-reuse"),
     develop: byId("develop-button"), cancelSelection: byId("cancel-selection"),
     newPairing: byId("new-pairing-button"), reset: byId("reset-button"),
@@ -335,6 +337,7 @@ function initializeExposureStudio() {
   };
   const state = { working: false, ready: false, hasResult: false, participant: null,
     selectedFile: null, downloadUrl: null, rePairUnavailable: false };
+  ui.monochrome.checked = PROJECT_SETTINGS.monochrome;
   const { loadPhoto, releasePhoto, develop } = createExposureProcessor();
   const storage = new GoogleDriveStorage(EXPOSURE_CONFIG);
   const workflow = new ExposureArchiveWorkflow({
@@ -362,6 +365,8 @@ function initializeExposureStudio() {
       input.disabled = state.working || !state.ready || selected || pending;
     }
     ui.sourceActions.hidden = selected || state.hasResult;
+    ui.outputOptions.hidden = state.hasResult || pending;
+    ui.monochrome.disabled = state.working || pending || state.hasResult;
     ui.sharingChoice.hidden = !selected || state.hasResult || pending;
     ui.resultActions.hidden = !state.hasResult;
     ui.develop.disabled = state.working || !state.ready || pending;
@@ -499,7 +504,9 @@ function initializeExposureStudio() {
   ui.develop.addEventListener("click", async () => {
     if (!state.selectedFile || state.working || workflow.pending || !state.ready) return;
     clearError();
-    await finishSubmission(() => workflow.start(state.selectedFile, { allowReuse: ui.allowReuse.checked }));
+    await finishSubmission(() => workflow.start(state.selectedFile, {
+      allowReuse: ui.allowReuse.checked, monochrome: ui.monochrome.checked
+    }));
   });
   ui.cancelSelection.addEventListener("click", () => {
     if (state.working || workflow.pending) return;

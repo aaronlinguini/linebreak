@@ -460,7 +460,7 @@ test("HTML keeps styling and executable code in their separate files", () => {
     assert.doesNotMatch(html, /\son[a-z]+\s*=/i, file);
     assert.doesNotMatch(html, /javascript\s*:/i, file);
     if (file === "index.html") {
-      assert.match(html, /<link\b[^>]*href=["']styles\.css["'][^>]*>/i);
+      assert.match(html, /<link\b[^>]*href=["']styles\.css(?:\?[^"']*)?["'][^>]*>/i);
       assert.match(html, /<script\b[^>]*src=["']scripts\.js(?:\?[^"']*)?["']/i);
     }
     const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)];

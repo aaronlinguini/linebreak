@@ -15,10 +15,15 @@ class ExposureArchiveWorkflow {
 
   get pending() { return Boolean(this.operation && !this.operation.receipt); }
 
-  async start(file, { allowReuse = false } = {}) {
+  async start(file, { allowReuse = false, monochrome = this.settings.monochrome } = {}) {
     if (this.busy || this.pending) throw new Error("Finish saving this photograph before adding another.");
     if (typeof allowReuse !== "boolean") throw new Error("The photograph sharing choice is invalid.");
-    this.operation = { submissionId: this.makeId(), file, allowReuse, reuse: null, begin: null, result: null, receipt: null };
+    if (typeof monochrome !== "boolean") throw new Error("The black-and-white choice is invalid.");
+    // Keep the visitor's choice with this exposure, including retries after the
+    // controls change. Other treatment settings remain the artist's defaults.
+    const settings = Object.freeze({ ...this.settings, monochrome });
+    this.operation = { submissionId: this.makeId(), file, allowReuse, settings,
+      reuse: null, begin: null, result: null, receipt: null };
     return this.run();
   }
 
@@ -28,7 +33,8 @@ class ExposureArchiveWorkflow {
     if (!previous?.receipt || !previous.begin?.token) throw new Error("Create and save an exposure first.");
     if (previous.receipt.canRePair === false) throw new Error("There is no other photograph available to pair right now.");
     this.operation = { submissionId: this.makeId(), file: previous.file,
-      allowReuse: previous.allowReuse, reuse: { submissionId: previous.submissionId, token: previous.begin.token },
+      allowReuse: previous.allowReuse, settings: previous.settings,
+      reuse: { submissionId: previous.submissionId, token: previous.begin.token },
       begin: null, result: null, receipt: null };
     try {
       return await this.run();
@@ -71,7 +77,7 @@ class ExposureArchiveWorkflow {
         this.onProgress({ stage });
         const result = await this.render({
           file: operation.file, base: operation.begin.base,
-          submissionId: operation.submissionId, settings: this.settings
+          submissionId: operation.submissionId, settings: operation.settings
         });
         if (!result?.blob || result.blob.type !== "image/jpeg" || result.blob.size === 0 ||
             !Number.isInteger(result.width) || result.width < 1 ||
@@ -86,7 +92,7 @@ class ExposureArchiveWorkflow {
       const receipt = await this.storage.complete({
         submissionId: operation.submissionId, token: operation.begin.token,
         resultBlob: operation.result.blob, width: operation.result.width,
-        height: operation.result.height, settings: this.settings
+        height: operation.result.height, settings: operation.settings
       });
       if (receipt.saved !== true || receipt.submissionId !== operation.submissionId ||
           receipt.originalId !== operation.begin.originalId || receipt.baseId !== operation.begin.base.id ||

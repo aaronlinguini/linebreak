@@ -24,7 +24,7 @@ function fixture(overrides = {}) {
     ...overrides.storage
   };
   const render = overrides.render || (async (request) => { calls.push(["render", request]); return { blob, width: 1200, height: 800 }; });
-  const workflow = new Workflow({ storage, render, settings, makeId: () => id, onProgress: ({ stage }) => calls.push(["stage", stage]) });
+  const workflow = new Workflow({ storage, render, settings: overrides.settings || settings, makeId: () => id, onProgress: ({ stage }) => calls.push(["stage", stage]) });
   return { workflow, calls, storage };
 }
 
@@ -48,6 +48,83 @@ test("sharing is opt-in and is sent with the exact original", async () => {
   await workflow.start(file, { allowReuse: true });
   const secondBegin = calls.filter(([type]) => type === "begin")[1][1];
   assert.equal(secondBegin.allowReuse, true);
+});
+
+test("the artist's monochrome default and each visitor override reach rendering and archiving together", async () => {
+  for (const artistDefault of [false, true]) {
+    for (const visitorChoice of [undefined, false, true]) {
+      const { workflow, calls } = fixture({ settings: { ...settings, monochrome: artistDefault } });
+      const operation = await workflow.start(file, visitorChoice === undefined ? {} : { monochrome: visitorChoice });
+      const expected = visitorChoice ?? artistDefault;
+      const uploading = calls.find(([type]) => type === "begin")[1];
+      const rendering = calls.find(([type]) => type === "render")[1];
+      const saving = calls.find(([type]) => type === "complete")[1];
+      assert.equal(operation.settings.monochrome, expected);
+      assert.equal(rendering.settings.monochrome, expected);
+      assert.equal(saving.settings.monochrome, expected);
+      assert.strictEqual(rendering.settings, saving.settings, "the archived recipe belongs to the rendered JPEG");
+      assert.equal(Object.isFrozen(operation.settings), true);
+      assert.equal(workflow.settings.monochrome, artistDefault, "visitor selection does not rewrite the artist's default");
+      assert.equal(operation.settings.baseExposure, settings.baseExposure);
+      assert.equal(operation.settings.participantExposure, settings.participantExposure);
+      assert.equal(operation.settings.contrast, settings.contrast);
+      assert.strictEqual(uploading.originalFile, file, "colour mode never replaces or modifies the original upload");
+      assert.equal(uploading.allowReuse, false, "colour mode does not grant future-use consent");
+    }
+  }
+});
+
+test("invalid monochrome selections do not start an upload or replace a saved operation", async () => {
+  const { workflow, calls } = fixture();
+  const previous = await workflow.start(file);
+  const count = calls.length;
+  for (const monochrome of [null, 0, 1, "false", {}, []]) {
+    await assert.rejects(workflow.start(file, { monochrome }), /black.and.white|monochrome/i);
+    assert.strictEqual(workflow.operation, previous);
+  }
+  assert.equal(calls.length, count);
+});
+
+test("an in-flight exposure snapshots the selected mode before upload and preserves it for retries", async () => {
+  let resume;
+  const requests = [];
+  const { workflow, calls, storage } = fixture({ settings: { ...settings, monochrome: true }, storage: {
+    begin: () => new Promise(resolve => { resume = resolve; }),
+    complete: async request => { requests.push(request); throw new Error("response lost"); }
+  } });
+  const choice = { monochrome: false };
+  const pending = workflow.start(file, choice);
+  choice.monochrome = true;
+  workflow.settings = Object.freeze({ ...settings, monochrome: true });
+  resume(begin());
+  await assert.rejects(pending, /response lost/);
+  storage.complete = async request => { requests.push(request); return receipt(); };
+  await workflow.retry();
+  assert.equal(calls.filter(([type]) => type === "render").length, 1);
+  assert.equal(calls.find(([type]) => type === "render")[1].settings.monochrome, false);
+  assert.equal(requests[0].settings.monochrome, false);
+  assert.strictEqual(requests[0].settings, requests[1].settings);
+  assert.strictEqual(requests[0].resultBlob, requests[1].resultBlob);
+});
+
+test("another pairing inherits its original visitor colour mode rather than a changed default", async () => {
+  const renders = [], saves = [];
+  let serial = 0;
+  const workflow = new Workflow({
+    storage: {
+      begin: async request => ({ ...begin(), submissionId: request.submissionId }),
+      complete: async request => { saves.push(request); return { ...receipt(), submissionId: request.submissionId, canRePair: true }; }
+    },
+    render: async request => { renders.push(request); return { blob, width: 1200, height: 800 }; },
+    settings: { ...settings, monochrome: true }, makeId: () => `submission-${++serial}`
+  });
+  const first = await workflow.start(file, { monochrome: false });
+  workflow.settings = Object.freeze({ ...settings, monochrome: true });
+  const second = await workflow.rePair();
+  assert.equal(first.settings.monochrome, false);
+  assert.equal(second.settings.monochrome, false);
+  assert.deepEqual(renders.map(request => request.settings.monochrome), [false, false]);
+  assert.deepEqual(saves.map(request => request.settings.monochrome), [false, false]);
 });
 
 test("another pairing uses a new identity and prior token without another original upload", async () => {

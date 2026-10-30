@@ -12,12 +12,12 @@ const source = fs.readFileSync(path.join(root, "scripts.js"), "utf8");
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 const makeFile = () => new File([Uint8Array.from([1, 2, 3])], "phone.jpg", { type: "image/jpeg" });
 
-function harness({ configured = true, canRePair = true } = {}) {
+function harness({ configured = true, canRePair = true, forceBlackAndWhite = false } = {}) {
   const ids = ["workspace", "canvas", "result-empty", "participant-preview", "source-actions",
     "sharing-choice", "result-actions", "allow-reuse", "develop-button", "cancel-selection",
     "new-pairing-button", "reset-button", "participant-input", "participant-camera-input",
     "upload-label", "camera-label", "download-button", "rotate-button", "retry-button", "status", "error",
-    "busy-indicator"];
+    "busy-indicator", "output-options", "visitor-monochrome"];
   const handlers = new Map();
   const elements = new Map(ids.map((id) => [id, {
     hidden: true, disabled: false, checked: false, files: [], value: "", textContent: "",
@@ -29,6 +29,8 @@ function harness({ configured = true, canRePair = true } = {}) {
   const urls = new Map();
   let rotationGate;
   let rotationError;
+  let startGate;
+  let startError;
   let mounted = false;
   let workflow;
   const sandbox = vm.createContext({
@@ -45,7 +47,7 @@ function harness({ configured = true, canRePair = true } = {}) {
       createObjectURL(blob) { const url = `blob:result-${urls.size + 1}`; urls.set(url, blob); return url; },
       revokeObjectURL(url) { calls.revoked.push(url); }
     },
-    EXPOSURE_CONFIG: { forceBlackAndWhite: false },
+    EXPOSURE_CONFIG: { forceBlackAndWhite },
     GoogleDriveStorage: class {
       configured = configured;
       async connect() { return { totalEligible: 2 }; }
@@ -57,8 +59,12 @@ function harness({ configured = true, canRePair = true } = {}) {
       constructor() { workflow = this; }
       async start(file, choice) {
         calls.start.push({ file, choice });
+        this.pending = true;
+        if (startGate) await startGate;
+        if (startError) throw startError;
         this.operation = { submissionId: "first", result: { blob: {}, width: 600, height: 400, preparedCanvas: {} },
           receipt: { canRePair } };
+        this.pending = false;
         return this.operation;
       }
       async rePair() {
@@ -92,6 +98,8 @@ function harness({ configured = true, canRePair = true } = {}) {
     elements, calls, urls, get workflow() { return workflow; },
     blockRotation(gate) { rotationGate = gate; },
     failRotation(error) { rotationError = error; },
+    blockStart(gate) { startGate = gate; },
+    failStart(error) { startError = error; },
     select(id, file) {
       const input = elements.get(id);
       input.files = file ? [file] : [];
@@ -108,12 +116,71 @@ test("public photo choices are distinct and HTML has no inline code", () => {
   assert.match(html, /id="participant-camera-input"[^>]*capture="environment"/);
   assert.match(html, /class="choice-separator">or<\/span>/);
   assert.match(html, /id="allow-reuse" type="checkbox"/);
+  assert.match(html, /<input\b[^>]*id="visitor-monochrome"[^>]*type="checkbox"/);
+  assert.match(html, /<label\b[^>]*for="visitor-monochrome"/);
   assert.match(html, /<button\b[^>]*id="rotate-button"[^>]*>Rotate 90°<\/button>/);
   assert.doesNotMatch(html, /<style\b|\sstyle\s*=|\son[a-z]+\s*=|javascript\s*:/i);
   for (const [, attrs, body] of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
     assert.match(attrs, /\bsrc="/);
     assert.equal(body.trim(), "");
   }
+});
+
+test("the visitor checkbox starts from the artist default and sends either colour mode at creation", async () => {
+  for (const forceBlackAndWhite of [false, true]) {
+    for (const visitorChoice of [false, true]) {
+      const h = harness({ forceBlackAndWhite });
+      await flush();
+      const checkbox = h.elements.get("visitor-monochrome");
+      assert.equal(checkbox.checked, forceBlackAndWhite);
+      assert.equal(checkbox.disabled, false);
+      assert.equal(h.elements.get("output-options").hidden, false);
+      checkbox.checked = visitorChoice;
+      await h.select("participant-input", makeFile());
+      assert.equal(checkbox.checked, visitorChoice, "choosing a photograph retains the visitor selection");
+      await h.click("develop-button");
+      assert.equal(h.calls.start[0].choice.monochrome, visitorChoice);
+      assert.equal(h.elements.get("output-options").hidden, true, "an archived result cannot be relabelled as another colour mode");
+      assert.equal(checkbox.disabled, true);
+      h.click("reset-button");
+      assert.equal(h.elements.get("output-options").hidden, false);
+      assert.equal(checkbox.disabled, false);
+      assert.equal(checkbox.checked, visitorChoice, "Start over retains the visitor's preference");
+    }
+  }
+});
+
+test("the visitor colour choice is retained on Back and remains usable while the archive is unconfigured", async () => {
+  const h = harness({ forceBlackAndWhite: true });
+  await flush();
+  h.elements.get("visitor-monochrome").checked = false;
+  await h.select("participant-camera-input", makeFile());
+  h.click("cancel-selection");
+  assert.equal(h.elements.get("visitor-monochrome").checked, false);
+  assert.equal(h.elements.get("output-options").hidden, false);
+  const offline = harness({ configured: false, forceBlackAndWhite: true });
+  await flush();
+  assert.equal(offline.elements.get("output-options").hidden, false);
+  assert.equal(offline.elements.get("visitor-monochrome").checked, true);
+  assert.equal(offline.elements.get("visitor-monochrome").disabled, false);
+});
+
+test("creating or retrying a pending save cannot change its colour choice through the page", async () => {
+  const h = harness();
+  await flush();
+  await h.select("participant-input", makeFile());
+  h.elements.get("visitor-monochrome").checked = true;
+  let resume;
+  h.blockStart(new Promise(resolve => { resume = resolve; }));
+  h.failStart(Object.assign(new Error("Response lost."), { originalSaved: true }));
+  const saving = h.click("develop-button");
+  assert.equal(h.elements.get("visitor-monochrome").disabled, true);
+  assert.equal(h.calls.start[0].choice.monochrome, true);
+  resume();
+  await saving;
+  assert.equal(h.workflow.pending, true);
+  assert.equal(h.elements.get("output-options").hidden, true);
+  assert.equal(h.elements.get("visitor-monochrome").disabled, true);
 });
 
 test("library and camera selections wait for explicit create and default to no reuse", async () => {

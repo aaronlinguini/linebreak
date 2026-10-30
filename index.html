@@ -4,26 +4,33 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#050505">
-    <title>Double exposure</title>
-    <link rel="stylesheet" href="styles.css">
+    <title>Double Exposure</title>
+    <link rel="stylesheet" href="styles.css?v=visitor-monochrome-v1">
     <script src="project-config.js" defer></script>
     <script src="drive-storage.js" defer></script>
-    <script src="archive-workflow.js" defer></script>
-    <script src="scripts.js?v=saved-current-v1" defer></script>
+    <script src="archive-workflow.js?v=visitor-monochrome-v1" defer></script>
+    <script src="scripts.js?v=visitor-monochrome-v1" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">Skip to photograph</a>
 
     <header class="site-header">
-      <h1>double exposure</h1>
+      <h1>Double Exposure</h1>
     </header>
 
     <main id="workspace" class="workspace" aria-busy="false">
       <div class="image-stage">
-        <p id="result-empty" class="empty-state">Upload a photo or take a photo directly from your camera using the buttons below.</p>
+        <p id="result-empty" class="empty-state">Use the bottons below to select a photo from your library or take a photo with your camera.</p>
         <img id="participant-preview" hidden alt="Your selected photograph">
         <canvas id="canvas" width="1" height="1" hidden aria-label="Your double exposure"></canvas>
         <p id="busy-indicator" class="busy-indicator" hidden>Developing…</p>
+      </div>
+
+      <div id="output-options" class="output-options">
+        <label for="visitor-monochrome">
+          <input id="visitor-monochrome" type="checkbox" disabled>
+          Black and white
+        </label>
       </div>
 
       <div id="source-actions" class="actions source-actions">
@@ -39,10 +46,9 @@
       </div>
 
       <div id="sharing-choice" class="sharing-choice" hidden>
-        <p>Your original and finished image will be saved. May your original also be paired with other visitors’ photos later?</p>
         <label for="allow-reuse">
           <input id="allow-reuse" type="checkbox">
-          Yes, use my photo in future pairings
+          You may add my submitted photo to the base-photo library for future double exposures.
         </label>
         <div class="actions">
           <button id="develop-button" class="save-button" type="button">Create double exposure</button>
@@ -65,7 +71,7 @@
     </main>
 
     <footer class="site-footer">
-      <p id="archive-note" class="privacy-note">Photos and finished exposures are saved to the project archive. Future pairing is your choice.</p>
+      <p id="archive-note" class="privacy-note">The project saves submitted photos and finished double exposures. Adding your photo to the base-photo library is optional.</p>
     </footer>
   </body>
 </html>
