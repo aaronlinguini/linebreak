@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#050505">
     <title>Double Exposure</title>
-    <link rel="stylesheet" href="styles.css?v=experiments-v1">
+    <link rel="stylesheet" href="styles.css?v=exposure-controls-v1">
     <script src="project-config.js" defer></script>
     <script src="drive-storage.js" defer></script>
     <script src="archive-workflow.js?v=visitor-monochrome-v1" defer></script>
-    <script src="scripts.js?v=visitor-monochrome-v1" defer></script>
+    <script src="scripts.js?v=exposure-controls-v1" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">Skip to photograph</a>
@@ -29,33 +29,37 @@
         <p id="busy-indicator" class="busy-indicator" hidden>Developing…</p>
       </div>
 
-      <div id="output-options" class="output-options">
-        <label for="visitor-monochrome">
-          <input id="visitor-monochrome" type="checkbox" disabled>
-          Black and white
-        </label>
-      </div>
+      <div class="exposure-controls">
+        <div class="exposure-buttons">
+          <div id="source-actions" class="actions source-actions">
+            <div class="file-picker">
+              <input id="participant-input" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="archive-note" disabled>
+              <label id="upload-label" class="upload-label" for="participant-input">Upload a photo</label>
+            </div>
+            <span class="choice-separator">or</span>
+            <div class="file-picker">
+              <input id="participant-camera-input" class="file-input" type="file" accept="image/jpeg" capture="environment" aria-describedby="archive-note" disabled>
+              <label id="camera-label" class="upload-label" for="participant-camera-input">Take a photo</label>
+            </div>
+          </div>
 
-      <div id="source-actions" class="actions source-actions">
-        <div class="file-picker">
-          <input id="participant-input" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="archive-note" disabled>
-          <label id="upload-label" class="upload-label" for="participant-input">Upload a photo</label>
+          <div id="sharing-choice" hidden>
+            <div class="actions">
+              <button id="develop-button" class="save-button" type="button">Create double exposure</button>
+              <button id="cancel-selection" class="save-button" type="button">Back</button>
+            </div>
+          </div>
         </div>
-        <span class="choice-separator">or</span>
-        <div class="file-picker">
-          <input id="participant-camera-input" class="file-input" type="file" accept="image/jpeg" capture="environment" aria-describedby="archive-note" disabled>
-          <label id="camera-label" class="upload-label" for="participant-camera-input">Take a photo</label>
-        </div>
-      </div>
 
-      <div id="sharing-choice" class="sharing-choice" hidden>
-        <label for="allow-reuse">
-          <input id="allow-reuse" type="checkbox">
-          You may add my submitted photo to the base-photo library for future double exposures.
-        </label>
-        <div class="actions">
-          <button id="develop-button" class="save-button" type="button">Create double exposure</button>
-          <button id="cancel-selection" class="save-button" type="button">Back</button>
+        <div id="output-options" class="output-options">
+          <label for="visitor-monochrome">
+            <input id="visitor-monochrome" type="checkbox" disabled>
+            Black and white
+          </label>
+          <label class="library-choice" for="allow-reuse">
+            <input id="allow-reuse" type="checkbox" aria-describedby="archive-note">
+            <span>you may add my uploaded photo to the library of base photos upon which new double exposures can be made<span aria-hidden="true">*</span></span>
+          </label>
         </div>
       </div>
 
@@ -74,7 +78,7 @@
     </main>
 
     <footer class="site-footer">
-      <p id="archive-note" class="privacy-note">The project saves submitted photos and finished double exposures. Adding your photo to the base-photo library is optional.</p>
+      <p id="archive-note" class="privacy-note">*If this box is unchecked, your photo will not be added to the base-photo directory. The project saves all finished double exposures.</p>
     </footer>
   </body>
 </html>

@@ -326,6 +326,7 @@ function initializeExposureStudio() {
   const state = { working: false, ready: false, hasResult: false, participant: null,
     selectedFile: null, downloadUrl: null, rePairUnavailable: false };
   ui.monochrome.checked = PROJECT_SETTINGS.monochrome;
+  ui.allowReuse.checked = false;
   const { loadPhoto, releasePhoto, develop } = createExposureProcessor();
   const storage = new GoogleDriveStorage(EXPOSURE_CONFIG);
   const workflow = new ExposureArchiveWorkflow({
@@ -481,7 +482,6 @@ function initializeExposureStudio() {
     ui.participantPreview.src = photo.thumbnail;
     ui.participantPreview.hidden = false;
     ui.resultEmpty.hidden = true;
-    ui.allowReuse.checked = false;
     announce("");
     refreshActions();
   }

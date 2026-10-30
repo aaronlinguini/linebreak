@@ -126,6 +126,20 @@ test("public photo choices are distinct and HTML has no inline code", () => {
   }
 });
 
+test("source and creation actions precede the colour and consent controls in reading order", () => {
+  const html = fs.readFileSync(path.join(root, "double-exposure.html"), "utf8");
+  const options = html.indexOf('id="output-options"');
+  const browse = html.indexOf('id="source-actions"');
+  const create = html.indexOf('id="sharing-choice"');
+  const colour = html.indexOf('id="visitor-monochrome"');
+  const consent = html.indexOf('id="allow-reuse"');
+  assert.ok(browse >= 0 && create >= 0 && options >= 0);
+  assert.ok(browse < options && create < options, "source and creation choices form the first column");
+  assert.ok(options < colour && colour < consent, "colour then consent belong to the options column");
+  assert.match(html, /<label\b[^>]*for="allow-reuse"/);
+  assert.doesNotMatch(html.match(/<input\b[^>]*id="allow-reuse"[^>]*>/)[0], /\bchecked(?:\s|=|>)/);
+});
+
 test("Home links to the three experiment pages and exposure tool without starting the archive on static pages", () => {
   const home = fs.readFileSync(path.join(root, "index.html"), "utf8");
   const tool = fs.readFileSync(path.join(root, "double-exposure.html"), "utf8");
@@ -188,17 +202,44 @@ test("creating or retrying a pending save cannot change its colour choice throug
   await flush();
   await h.select("participant-input", makeFile());
   h.elements.get("visitor-monochrome").checked = true;
+  h.elements.get("allow-reuse").checked = true;
   let resume;
   h.blockStart(new Promise(resolve => { resume = resolve; }));
   h.failStart(Object.assign(new Error("Response lost."), { originalSaved: true }));
   const saving = h.click("develop-button");
   assert.equal(h.elements.get("visitor-monochrome").disabled, true);
+  assert.equal(h.elements.get("allow-reuse").disabled, true);
   assert.equal(h.calls.start[0].choice.monochrome, true);
+  assert.equal(h.calls.start[0].choice.allowReuse, true);
   resume();
   await saving;
   assert.equal(h.workflow.pending, true);
   assert.equal(h.elements.get("output-options").hidden, true);
   assert.equal(h.elements.get("visitor-monochrome").disabled, true);
+  assert.equal(h.elements.get("allow-reuse").disabled, true);
+});
+
+test("consent can be selected before either photo chooser and reaches Create without being cleared", async () => {
+  for (const input of ["participant-input", "participant-camera-input"]) {
+    const h = harness();
+    await flush();
+    assert.equal(h.elements.get("output-options").hidden, false);
+    assert.equal(h.elements.get("allow-reuse").checked, false);
+    assert.equal(h.elements.get("allow-reuse").disabled, false);
+    h.elements.get("allow-reuse").checked = true;
+    await h.select(input, null);
+    assert.equal(h.elements.get("allow-reuse").checked, true, "cancelling a chooser preserves the unsent choice");
+    await h.select(input, makeFile());
+    assert.equal(h.elements.get("allow-reuse").checked, true, "choosing a photo preserves consent selected beforehand");
+    assert.equal(h.elements.get("output-options").hidden, false);
+    assert.equal(h.calls.start.length, 0);
+    await h.click("develop-button");
+    assert.equal(h.calls.start[0].choice.allowReuse, true);
+    assert.equal(h.elements.get("output-options").hidden, true);
+    h.click("reset-button");
+    assert.equal(h.elements.get("allow-reuse").checked, false, "a new contribution requires a fresh opt-in");
+    assert.equal(h.elements.get("output-options").hidden, false);
+  }
 });
 
 test("library and camera selections wait for explicit create and default to no reuse", async () => {
@@ -242,10 +283,13 @@ test("explicit future-use choice and a second pairing do not reupload through th
 test("back cancels the local selection before upload; unconfigured site shows no internal status", async () => {
   const h = harness();
   await flush();
+  h.elements.get("allow-reuse").checked = true;
   await h.select("participant-camera-input", makeFile());
   h.click("cancel-selection");
   assert.equal(h.calls.start.length, 0);
   assert.equal(h.elements.get("source-actions").hidden, false);
+  assert.equal(h.elements.get("allow-reuse").checked, false);
+  assert.equal(h.elements.get("output-options").hidden, false);
   const offline = harness({ configured: false });
   await flush();
   assert.equal(offline.elements.get("participant-input").disabled, true);
