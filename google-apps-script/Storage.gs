@@ -176,6 +176,7 @@ var ArchiveDrive = (function () {
       getDateCreated: function () { return new Date(read().createdTime); },
       getLastUpdated: function () { return new Date(read().modifiedTime); },
       isTrashed: function () { return read().trashed === true; },
+      isParticipantPhoto: function () { return read().appProperties?.exposureRole === "participant"; },
       getBlob: function () {
         if (isFolder) throw artistFailure();
         artistFolder(folderId);
@@ -194,6 +195,7 @@ var ArchiveDrive = (function () {
       getFoldersByName: function () { throw failure("UNSUPPORTED_SOURCE_OPERATION", "Only photographs directly inside the base-photo folder are listed."); },
       createFolder: readOnly,
       createFile: readOnly,
+      markParticipantPhoto: readOnly,
       moveTo: readOnly
     };
   }
@@ -207,12 +209,25 @@ var ArchiveDrive = (function () {
       getDateCreated: function () { return new Date(get(id).createdTime); },
       getLastUpdated: function () { return new Date(get(id).modifiedTime); },
       isTrashed: function () { return get(id).trashed === true; },
+      isParticipantPhoto: function () { return get(id).appProperties?.exposureRole === "participant"; },
       getBlob: function () { return blobFor(id); },
       getFiles: function () { return children(id, false); },
       getFilesByName: function (name) { return children(id, false, name); },
       getFoldersByName: function (name) { return children(id, true, name); },
       createFolder: function (name) { return create(name, folderType, id); },
       createFile: function (blob) { return create(blob.getName(), blob.getContentType(), id, blob); },
+      markParticipantPhoto: function (name) {
+        var file = get(id);
+        if (!/^image\/(jpeg|png|webp|avif)$/.test(file.mimeType) ||
+            !/^participant_photo_[1-9][0-9]*\.(jpg|png|webp|avif)$/.test(name)) throw accessFailure();
+        if (file.name === name && file.appProperties.exposureRole === "participant") return this;
+        // Mark provenance before moving the same file into the source pool.
+        // A later folder scan must never treat it as an artist-owned upload.
+        remember(Drive.Files.update({ name: name, appProperties: Object.assign({}, file.appProperties, {
+          exposureRole: "participant"
+        }) }, id, null, { fields: fields }));
+        return this;
+      },
       moveTo: function (folder) {
         var target = validId(folder.getId());
         if (get(target).mimeType !== folderType) throw accessFailure();

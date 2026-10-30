@@ -1,7 +1,10 @@
 /*
  * Private Drive archive + Sheets index for the double-exposure project.
- * Runs in a dedicated project account. Drive reads include photographs dropped
- * into My_photos; archive writes remain limited to app-created files.
+ * Runs in a dedicated project account. My_photos contains artist bases and
+ * completed, opted-in participant originals; unshared originals remain private
+ * in participant_uploads. Each original file is stored once and moved, not
+ * copied, when it joins the pool. Completed exposures have their own folder.
+ * Archive writes remain limited to app-created files.
  * Run setupProject, then add base photographs directly in the Drive folder.
  * No operation changes Drive sharing settings.
  *
@@ -152,12 +155,15 @@ function artistStatus_(project) {
 }
 
 function importArtist_(project, image) {
+  var scan = refreshArtistSources_(project);
+  if (!scan.complete) throw apiError_("COLLECTION_REFRESHING", "The photograph collection is still being checked. Please retry in a moment.");
   var sources = readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders);
-  var existing = sources.filter(function (source) { return source.kind === "artist" && source.sha256 === image.hash; })[0];
-  if (existing && isEligible_(existing)) {
+  var existing = sources.filter(function (source) { return source.sha256 === image.hash; })[0];
+  if (existing) {
     readSource_(existing);
     return { imported: false, duplicate: true, artistCount: artistStatus_(project).artistCount, name: image.name };
   }
+  rejectArchivedResult_(project, image);
   // Artist uploads are deliberate owner operations, separate from the visitor
   // intake budget. A deterministic name recovers an interrupted index write.
   var filename = "artist-" + image.hash + "." + extension_(image.mimeType);
@@ -293,7 +299,19 @@ function refreshArtistSources_(project) {
   existing.forEach(function (source) { byId[source.sourceId] = source; });
   var retainedIds = {}, seenHashes = {}, updates = [];
   var skipped = 0, preserved = 0, deferred = 0, reads = 0, readBytes = 0;
-  var complete = true;
+  var complete = true, issues = [], omittedIssues = 0;
+  // Owner diagnostics identify skipped files without recording image contents,
+  // file IDs, authorization tokens, or exception details. Keep logs bounded.
+  function issue(file, reasonCode, size, mimeType, detectedMime) {
+    if (issues.length >= 50) { omittedIssues++; return; }
+    var name = "Photograph";
+    try { name = cleanName_(file.getName()); } catch (error) { /* Metadata may be unavailable. */ }
+    var item = { name: name, reasonCode: reasonCode,
+      bytes: Number.isFinite(size) ? size : null, mimeType: String(mimeType || "") };
+    if (detectedMime !== undefined) item.detectedMime = detectedMime;
+    issues.push(item);
+  }
+  var submissions = readRecords_(project.submissions, EXPOSURE_CONFIG_.submissionsHeaders);
   var files = project.artist.getFiles();
   function preserve(fileId) {
     var previous = byId[fileId];
@@ -305,25 +323,67 @@ function refreshArtistSources_(project) {
     }
   }
   while (files.hasNext()) {
-    var file = files.next(), fileId = "";
+    var file = files.next(), fileId = "", size = null, mimeType = "";
     try {
       fileId = file.getId();
-      var size = file.getSize(), mimeType = file.getMimeType();
-      if (!Number.isSafeInteger(size) || size < 1 || size > EXPOSURE_CONFIG_.maxOriginalBytes ||
-          !/^image\/(jpeg|png|webp|avif)$/.test(mimeType)) { skipped++; continue; }
+      size = file.getSize(); mimeType = file.getMimeType();
+      var invalidReason = !Number.isSafeInteger(size) || size < 1 ? "INVALID_IMAGE_SIZE"
+        : size > EXPOSURE_CONFIG_.maxOriginalBytes ? "IMAGE_TOO_LARGE"
+        : !/^image\/(jpeg|png|webp|avif)$/.test(mimeType) ? "UNSUPPORTED_IMAGE" : "";
+      if (invalidReason) { skipped++; issue(file, invalidReason, size, mimeType); continue; }
       var modifiedAt = file.getLastUpdated().toISOString();
       var previous = byId[fileId];
+      // Moving a participant original into the pool never makes it an artist
+      // photograph. A private role marker also protects an orphaned index row.
+      var participant = previous && previous.kind === "participant";
+      if (participant || file.isParticipantPhoto()) {
+        retainedIds[fileId] = true;
+        if (!participant) { complete = false; skipped++; issue(file, "CONSENT_RECORD_MISSING", size, mimeType); continue; }
+        var consented = submissions.some(function (submission) {
+          return submission.originalId === fileId && submission.originalSha256 === previous.sha256 &&
+            submission.status === "complete" && (submission.allowReuse === true || submission.allowReuse === "true");
+        });
+        var unchangedParticipant = previous.modifiedAt === modifiedAt && Number(previous.byteLength) === size && previous.mimeType === mimeType;
+        if (!unchangedParticipant) {
+          if (reads >= EXPOSURE_CONFIG_.maxArtistReads || readBytes + size > EXPOSURE_CONFIG_.maxArtistReadBytes) {
+            complete = false; deferred++; issue(file, "SCAN_DEFERRED", size, mimeType); continue;
+          }
+          reads++; readBytes += size;
+          var participantBytes = file.getBlob().getBytes();
+          unchangedParticipant = participantBytes.length === size && sha256_(participantBytes) === previous.sha256 && detectMime_(participantBytes) === previous.mimeType;
+        }
+        var participantRecord = Object.assign({}, previous, {
+          eligible: consented && unchangedParticipant,
+          modifiedAt: unchangedParticipant ? modifiedAt : previous.modifiedAt
+        });
+        if (EXPOSURE_CONFIG_.sourcesHeaders.some(function (key) { return previous[key] !== participantRecord[key]; })) updates.push(participantRecord);
+        if (!participantRecord.eligible) {
+          skipped++;
+          issue(file, unchangedParticipant ? "CONSENT_NOT_GRANTED" : "SOURCE_CHANGED", size, mimeType);
+        }
+        continue;
+      }
+      // An interrupted managed write moved manually into this folder is not a
+      // new artist contribution. Its missing archive record needs repair.
+      if (!previous && /^(?:source-[0-9a-f]{64}\.|result-[0-9a-f-]+\.|participant_photo_\d+\.)/i.test(file.getName())) {
+        complete = false; skipped++; issue(file, "ARCHIVE_RECORD_MISSING", size, mimeType); continue;
+      }
       var unchanged = previous && previous.kind === "artist" && previous.modifiedAt === modifiedAt &&
         Number(previous.byteLength) === size && previous.mimeType === mimeType && /^[0-9a-f]{64}$/.test(previous.sha256);
       var hash;
       if (unchanged) hash = previous.sha256;
       else {
         if (reads >= EXPOSURE_CONFIG_.maxArtistReads || readBytes + size > EXPOSURE_CONFIG_.maxArtistReadBytes) {
-          complete = false; deferred++; preserve(fileId); continue;
+          complete = false; deferred++; preserve(fileId); issue(file, "SCAN_DEFERRED", size, mimeType); continue;
         }
         reads++; readBytes += size;
         var bytes = file.getBlob().getBytes();
-        if (bytes.length !== size || detectMime_(bytes) !== mimeType) { skipped++; continue; }
+        var detectedMime = detectMime_(bytes);
+        if (bytes.length !== size || detectedMime !== mimeType) {
+          skipped++;
+          issue(file, bytes.length !== size ? "CONTENT_LENGTH_MISMATCH" : "CONTENT_TYPE_MISMATCH", size, mimeType, detectedMime);
+          continue;
+        }
         hash = sha256_(bytes);
       }
       retainedIds[fileId] = true;
@@ -331,16 +391,16 @@ function refreshArtistSources_(project) {
         sourceId: fileId, sha256: hash, nameJson: JSON.stringify(cleanName_(file.getName())),
         mimeType: mimeType, byteLength: size, kind: "artist", eligible: !seenHashes[hash], modifiedAt: modifiedAt
       });
-      if (seenHashes[hash]) skipped++;
+      if (seenHashes[hash]) { skipped++; issue(file, "DUPLICATE", size, mimeType); }
       seenHashes[hash] = true;
       // Retain duplicate hashes and metadata too, avoiding repeated downloads.
       if (!previous || EXPOSURE_CONFIG_.sourcesHeaders.some(function (key) { return previous[key] !== record[key]; })) updates.push(record);
     } catch (error) {
-      complete = false; skipped++; preserve(fileId);
+      complete = false; skipped++; preserve(fileId); issue(file, "READ_FAILED", size, mimeType);
     }
   }
   existing.forEach(function (source) {
-    if (source.kind === "artist" && !retainedIds[source.sourceId] && isEligible_(source)) {
+    if (!retainedIds[source.sourceId] && isEligible_(source)) {
       source.eligible = false;
       updates.push(source);
     }
@@ -351,7 +411,8 @@ function refreshArtistSources_(project) {
     artistCount: readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders).filter(function (source) {
       return source.kind === "artist" && isEligible_(source);
     }).length,
-    skipped: skipped, preserved: preserved, deferred: deferred
+    skipped: skipped, preserved: preserved, deferred: deferred, complete: complete,
+    issues: issues, omittedIssues: omittedIssues
   };
   console.log(JSON.stringify(summary));
   return summary;
@@ -374,11 +435,11 @@ function bootstrap_(project) {
 
 function begin_(project, payload) {
   var submissionId = submissionId_(payload.submissionId);
-  syncArtistSourcesIfDue_(project);
   if (payload.reuse !== undefined && !isObject_(payload.reuse)) {
     throw apiError_("INVALID_REQUEST", "The previous exposure could not be verified.");
   }
   var reusing = isObject_(payload.reuse);
+  if (reusing) syncArtistSourcesIfDue_(project);
   if (reusing === (payload.original !== undefined)) {
     throw apiError_("INVALID_REQUEST", "Choose one photograph or one saved exposure to pair.");
   }
@@ -403,6 +464,10 @@ function begin_(project, payload) {
       throw apiError_("INVALID_REQUEST", "The photograph sharing choice is invalid.");
     }
     original = imageInput_(payload.original, EXPOSURE_CONFIG_.maxOriginalBytes, false);
+    // Refresh even inside the usual cache window: a file just dropped into
+    // Drive must be considered before deciding to save another physical copy.
+    var scan = refreshArtistSources_(project);
+    if (!scan.complete) throw apiError_("COLLECTION_REFRESHING", "The photograph collection is still being checked. Please retry in a moment.");
     originalHash = original.hash;
     allowReuse = payload.allowReuse === true;
   }
@@ -484,6 +549,10 @@ function complete_(project, payload) {
     if (submission.resultSha256 && (submission.resultSha256 !== result.hash || Number(submission.width) !== dimensions.width || Number(submission.height) !== dimensions.height || submission.settingsJson !== settingsJson)) {
       throw apiError_("RESULT_CONFLICT", "This submission already has a different result. Start a new submission to save another result.", true);
     }
+    var sourceMatch = readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders).some(function (source) {
+      return source.sha256 === result.hash;
+    });
+    if (sourceMatch) throw apiError_("RESULT_MATCHES_SOURCE", "The finished exposure is identical to an archived original. No additional copy was saved.");
     if (!submission.resultSha256) {
       submission.resultSha256 = result.hash;
       submission.width = dimensions.width;
@@ -492,8 +561,7 @@ function complete_(project, payload) {
       submission.status = "saving";
       writeRecord_(project.submissions, EXPOSURE_CONFIG_.submissionsHeaders, submission);
     }
-    var filename = "result-" + submissionId + "-" + result.hash + ".jpg";
-    var file = recoverOrCreate_(project, project.results, filename, result);
+    var file = saveResult_(project, result);
     submission.resultId = file.getId();
     submission.status = "complete";
     if (!submission.completedAt) submission.completedAt = now_();
@@ -502,9 +570,8 @@ function complete_(project, payload) {
     if (!original) throw apiError_("ARCHIVE_UNAVAILABLE", "The original's archive record is unavailable. Please retry.", true);
     // Eligibility follows the saved result and this photograph's consent.
     // A retry repairs an interrupted final update without another file write.
-    if ((submission.allowReuse === true || submission.allowReuse === "true") && !isEligible_(original)) {
-      original.eligible = true;
-      writeRecord_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders, original);
+    if ((submission.allowReuse === true || submission.allowReuse === "true") && original.kind === "participant") {
+      shareParticipantOriginal_(project, original);
     }
     var currentBase = findRecord_(readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders), "sourceId", submission.baseId);
     var alternatives = currentBase ? eligibleSources_(project, submission.originalSha256, includeParticipants_(), submission.baseSha256 || currentBase.sha256) : [];
@@ -518,12 +585,17 @@ function complete_(project, payload) {
 
 function saveOriginal_(project, image) {
   var sources = readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders);
-  var existing = sources.filter(function (source) { return source.kind === "participant" && source.sha256 === image.hash; })[0];
-  if (existing) {
-    // Verify the archived file rather than trust only a stale index entry.
-    readSource_(existing);
-    return existing;
+  var matches = sources.filter(function (source) { return source.sha256 === image.hash; });
+  if (matches.length) {
+    // Reuse an artist's existing photo too. Do not move it, rename it, or store
+    // another participant copy of exactly the same original bytes.
+    for (var index = 0; index < matches.length; index++) {
+      try { readSource_(matches[index]); return matches[index]; }
+      catch (error) { /* Try another already indexed copy before failing closed. */ }
+    }
+    throw apiError_("ARCHIVE_UNAVAILABLE", "This photograph is already recorded but its saved copy could not be verified. Please retry.");
   }
+  rejectArchivedResult_(project, image);
   var filename = "source-" + image.hash + "." + extension_(image.mimeType);
   var file = recoverOrCreate_(project, project.originals, filename, image);
   var source = {
@@ -534,15 +606,70 @@ function saveOriginal_(project, image) {
   return source;
 }
 
+// A contribution keeps the same file ID and bytes. The source-row ordinal is
+// stable across retries and avoids a second counter or a duplicate Drive write.
+function shareParticipantOriginal_(project, source) {
+  readSource_(source);
+  var file = ArchiveDrive.getFileById(source.sourceId);
+  var filename = "participant_photo_" + (source._row - 1) + "." + extension_(source.mimeType);
+  // Persist the participant role before moving. Folder discovery can then never
+  // mistake this managed original for an artist photo if a later write fails.
+  file.markParticipantPhoto(filename);
+  file.moveTo(ArchiveDrive.getFolderById(project.artist.getId()));
+  source.nameJson = JSON.stringify(filename);
+  source.modifiedAt = file.getLastUpdated().toISOString();
+  source.eligible = true;
+  writeRecord_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders, source);
+}
+
+function rejectArchivedResult_(project, image) {
+  var completed = readRecords_(project.submissions, EXPOSURE_CONFIG_.submissionsHeaders).some(function (submission) {
+    return submission.resultSha256 === image.hash;
+  });
+  var savedResult = project.results.getFilesByName("result-" + image.hash + ".jpg");
+  if (completed || savedResult.hasNext()) {
+    throw apiError_("ALREADY_ARCHIVED_RESULT", "This file is already archived as a finished exposure. Choose an original photograph instead; no additional copy was saved.");
+  }
+}
+
+function saveResult_(project, image) {
+  var submissions = readRecords_(project.submissions, EXPOSURE_CONFIG_.submissionsHeaders);
+  var matching = submissions.filter(function (submission) { return submission.resultSha256 === image.hash; });
+  var saved = matching.filter(function (submission) { return submission.resultId; });
+  if (saved.length) {
+    for (var index = 0; index < saved.length; index++) {
+      try {
+        var file = ArchiveDrive.getFileById(saved[index].resultId);
+        verifyImageFile_(file, image);
+        return file;
+      } catch (error) { /* Verify another recorded reference, never make a copy. */ }
+    }
+    throw apiError_("ARCHIVE_UNAVAILABLE", "This finished exposure is already recorded but its saved copy could not be verified. Please retry.");
+  }
+  // Earlier versions included a submission ID in result filenames. Recover
+  // those interrupted writes before adopting the new shared content filename.
+  for (var legacyIndex = 0; legacyIndex < matching.length; legacyIndex++) {
+    var legacyFiles = project.results.getFilesByName("result-" + matching[legacyIndex].submissionId + "-" + image.hash + ".jpg");
+    if (legacyFiles.hasNext()) return verifyImageFile_(legacyFiles.next(), image);
+  }
+  // Hash-only names recover a Drive write even if it preceded a failed index
+  // update or belongs to another submission producing exactly the same JPEG.
+  return recoverOrCreate_(project, project.results, "result-" + image.hash + ".jpg", image);
+}
+
+function verifyImageFile_(file, image) {
+  var bytes = file.getBlob().getBytes();
+  if (bytes.length !== image.bytes.length || sha256_(bytes) !== image.hash || detectMime_(bytes) !== image.mimeType) {
+    throw apiError_("STORAGE_CONFLICT", "An archive file could not be verified. Please contact the artist.");
+  }
+  return file;
+}
+
 function recoverOrCreate_(project, folder, filename, image) {
   var files = folder.getFilesByName(filename);
   if (files.hasNext()) {
     var file = files.next();
-    var bytes = file.getBlob().getBytes();
-    if (bytes.length !== image.bytes.length || sha256_(bytes) !== image.hash || detectMime_(bytes) !== image.mimeType) {
-      throw apiError_("STORAGE_CONFLICT", "An archive file could not be verified. Please contact the artist.");
-    }
-    return file;
+    return verifyImageFile_(file, image);
   }
   // Reserve before Drive writes. A retry reuses this key, including when the
   // previous attempt stopped after reservation or after creating the file.

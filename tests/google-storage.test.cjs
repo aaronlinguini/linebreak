@@ -494,9 +494,13 @@ test("the real backend archives through the limited adapters with consent, origi
 
   const originals = [...h.files.values()].filter(file => file.metadata.parents.includes(h.properties.get("EXPOSURE_ORIGINALS_FOLDER_ID")));
   const results = [...h.files.values()].filter(file => file.metadata.parents.includes(h.properties.get("EXPOSURE_RESULTS_FOLDER_ID")));
-  assert.equal(originals.length, 1);
+  assert.equal(originals.length, 0, "a completed opt-in moves the original out of private-only intake");
   assert.equal(results.length, 2);
-  assert.deepEqual(Buffer.from(originals[0].bytes), Buffer.from(image(2).base64, "base64"), "the original archive preserves exact bytes");
+  const promoted = h.files.get(first.originalId);
+  assert.deepEqual(Array.from(promoted.metadata.parents), [h.properties.get("EXPOSURE_ARTIST_FOLDER_ID")]);
+  assert.match(promoted.metadata.name, /^participant_photo_[1-9]\d*\.jpg$/);
+  assert.equal(promoted.metadata.appProperties.exposureRole, "participant");
+  assert.deepEqual(Buffer.from(promoted.bytes), Buffer.from(image(2).base64, "base64"), "moving and identifying the original preserves exact bytes");
   assert.deepEqual(h.records("Submissions").map(row => [row.status, row.allowReuse]), [["complete", false], ["complete", true]]);
 
   const usage = h.records("Usage");
@@ -558,4 +562,58 @@ test("the real owner RPC denies anonymous and other-account calls before reachin
     assert.throws(() => h.sandbox.setupProject(), error => error.exposureCode_ === "OWNER_REQUIRED");
   }
   assert.equal(JSON.stringify(Object.fromEntries(Object.entries(h.calls).map(([name, calls]) => [name, calls.length]))), before);
+});
+
+test("participant provenance and numbered name are written atomically only on managed image files", () => {
+  const h = harness();
+  const root = h.drive.createFolder("Project");
+  const originals = root.createFolder("participant_uploads");
+  const artist = root.createFolder("My_photos");
+  const image = originals.createFile(new h.Blob([1, -2, 3], "image/jpeg", "source.jpg"));
+  const before = h.calls.update.length;
+  image.markParticipantPhoto("participant_photo_1.jpg");
+  assert.equal(h.calls.update.length, before + 1);
+  const write = h.calls.update.at(-1);
+  assert.equal(write.resource.name, "participant_photo_1.jpg");
+  assert.equal(write.resource.appProperties.exposureRole, "participant");
+  assert.equal(h.files.get(image.getId()).metadata.appProperties.exposureArchive, "drive-file-v1");
+  assert.equal(image.isParticipantPhoto(), true);
+  image.moveTo(artist);
+  assert.deepEqual(Array.from(h.files.get(image.getId()).metadata.parents), [artist.getId()]);
+  assert.equal(h.drive.getArtistFileById(image.getId(), artist.getId()).isParticipantPhoto(), true);
+  assert.equal(h.calls.create.filter(call => call.resource.mimeType === "image/jpeg").length, 1, "classification and movement do not copy image bytes");
+});
+
+test("participant marker writes cannot broaden read-only source access", () => {
+  const h = harness();
+  const artist = h.addFile({ mimeType: folderType, isAppAuthorized: false, appProperties: {} }, []);
+  const image = h.addFile({ parents: [artist.id], isAppAuthorized: false, appProperties: {} });
+  const source = h.drive.getArtistFileById(image.id, artist.id);
+  assert.equal(source.isParticipantPhoto(), false);
+  assert.throws(() => source.markParticipantPhoto("participant_photo_1.jpg"));
+  assert.equal(h.calls.update.length, 0);
+  assert.equal(h.files.get(image.id).metadata.name, "image.jpg");
+});
+
+test("the real adapters deduplicate existing Drive bases and repeated composite bytes across new submissions", () => {
+  const h = backendHarness();
+  h.sandbox.setupProject();
+  const artistFolderId = h.properties.get("EXPOSURE_ARTIST_FOLDER_ID");
+  const dropped = image(31, "artist-original.jpg");
+  const source = h.addFile({ name: dropped.name, parents: [artistFolderId], isAppAuthorized: false, appProperties: {} }, Buffer.from(dropped.base64, "base64"));
+  h.artist("import", { image: image(32) });
+  const settings = { baseExposure: 0, participantExposure: 0, contrast: 12, monochrome: true };
+  const receipts = [];
+  for (const number of [1, 2]) {
+    const begun = h.api("begin", { submissionId: crypto.randomUUID(), original: image(31, `test-copy-${number}.jpg`), allowReuse: true });
+    assert.equal(begun.originalId, source.id);
+    receipts.push(h.api("complete", { submissionId: begun.submissionId, token: begun.token, result: image(40), width: 720, height: 480, settings }));
+  }
+  assert.equal(receipts[0].resultId, receipts[1].resultId);
+  const originals = [...h.files.values()].filter(file => file.metadata.parents.includes(h.properties.get("EXPOSURE_ORIGINALS_FOLDER_ID")));
+  const results = [...h.files.values()].filter(file => file.metadata.parents.includes(h.properties.get("EXPOSURE_RESULTS_FOLDER_ID")));
+  assert.equal(originals.length, 0);
+  assert.equal(results.length, 1);
+  assert.equal(h.files.get(source.id).metadata.name, "artist-original.jpg");
+  assert.deepEqual(h.files.get(source.id).metadata.appProperties, {}, "an artist's dropped original is not reclassified or modified");
 });

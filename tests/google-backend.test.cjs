@@ -26,7 +26,7 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
   const properties = new Map([["SITE_URL", "https://artist.example/exposures/"], ["PROJECT_OWNER_EMAIL", projectOwnerEmail]]);
   const io = { driveCalls: 0, blobReads: 0, listings: 0, sheetWrites: Object.create(null) };
   const logs = [];
-  const failures = { sheetWrite: null, fileCreate: false };
+  const failures = { sheetWrite: null, fileCreate: false, participantMark: false, fileMove: false };
   const iterator = (values) => { let index = 0; return { hasNext: () => index < values.length, next: () => values[index++] }; };
   const id = (kind) => `${kind}-${++nextId}`;
 
@@ -47,13 +47,18 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
   class File {
     constructor(blob, folder) {
       this.id = id("file"); this.blob = blob.copyBlob(); this.folder = folder;
-      this.trashed = false; this.date = new Date("2026-10-25T00:00:00Z");
+      this.trashed = false; this.participant = false; this.date = new Date("2026-10-25T00:00:00Z");
       files.set(this.id, this);
       if (folder) folder.files.push(this);
     }
     getId() { return this.id; }
     getName() { return this.blob.name; }
     setName(value) { this.blob.name = value; return this; }
+    isParticipantPhoto() { return this.participant; }
+    markParticipantPhoto(value) {
+      if (failures.participantMark) { failures.participantMark = false; throw new Error("Simulated participant marker failure"); }
+      this.participant = true; this.blob.name = value; return this;
+    }
     getBlob() { io.blobReads++; return this.blob.copyBlob(); }
     getMimeType() { return this.blob.type; }
     getSize() { return this.blob.bytes.length; }
@@ -64,6 +69,7 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
     setTrashed(value) { this.trashed = value; return this; }
     getParents() { return iterator(this.folder ? [this.folder] : []); }
     moveTo(folder) {
+      if (failures.fileMove) { failures.fileMove = false; throw new Error("Simulated Drive move failure"); }
       if (this.folder) this.folder.files = this.folder.files.filter((file) => file !== this);
       this.folder = folder; folder.files.push(this); return this;
     }
@@ -283,7 +289,8 @@ test("another pairing reuses an authenticated original, chooses a different base
   assert.equal(secondReceipt.saved, true);
   assert.equal(secondReceipt.originalId, firstReceipt.originalId);
   assert.notEqual(secondReceipt.resultId, firstReceipt.resultId);
-  assert.equal(backend.folder("Participant").files.length, 1);
+  assert.equal(backend.folder("Participant").files.length, 0, "the consented original lives only in the shared base folder");
+  assert.equal(backend.folder("Artist").files.filter(file => file.getId() === first.originalId).length, 1);
   assert.equal(backend.folder("Double exposure").files.length, 2);
   const rows = [...backend.books.values()][0].getSheetByName("Submissions").rows;
   const secondRow = rows.find((row) => row.includes(second.submissionId));
@@ -408,17 +415,21 @@ test("duplicate participant files share one stored source while each result is r
   const first = backend.begin(1, 22, true); backend.data("complete", backend.completePayload(first, 90));
   const second = backend.begin(2, 22); backend.data("complete", backend.completePayload(second, 91));
   assert.equal(first.originalId, second.originalId);
-  assert.equal(backend.folder("Participant").files.length, 1);
+  assert.equal(backend.folder("Participant").files.length, 0);
+  assert.equal(backend.folder("Artist").files.filter(file => file.getId() === first.originalId).length, 1);
   assert.equal(backend.folder("Double exposure").files.length, 2);
   assert.equal(backend.data("bootstrap").totalEligible, 2, "a duplicate must not gain additional selection weight");
 });
 
-test("a participant copy of an artist photograph does not gain extra weight in the shared pool", () => {
-  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.seed(2); backend.refresh();
+test("a participant or artist test reusing an artist photograph creates no extra physical copy", () => {
+  const backend = makeBackend(); backend.setup(); const artist = backend.seed(1); backend.seed(2); backend.refresh();
   const begun = backend.begin(1, 1);
   assert.equal(Buffer.from(begun.base.base64, "base64").equals(jpeg(2)), true);
   backend.data("complete", backend.completePayload(begun));
-  assert.equal(backend.folder("Participant").files.length, 1, "the participant original is still archived");
+  assert.equal(begun.originalId, artist.getId());
+  assert.equal(backend.folder("Participant").files.length, 0, "the artist's existing file is the original archive reference");
+  assert.equal(artist.getName(), "artist-1.jpg", "reusing an artist file must not rename it as a participant photo");
+  assert.equal(artist.isParticipantPhoto(), false);
   assert.equal(backend.data("bootstrap").totalEligible, 2, "identical image content should have one place in the pool");
 });
 
@@ -997,4 +1008,303 @@ test("large new-folder batches make bounded progress without delaying every phot
   assert.equal(backend.data("bootstrap").artistCount, 11);
   assert.equal(backend.io.blobReads, 11, "the next request reuses ten cached files and reads only the deferred file");
   assert.ok(backend.properties.get("EXPOSURE_ARTIST_REFRESHED_AT"));
+});
+
+test("late consent moves one unchanged original into the base folder and retains participant provenance", () => {
+  const backend = makeBackend(); backend.setup(); const artist = backend.seed(1); backend.seed(2); backend.refresh();
+  const first = backend.begin(1, 22, false);
+  backend.data("complete", backend.completePayload(first, 90));
+  const participant = backend.files.get(first.originalId);
+  const before = backend.files.size;
+  assert.equal(participant.folder, backend.folder("Participant"));
+  const optedIn = backend.begin(2, 22, true);
+  assert.equal(optedIn.originalId, first.originalId);
+  assert.equal(participant.folder, backend.folder("Participant"), "selecting consent alone does not expose an unfinished submission");
+  const request = backend.completePayload(optedIn, 91);
+  backend.data("complete", request);
+  assert.equal(backend.files.size, before + 1, "only the new result is written; promoting the original is a move");
+  assert.equal(participant.folder, backend.folder("Artist"));
+  assert.match(participant.getName(), /^participant_photo_[1-9]\d*\.jpg$/);
+  assert.deepEqual(participant.blob.bytes, jpeg(22));
+  assert.equal(participant.isParticipantPhoto(), true);
+  const promotedName = participant.getName();
+  backend.refresh();
+  const status = backend.data("bootstrap");
+  assert.equal(status.artistCount, 2);
+  assert.equal(status.participantCount, 1);
+  assert.equal(backend.records("Sources").find(source => source.sourceId === participant.getId()).kind, "participant");
+  backend.data("complete", request);
+  backend.data("complete", backend.completePayload(first, 90));
+  assert.equal(participant.getName(), promotedName, "retries retain the participant's assigned number");
+  assert.equal(participant.folder, backend.folder("Artist"), "an earlier opt-out does not revoke a completed opt-in");
+  assert.equal(artist.getName(), "artist-1.jpg");
+  backend.properties.set("INCLUDE_PARTICIPANT_PHOTOS", "false");
+  assert.equal(backend.data("bootstrap").totalEligible, 2, "participant provenance survives a folder scan and global exclusion");
+});
+
+test("different consenting participants receive distinct stable numbered names", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const names = [];
+  for (const number of [1, 2, 3]) {
+    const begun = backend.begin(number, 20 + number, true);
+    const request = backend.completePayload(begun, 80 + number);
+    backend.data("complete", request);
+    names.push(backend.files.get(begun.originalId).getName());
+    backend.data("complete", request);
+    assert.equal(backend.files.get(begun.originalId).getName(), names.at(-1));
+  }
+  assert.equal(new Set(names).size, 3);
+  for (const name of names) assert.match(name, /^participant_photo_[1-9]\d*\.jpg$/);
+  assert.equal(backend.folder("Participant").files.length, 0);
+  assert.equal(backend.folder("Artist").files.length, 4);
+});
+
+test("moving a private participant original into My_photos never bypasses consent", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const begun = backend.begin(1, 22, false);
+  backend.data("complete", backend.completePayload(begun, 90));
+  const originalFile = backend.files.get(begun.originalId);
+  originalFile.moveTo(backend.folder("Artist"));
+  originalFile.setName("looks-like-an-artist-photo.jpg");
+  backend.refresh();
+  assert.equal(backend.data("bootstrap").totalEligible, 1);
+  const record = backend.records("Sources").find(source => source.sourceId === begun.originalId);
+  assert.equal(record.kind, "participant");
+  assert.equal(record.eligible, false);
+});
+
+test("a marked participant file without a completed consent record is not discovered as an artist base", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const orphan = backend.seed(22, "participant_photo_123.jpg");
+  orphan.markParticipantPhoto(orphan.getName());
+  backend.refresh();
+  const status = backend.data("bootstrap");
+  assert.equal(status.artistCount, 1);
+  assert.equal(status.participantCount, 0);
+  assert.equal(backend.records("Sources").filter(source => source.sourceId === orphan.getId() && source.kind === "artist").length, 0);
+});
+
+for (const boundary of ["participantMark", "fileMove"]) {
+  test(`a failed ${boundary} promotion retries without duplicate originals or a second participant number`, () => {
+    const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+    const begun = backend.begin(1, 22, true);
+    const request = backend.completePayload(begun, 90);
+    backend.failures[boundary] = true;
+    const first = backend.api("complete", request);
+    assert.equal(first.ok, false);
+    assert.equal(first.error.originalSaved, true);
+    const fileCount = backend.files.size;
+    const receipt = backend.data("complete", request);
+    const stored = backend.files.get(receipt.originalId);
+    assert.equal(backend.files.size, fileCount, "retry repairs promotion rather than creating another image");
+    assert.equal(stored.folder, backend.folder("Artist"));
+    assert.match(stored.getName(), /^participant_photo_[1-9]\d*\.jpg$/);
+    assert.equal(backend.folder("Participant").files.length, 0);
+    assert.equal(backend.folder("Double exposure").files.length, 1);
+    assert.equal(backend.data("bootstrap").participantCount, 1);
+  });
+}
+
+test("identical finished exposures from separate submissions share one verified archived file", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.seed(2); backend.refresh();
+  const receipts = [];
+  for (const number of [1, 2, 3]) {
+    const begun = backend.begin(number, 22, number === 1);
+    receipts.push(backend.data("complete", backend.completePayload(begun, 90)));
+  }
+  assert.equal(new Set(receipts.map(receipt => receipt.originalId)).size, 1);
+  assert.equal(new Set(receipts.map(receipt => receipt.resultId)).size, 1, "same result bytes must not create another Drive copy, including artist tests");
+  assert.equal(backend.folder("Double exposure").files.length, 1);
+  assert.equal(backend.folder("Artist").files.length, 3);
+  assert.equal(backend.folder("Participant").files.length, 0);
+  assert.equal(backend.records("Submissions").length, 3, "each exposure's receipt and consent history is still recorded");
+  assert.equal(backend.usage().filter(row => row[2] === "file").length, 2, "one original and one unique result are charged");
+});
+
+test("a fresh Drive drop is checked before an identical test upload even inside the cached-scan interval", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const dropped = backend.seed(22, "owner-new-photo.jpg");
+  const begun = backend.begin(1, 22, true);
+  assert.equal(begun.originalId, dropped.getId());
+  backend.data("complete", backend.completePayload(begun, 90));
+  assert.equal(backend.folder("Participant").files.length, 0);
+  assert.equal(dropped.getName(), "owner-new-photo.jpg");
+  assert.equal(dropped.isParticipantPhoto(), false);
+  assert.equal(backend.data("bootstrap").artistCount, 2);
+});
+
+test("an existing completed exposure cannot be uploaded again as a new original copy", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const first = backend.begin(1, 22);
+  backend.data("complete", backend.completePayload(first, 90));
+  const count = backend.files.size;
+  const attempt = backend.api("begin", { submissionId: submissionId(2), original: original(90, "renamed-result.jpg"), allowReuse: true });
+  assert.equal(attempt.ok, false);
+  assert.equal(attempt.error.code, "ALREADY_ARCHIVED_RESULT");
+  assert.equal(backend.files.size, count, "rejecting a cross-role duplicate must not create an original copy");
+});
+
+test("a composite identical to an existing base or its own original is rejected before another file write", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const first = backend.begin(1, 22);
+  const count = backend.files.size;
+  for (const marker of [1, 22]) {
+    const result = backend.api("complete", backend.completePayload(first, marker));
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "RESULT_MATCHES_SOURCE");
+    assert.equal(backend.files.size, count);
+    assert.equal(backend.folder("Double exposure").files.length, 0);
+  }
+});
+
+test("a recorded legacy composite is reused by content regardless of its old submission-based filename", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const first = backend.begin(1, 22);
+  const saved = backend.data("complete", backend.completePayload(first, 90));
+  const file = backend.files.get(saved.resultId);
+  file.setName(`result-${first.submissionId}-${crypto.createHash("sha256").update(jpeg(90)).digest("hex")}.jpg`);
+  const second = backend.begin(2, 23);
+  const repeated = backend.data("complete", backend.completePayload(second, 90));
+  assert.equal(repeated.resultId, saved.resultId);
+  assert.equal(backend.folder("Double exposure").files.length, 1);
+});
+
+test("an unreadable recorded duplicate never causes a replacement copy to be silently written", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const first = backend.begin(1, 22);
+  const saved = backend.data("complete", backend.completePayload(first, 90));
+  backend.files.get(saved.resultId).getBlob = () => { throw new Error("Temporary Drive read failure"); };
+  const second = backend.begin(2, 23);
+  const count = backend.files.size;
+  const result = backend.api("complete", backend.completePayload(second, 90));
+  assert.equal(result.ok, false);
+  assert.equal(backend.files.size, count);
+  assert.equal(backend.folder("Double exposure").files.length, 1);
+});
+
+test("unfinished bounded collection scans refuse new originals until duplicate checking can finish", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  for (let marker = 10; marker <= 21; marker++) backend.seed(marker);
+  const attempt = backend.api("begin", { submissionId: submissionId(1), original: original(21), allowReuse: true });
+  assert.equal(attempt.ok, false);
+  assert.equal(attempt.error.code, "COLLECTION_REFRESHING");
+  assert.equal(backend.folder("Participant").files.length, 0, "the duplicate check is incomplete, so no upload is saved yet");
+  const retry = backend.begin(1, 21, true);
+  assert.equal(backend.files.get(retry.originalId).folder, backend.folder("Artist"));
+  assert.equal(backend.folder("Participant").files.length, 0);
+});
+
+test("owner test imports reuse private participant originals without granting consent or copying them", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const begun = backend.begin(1, 22, false);
+  backend.data("complete", backend.completePayload(begun, 90));
+  const count = backend.files.size;
+  const response = clone(backend.sandbox.artistApi({ action: "import", payload: { image: original(22, "artist-test-copy.jpg") } }));
+  assert.equal(response.ok, true);
+  assert.equal(response.data.duplicate, true);
+  assert.equal(backend.files.size, count);
+  assert.equal(backend.files.get(begun.originalId).folder, backend.folder("Participant"));
+  assert.equal(backend.data("bootstrap").participantCount, 0, "the owner's repeated test does not manufacture participant consent");
+  const rejected = clone(backend.sandbox.artistApi({ action: "import", payload: { image: original(90, "result-test-copy.jpg") } }));
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.error.code, "ALREADY_ARCHIVED_RESULT");
+  assert.equal(backend.files.size, count);
+});
+
+test("an interrupted old-version composite write is recovered after its filename convention changes", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const first = backend.begin(1, 22);
+  const payload = backend.completePayload(first, 90);
+  backend.failures.sheetWrite = (sheet, values) => sheet.name === "Submissions" && values.some(row => row.includes("complete"));
+  assert.equal(backend.api("complete", payload).ok, false);
+  const file = backend.folder("Double exposure").files[0];
+  const hash = crypto.createHash("sha256").update(jpeg(90)).digest("hex");
+  file.setName(`result-${first.submissionId}-${hash}.jpg`);
+  const before = backend.files.size;
+  const saved = backend.data("complete", payload);
+  assert.equal(saved.resultId, file.getId());
+  assert.equal(backend.files.size, before);
+  assert.equal(backend.folder("Double exposure").files.length, 1);
+});
+
+test("an unindexed original moved into My_photos blocks duplicate creation until its archive record is repaired", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  backend.failures.sheetWrite = (sheet, values) => sheet.name === "Sources" && values.some(row => row.includes("participant"));
+  const failed = backend.api("begin", { submissionId: submissionId(1), original: original(22), allowReuse: true });
+  assert.equal(failed.ok, false);
+  const orphan = backend.folder("Participant").files[0];
+  assert.match(orphan.getName(), /^source-[a-f0-9]{64}\.jpg$/);
+  assert.equal(backend.records("Sources").some(source => source.sourceId === orphan.getId()), false);
+  orphan.moveTo(backend.folder("Artist"));
+  const count = backend.files.size;
+  const retry = backend.api("begin", { submissionId: submissionId(1), original: original(22), allowReuse: true });
+  assert.equal(retry.ok, false);
+  assert.equal(retry.error.code, "COLLECTION_REFRESHING");
+  assert.equal(backend.files.size, count, "an unverified orphan must never be followed by another physical copy");
+  assert.equal(backend.folder("Participant").files.length, 0);
+});
+
+test("a participant-marked orphan in My_photos prevents unverified new original writes", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const orphan = backend.seed(22, "participant_photo_123.jpg");
+  orphan.markParticipantPhoto(orphan.getName());
+  const count = backend.files.size;
+  const request = backend.api("begin", { submissionId: submissionId(1), original: original(22), allowReuse: false });
+  assert.equal(request.ok, false);
+  assert.equal(request.error.code, "COLLECTION_REFRESHING");
+  assert.equal(backend.files.size, count);
+  assert.equal(backend.folder("Participant").files.length, 0);
+  assert.equal(backend.records("Sources").some(source => source.sourceId === orphan.getId()), false, "a role marker cannot manufacture a consent record");
+});
+
+test("owner refresh identifies skipped image causes using bounded metadata diagnostics", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1, "valid.jpg");
+  const oversized = backend.seed(22, "oversized.jpg");
+  oversized.getSize = () => 30 * 1024 * 1024 + 1;
+  backend.seed(23, "wrong-content.png", "image/png", jpeg(23));
+  const changedLength = backend.seed(24, "changed-length.jpg");
+  changedLength.getSize = () => jpeg(24).length + 1;
+  backend.seed(25, "unsupported.heic", "image/heic", jpeg(25));
+  const failedRead = backend.seed(26, "temporarily-unreadable.jpg");
+  failedRead.getBlob = () => { throw new Error("private-authorization-token https://private.example/secret"); };
+  const summary = clone(backend.refresh());
+  assert.equal(summary.artistCount, 1);
+  assert.equal(summary.skipped, 5);
+  assert.equal(summary.complete, false, "a transient read failure remains retryable");
+  const issues = Object.fromEntries(summary.issues.map(issue => [issue.name, issue]));
+  assert.equal(issues["oversized.jpg"].reasonCode, "IMAGE_TOO_LARGE");
+  assert.equal(issues["oversized.jpg"].bytes, 30 * 1024 * 1024 + 1);
+  assert.deepEqual(issues["wrong-content.png"], { name: "wrong-content.png", reasonCode: "CONTENT_TYPE_MISMATCH", bytes: jpeg(23).length, mimeType: "image/png", detectedMime: "image/jpeg" });
+  assert.equal(issues["changed-length.jpg"].reasonCode, "CONTENT_LENGTH_MISMATCH");
+  assert.equal(issues["unsupported.heic"].reasonCode, "UNSUPPORTED_IMAGE");
+  assert.equal(issues["temporarily-unreadable.jpg"].reasonCode, "READ_FAILED");
+  assert.equal(summary.omittedIssues, 0);
+  const logged = JSON.stringify({ summary, logs: backend.logs });
+  assert.doesNotMatch(logged, /private-authorization-token|private\.example|base64|stack/);
+  for (const issue of summary.issues) {
+    assert.ok(Object.keys(issue).every(key => ["name", "reasonCode", "bytes", "mimeType", "detectedMime"].includes(key)), "diagnostics contain no image data or Drive file identifiers");
+  }
+});
+
+test("owner refresh caps per-file diagnostics without losing the skipped-file count", () => {
+  const backend = makeBackend(); backend.setup();
+  for (let number = 0; number < 53; number++) backend.seed(number, `unsupported-${number}.heic`, "image/heic");
+  const summary = clone(backend.refresh());
+  assert.equal(summary.issues.length, 50);
+  assert.equal(summary.omittedIssues, 3);
+  assert.equal(summary.skipped, 53);
+  assert.equal(backend.io.blobReads, 0, "unsupported metadata does not download image bytes");
+});
+
+test("anonymous collection bootstrap never exposes the owner's per-file diagnostics", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1, "valid.jpg");
+  const oversized = backend.seed(22, "private-filename.jpg");
+  oversized.getSize = () => 30 * 1024 * 1024 + 1;
+  const summary = clone(backend.refresh());
+  assert.equal(summary.issues[0].name, "private-filename.jpg");
+  const publicStatus = backend.data("bootstrap");
+  assert.equal(publicStatus.artistCount, 1);
+  assert.equal("issues" in publicStatus, false);
+  assert.equal("omittedIssues" in publicStatus, false);
+  assert.doesNotMatch(JSON.stringify(publicStatus), /private-filename/);
 });

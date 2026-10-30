@@ -13,19 +13,19 @@ The user chose the dedicated account **aaron.double.exposure.project@gmail.com**
 | `UPLOADS_PAUSED` | `true` |
 | `ALLOWED_ORIGINS` | `http://127.0.0.1:5500,http://localhost:5500` |
 
-**The five files are installed in the new account's “Photo archive” project and verified byte for byte against the tested local files after reloading.** Drive v3 and Sheets v4 appear in Services. All **247 automated checks pass**, including folder discovery without the import API, read-only source boundaries, metadata caching, batched index writes, legacy schema migration, and stable retries. The user manually approved the new-account Google permissions. **`setupProject` completed successfully on October 30, 2026, at 2:18:51 PM**, creating the project's folders and index. **The user then explicitly approved deployment, and Version 1 deployed successfully at 2:27 PM**, executing as **aaron.double.exposure.project@gmail.com** with **Anyone** access.
+**The initial five files were installed in the new account's “Photo archive” project and verified byte for byte against that release's tested local files after reloading.** Drive v3 and Sheets v4 appear in Services. The initial release passed **247 automated checks**, including folder discovery without the import API, read-only source boundaries, metadata caching, batched index writes, legacy schema migration, and stable retries. The user manually approved the new-account Google permissions. **`setupProject` completed successfully on October 30, 2026, at 2:18:51 PM**, creating the project's folders and index. **The user then explicitly approved deployment, and Version 1 deployed successfully at 2:27 PM**, executing as **aaron.double.exposure.project@gmail.com** with **Anyone** access.
 
 The new [Google web app](https://script.google.com/macros/s/AKfycbyzIdwIui57NUjmTMm_XyNMvWNHZixo4UyMedoRtz7Qod4COqvjAbcwGDQounUvsCPv/exec) is configured in `project-config.js` and published. Only that configuration file changed in public GitHub commit [`0cde36215db2df0da80c0570bfb82db217ca3959`](https://github.com/aaronlinguini/double-exposure-online-project/commit/0cde36215db2df0da80c0570bfb82db217ca3959). [GitHub Pages run 41107291539](https://github.com/aaronlinguini/double-exposure-online-project/actions/runs/41107291539) **completed successfully**. The publication checks passed **8/8**, and the published tree contains exactly the nine approved files, with no backend, docs, secrets, or private photographs.
 
-The optional [owner page](https://script.google.com/macros/s/AKfycbyzIdwIui57NUjmTMm_XyNMvWNHZixo4UyMedoRtz7Qod4COqvjAbcwGDQounUvsCPv/exec?view=artist) reported **Collection ready**, **0 photographs**, and all correct new folder links in the project account. A real Chrome Incognito visit denied owner-page access with **Open the artist import page while signed into the account that deployed this project.** The new **My_photos** folder is still empty. **Visitor submissions remain paused; actual photo intake, complete exposures, consent, duplicate handling, another pairing, and device checks are not yet verified live.** Do not wait at the earlier warning, repeat initial setup, clear working IDs, or create another initial deployment.
+The optional [owner page](https://script.google.com/macros/s/AKfycbyzIdwIui57NUjmTMm_XyNMvWNHZixo4UyMedoRtz7Qod4COqvjAbcwGDQounUvsCPv/exec?view=artist) reported **Collection ready** and correct new folder links before photos were added. A real Chrome Incognito visit denied owner-page access with **Open the artist import page while signed into the account that deployed this project.** The user has since dragged base photos into Drive. A live folder listing showed **accidentalselfie.jpeg (16.7 MB)** and **balcony.jpeg (47.8 MB)**. Neither file is currently a usable base. The owner-editor refresh at **3:10:49–3:11:01 PM** returned **artistCount=0, skipped=2, complete=true**. It reported accidentalselfie.jpeg as **CONTENT_TYPE_MISMATCH** (17,501,532 bytes, declared `image/jpeg`, unrecognized content signature) and balcony.jpeg as **IMAGE_TOO_LARGE** (50,164,826 bytes). The first file's actual format is not established by that result; do not guess it. Both need supported, smaller JPEG exports below 30 MB before real participant tests. Neither user file was changed. **Visitor submissions remain paused.** The tested backend was installed and verified by read-back. The folder/consent/deduplication and owner-diagnostic revision passes **270/270 automated checks** and **deployed successfully as Version 3 on October 30 at 3:25 PM**. It keeps the same `/exec` URL, executing account, Anyone access, and OAuth scopes. No frontend or public website files changed. Version 1 and local checkpoint `23fad50` preserve rollback. **Real participant completion, consent-based moves, duplicate reuse, another-pairing, and device checks remain pending.** Do not wait at the earlier warning, repeat initial setup, clear working IDs, or create another initial deployment.
 
 The user can now drag chosen base photos directly into the new [My_photos folder](https://drive.google.com/drive/folders/1KTwgNyGgTgv8HwT1MrBaJeWk-JJIupKY), while signed into **aaron.double.exposure.project@gmail.com**. These are the new project-account archive links:
 
 | Project item | Link |
 | --- | --- |
 | Root folder | [Double_exposure_web_project (app)](https://drive.google.com/drive/folders/10BU2Di0YgAwW_fJ79Z0kDDq3_zBue1hY) |
-| Base photos | [My_photos](https://drive.google.com/drive/folders/1KTwgNyGgTgv8HwT1MrBaJeWk-JJIupKY) |
-| Participant originals | [participant_uploads](https://drive.google.com/drive/folders/1-ZpZKBP9NGF-ODqRxA6OdWBtabEmgwph) |
+| Artist bases and consented participant bases | [My_photos](https://drive.google.com/drive/folders/1KTwgNyGgTgv8HwT1MrBaJeWk-JJIupKY) |
+| Private pending/nonconsenting originals | [participant_uploads](https://drive.google.com/drive/folders/1-ZpZKBP9NGF-ODqRxA6OdWBtabEmgwph) |
 | Finished exposures | [Completed_double_exposures](https://drive.google.com/drive/folders/1pzaRs9SiFmCR8aXMeCLUhFkhXiItKisM) |
 | Index | [Double exposure index](https://docs.google.com/spreadsheets/d/12jxnBQ1yels6UGYMQ_KB-uVuE8UULyMgx7ZX28XZ-JQ/edit) |
 
@@ -82,6 +82,14 @@ Double_exposure_web_project (app)
 
 The index contains **Sources**, **Submissions**, and **Usage** tabs. Setup does not make these files public.
 
+The consent-folder revision uses the existing folders as follows:
+
+- **My_photos** holds the artist's base photographs and participant originals that have an explicit opt-in and a completed result. A participant file moves here once and keeps a stable numbered name such as **participant_photo_1.jpg**; no additional image copy is created.
+- **participant_uploads** privately archives originals that are pending or were submitted without future-use consent. Consent concerns future pairings, not whether the artist retains the original upload.
+- **Completed_double_exposures** holds completed JPEGs. Identical results from separate submissions, retries, or tests reuse one file; the index can record several exposures referring to that same file. Finished exposures never enter the base-photo pool.
+
+If a participant submits a byte-identical copy of an artist base already in `My_photos`, the existing artist file is reused and keeps its name and location. A folder scan preserves participant provenance and consent; a filename alone never grants consent.
+
 ## Add and manage base photographs in Google Drive
 
 Use the new project-account folder links above:
@@ -91,6 +99,8 @@ Use the new project-account folder links above:
 3. Keep photos directly inside **My_photos**. This reader does not recurse through subfolders or follow Drive shortcuts.
 
 No import app or scheduled trigger is needed for normal use. With visitor uploads enabled, the program checks for folder changes when the site connects and before a new pairing. A completed scan is reused for up to one minute. Reload the site or use Retry after adding photographs. While visitor uploads are paused, run **refreshArtistCollection** in the project account's Apps Script editor to check the collection; the optional owner page can also check it.
+
+Owner refresh diagnostics report at most **50** file issues using private metadata such as the filename, declared/detected type, size, and a bounded reason code. They do not include image bytes, access tokens, or file IDs, and are not returned to visitor requests. These diagnostics distinguish unsupported content and oversize files from successful intake.
 
 Each scan reads at most **10 new or changed images** and **64 MiB** of their data. Large additions progress across later requests rather than downloading the whole folder at once. Files with unchanged modification time, size, and type reuse their recorded hashes. The program is not an always-running folder watcher: without site or owner requests, it does not scan in the background.
 
@@ -134,8 +144,8 @@ Keep `UPLOADS_PAUSED=true` until the new account, archive, base photos, deployme
 1. Confirm new photos dropped into **My_photos** become eligible without using the import upload control. Check duplicate files and a later folder addition. The first scan may need several requests for a large batch.
 2. Open the public site in a genuinely signed-out/private browser. Submit a different photo with future reuse unchecked. Wait for **Double exposure saved**.
 3. Verify its exact original in **participant_uploads**, its JPEG in **Completed_double_exposures**, and a completed row with `allowReuse=false`. The participant source must remain ineligible for future pairings.
-4. Submit another photo with future reuse checked. It joins future pairings only after its completed result is saved. Random selection does not guarantee it is selected immediately.
-5. Reuse an identical original and test **Try another pairing**. Confirm one archived participant original, a separate result per exposure, and avoidance of the immediately previous base.
+4. Submit another photo with future reuse checked. After its result is saved, confirm that the original **moves** from `participant_uploads` into `My_photos`, gets a stable **participant_photo_N.ext** name, and joins future pairings. Confirm that its original file ID is unchanged and no second image copy exists. Random selection does not guarantee it is selected immediately.
+5. Reuse the same original, upload a renamed identical file, and test **Try another pairing**. Confirm one original across both source folders, stable numbering, and avoidance of the immediately previous base. Repeat with an artist photo already in `My_photos`; no participant copy or artist rename should result. Repeat an identical finished JPEG across separate test submissions; both records must refer to one completed file.
 6. Retry an interrupted save. Confirm stable submission/base/result identity. A changed or removed assigned artist photo must fail clearly rather than silently replace the base.
 7. Verify `/exec?view=artist` denies signed-out and different-account visitors while the project owner can use it. Do not treat another signed-in browser as an anonymous test.
 8. Test library selection, camera capture, cancellation, and portrait input on actual phones/tablets. Desktop layout tests do not prove camera-picker or HEIC-conversion behavior.
@@ -144,7 +154,11 @@ Do not describe the real archive workflow as tested until these checks pass. If 
 
 ## Archive behavior and later updates
 
-Participant originals keep the exact bytes supplied by their device's picker. Identical originals reuse the saved participant file; cropped or re-exported versions have different bytes and count as different files. Finished exposures never join the source pool. A participant original becomes eligible only with opt-in and a saved finished result. `INCLUDE_PARTICIPANT_PHOTOS=false` disables all participant bases while retaining the archive.
+Participant originals keep the exact bytes supplied by their device's picker. The consent-folder revision computes SHA-256 on the server before saving. Identical original files reuse a verified existing artist or participant source; changing a filename does not make a new photo. Identical completed JPEGs reuse one result file across submissions and tests. Recovery must also reuse a file created immediately before an interrupted index write. A request that would duplicate an image across source/result roles fails without saving another copy.
+
+This identity check covers identical file bytes. Cropping, resizing, re-exporting, changing embedded metadata, or camera-picker conversion can change those bytes; detecting every visually similar version cannot be guaranteed by exact hashing. The program does not trust a browser-supplied fingerprint to substitute a different archived original. Copies manually created by dragging the same file into Drive are detected and receive only one eligible pool entry, but are not silently deleted. No broader Drive write permission is added for cleanup.
+
+Finished exposures never join the source pool. A participant original joins `My_photos` only after explicit opt-in and a saved completed result, and it moves rather than being copied. The archive retains pending/nonconsenting originals privately in `participant_uploads`. The stable `participant_photo_N.ext` name identifies participant files for the artist, while private provenance and completed consent control eligibility. The number comes from the original source row, so gaps are normal; do not renumber the files or sort/delete index rows to change it. `INCLUDE_PARTICIPANT_PHOTOS=false` disables participant bases while retaining their files.
 
 Retry saving keeps the same submission and assigned base in the open browser session. Keep that tab open until completion; closing it can leave a saved original without a finished result. The new **Sources** schema has nine columns, adding `modifiedAt`; **Submissions** has sixteen, adding `baseSha256`. Existing compatible indexes gain those fields, and earlier assigned bases are pinned before inventory changes. Do not manually edit source hashes, consent, submission tokens, or the Usage ledger.
 
@@ -152,7 +166,7 @@ The public image treatment remains **Saved Current, contrast 12, 0/0 EV**. `forc
 
 Later backend edits require saving the Google files and deploying a new version through **Manage deployments → Edit → New version**. Keeping the deployment preserves its `/exec` address. Frontend edits publish through GitHub Pages. A local file edit does not update either service automatically.
 
-The old import-page implementation is retained at local commit **`6e966b3`**. Earlier checkpoints remain in Git, including **`before-limited-drive-access`** at **`f458bb2`**. Restoring local files does not switch a deployed Google version, republish GitHub Pages, or revoke an OAuth grant.
+The pre-revision direct-folder deployment is retained as **Version 1** in Google, with its local files and connection at checkpoint **`23fad50`**. To roll back this revision, restore the preserved local files and select the existing Google deployment's Version 1; neither action alone changes the other environment. The old import-page implementation is retained at local commit **`6e966b3`**. Earlier checkpoints remain in Git, including **`before-limited-drive-access`** at **`f458bb2`**. Restoring local files does not switch a deployed Google version, republish GitHub Pages, or revoke an OAuth grant.
 
 ## Intake and storage limits
 
