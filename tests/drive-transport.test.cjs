@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const crypto = require("node:crypto");
+const { googleClientSource, buildGoogleClient } = require("../scripts/build-google-client.cjs");
 
 const project = path.resolve(__dirname, "..");
 const protocol = "double-exposure-archive-v1";
@@ -13,6 +14,22 @@ const endpoint = "https://script.google.com/macros/s/deployment-example/exec";
 const bootstrap = { totalEligible: 1, artistCount: 1, participantCount: 0, includeParticipantPhotos: true, maxOriginalBytes: 30 * 1024 * 1024, maxResultBytes: 12 * 1024 * 1024 };
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const plain = (value) => JSON.parse(JSON.stringify(value));
+const websiteBridgeSource = fs.readFileSync(path.join(project, "drive-bridge.js"), "utf8");
+
+function googleBridgeSource() {
+  const sandbox = vm.createContext({
+    ContentService: {
+      MimeType: { JAVASCRIPT: "JAVASCRIPT" },
+      createTextOutput: (content) => ({ getContent: () => content, setMimeType(type) { this.mimeType = type; return this; } })
+    }
+  });
+  for (const name of ["Code.gs", "Client.gs"]) {
+    vm.runInContext(fs.readFileSync(path.join(project, "google-apps-script", name), "utf8"), sandbox, { timeout: 1000 });
+  }
+  const output = sandbox.doGet({ parameter: { asset: "bridge" } });
+  assert.equal(output.mimeType, "JAVASCRIPT");
+  return output.getContent();
+}
 
 function makeTransport(options = {}) {
   const listeners = new Set();
@@ -227,7 +244,7 @@ test("configuration accepts only actual deployed Google Apps Script URLs", async
   }
 });
 
-function makeBridge() {
+function makeBridge(source = websiteBridgeSource) {
   const parentOrigin = "https://artist.example";
   const channel = "a".repeat(32);
   const messages = [];
@@ -251,14 +268,21 @@ function makeBridge() {
     setInterval(callback) { intervals.add(callback); return callback; },
     clearInterval(callback) { intervals.delete(callback); }
   });
-  const source = fs.readFileSync(path.join(project, "drive-bridge.js"), "utf8");
   vm.runInContext(source, sandbox, { timeout: 1000 });
   const emit = (values, origin = parentOrigin, sender = host) => events.get("message")?.({ data: { protocol, channel, ...values }, origin, source: sender });
   return { messages, calls, events, intervals, host, parentOrigin, channel, emit };
 }
 
-test("the Google bridge requires a valid top-window acknowledgement before invoking RPC", () => {
-  const bridge = makeBridge();
+test("the Google client is generated deterministically from the website bridge", () => {
+  assert.equal(fs.readFileSync(path.join(project, "google-apps-script", "Client.gs"), "utf8"), googleClientSource(websiteBridgeSource));
+  assert.doesNotThrow(() => buildGoogleClient({ check: true }));
+  assert.throws(() => googleClientSource("console.log('not a bridge');"), /self-contained bridge function/);
+  assert.doesNotMatch(googleBridgeSource(), /__[A-Z_]+__|SITE_URL|PRIVATE|<script\b/);
+});
+
+for (const [variant, source] of [["website file", websiteBridgeSource], ["Google-served asset", googleBridgeSource()]]) {
+test(`${variant}: the bridge requires a valid top-window acknowledgement before invoking RPC`, () => {
+  const bridge = makeBridge(source);
   assert.equal(bridge.messages[0].message.type, "ready");
   assert.equal(bridge.messages[0].origin, bridge.parentOrigin);
   const request = { type: "request", id: "request-1", request: { action: "bootstrap", payload: {} } };
@@ -275,8 +299,8 @@ test("the Google bridge requires a valid top-window acknowledgement before invok
   assert.equal(bridge.intervals.size, 0);
 });
 
-test("the bridge limits actions and returns RPC responses to their original request IDs", () => {
-  const bridge = makeBridge(); bridge.emit({ type: "ack" });
+test(`${variant}: the bridge limits actions and returns RPC responses to their original request IDs`, () => {
+  const bridge = makeBridge(source); bridge.emit({ type: "ack" });
   bridge.emit({ type: "request", id: "forbidden", request: { action: "setupProject_", payload: {} } });
   assert.equal(bridge.calls.length, 0);
   assert.equal(bridge.messages.at(-1).message.response.ok, false);
@@ -290,8 +314,8 @@ test("the bridge limits actions and returns RPC responses to their original requ
   assert.deepEqual(response.message.response, { ok: true, data: { originalId: "source-one" } });
 });
 
-test("Google RPC failure produces an error response and never a saved acknowledgement", () => {
-  const bridge = makeBridge(); bridge.emit({ type: "ack" });
+test(`${variant}: Google RPC failure produces an error response and never a saved acknowledgement`, () => {
+  const bridge = makeBridge(source); bridge.emit({ type: "ack" });
   bridge.emit({ type: "request", id: "save-1", request: { action: "complete", payload: {} } });
   bridge.calls[0].failure(new Error("Temporary Google service error"));
   const response = bridge.messages.at(-1).message;
@@ -301,3 +325,4 @@ test("Google RPC failure produces an error response and never a saved acknowledg
   bridge.events.get("pagehide")();
   assert.equal(bridge.events.has("message"), false);
 });
+}

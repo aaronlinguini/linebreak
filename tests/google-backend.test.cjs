@@ -17,14 +17,14 @@ const submissionId = (number) => `11111111-1111-4111-8111-${String(number).padSt
 // In-memory fakes implement the Google service boundary. The application's
 // real Apps Script is executed unchanged, so persistence and retry assertions
 // exercise its actual public API rather than a second implementation of it.
-function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "owner@example.test", projectOwnerEmail = "owner@example.test" } = {}) {
+function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "owner@example.test", projectOwnerEmail = "owner@example.test", deploymentUrl = "https://script.google.com/macros/s/deployment-example/exec" } = {}) {
   let nextId = 0;
   let timestamp = Date.parse("2026-10-29T12:00:00Z");
   const files = new Map();
   const folders = new Map();
   const books = new Map();
   const properties = new Map([["SITE_URL", "https://artist.example/exposures/"], ["PROJECT_OWNER_EMAIL", projectOwnerEmail]]);
-  const io = { driveCalls: 0, blobReads: 0, listings: 0, sheetWrites: Object.create(null) };
+  const io = { driveCalls: 0, blobReads: 0, listings: 0, propertyReads: 0, sheetWrites: Object.create(null) };
   const logs = [];
   const failures = { sheetWrite: null, fileCreate: false, participantMark: false, fileMove: false };
   const iterator = (values) => { let index = 0; return { hasNext: () => index < values.length, next: () => values[index++] }; };
@@ -165,7 +165,7 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
       getEffectiveUser: () => ({ getEmail: () => effectiveEmail })
     },
     PropertiesService: { getScriptProperties: () => ({
-      getProperty: (key) => properties.get(key) ?? null,
+      getProperty: (key) => { io.propertyReads++; return properties.get(key) ?? null; },
       setProperty(key, value) { properties.set(key, String(value)); return this; },
       getProperties: () => Object.fromEntries(properties),
       setProperties(values, removeOthers) { if (removeOthers) properties.clear(); for (const [key, value] of Object.entries(values)) properties.set(key, String(value)); return this; },
@@ -185,9 +185,14 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
       XFrameOptionsMode: { ALLOWALL: "ALLOWALL" },
       createHtmlOutput: htmlOutput,
       createHtmlOutputFromFile: (name) => htmlOutput(fs.readFileSync(path.join(project, "google-apps-script", `${name}.html`), "utf8"))
-    }
+    },
+    ContentService: {
+      MimeType: { JAVASCRIPT: "JAVASCRIPT" },
+      createTextOutput: (content) => ({ getContent: () => content, setMimeType(type) { this.mimeType = type; return this; } })
+    },
+    ScriptApp: { getService: () => ({ getUrl: () => deploymentUrl }) }
   });
-  const source = fs.readFileSync(path.join(project, "google-apps-script", "Code.gs"), "utf8");
+  const source = ["Code.gs", "Client.gs"].map((name) => fs.readFileSync(path.join(project, "google-apps-script", name), "utf8")).join("\n");
   vm.runInContext(source, sandbox, { timeout: 1000 });
   const api = (action, payload = {}) => clone(sandbox.exposureApi({ action, payload }));
   const data = (action, payload) => { const response = api(action, payload); assert.equal(response.ok, true, JSON.stringify(response)); return response.data; };
@@ -644,14 +649,61 @@ test("the bridge is served only to permitted origins and escapes its metadata", 
   const channel = "a".repeat(32);
   const valid = backend.sandbox.doGet({ parameter: { origin: "https://artist.example", channel } });
   const html = valid.getContent();
-  assert.match(html, /https:\/\/artist\.example\/exposures\/drive-bridge\.js/);
+  assert.match(html, /https:\/\/script\.google\.com\/macros\/s\/deployment-example\/exec\?asset=bridge/);
+  assert.doesNotMatch(html, /artist\.example\/exposures\/drive-bridge\.js/);
   assert.match(html, new RegExp(channel));
   assert.doesNotMatch(html, /__[A-Z_]+__/);
   assert.doesNotMatch(html, /<script\b[^>]*>[\s\S]*?\S[\s\S]*?<\/script>/i);
   assert.equal(valid.frameMode, "ALLOWALL");
   for (const origin of ["https://attacker.example", "https://artist.example.attacker.example", "null"]) {
     const output = backend.sandbox.doGet({ parameter: { origin, channel } });
-    assert.doesNotMatch(output.getContent(), /drive-bridge\.js/);
+    assert.doesNotMatch(output.getContent(), /<script\b|asset=bridge/);
+  }
+});
+
+test("the bridge JavaScript asset is fixed public code without property or archive access", () => {
+  const backend = makeBackend({ activeEmail: "", effectiveEmail: "" });
+  backend.properties.clear();
+  backend.properties.set("PRIVATE_SENTINEL", "must-not-appear-in-bridge-source");
+  backend.properties.set("UPLOADS_PAUSED", "true");
+  const page = backend.sandbox.doGet({ parameter: { asset: "bridge" } });
+  const source = page.getContent();
+  assert.equal(page.mimeType, "JAVASCRIPT");
+  assert.match(source, /double-exposure-archive-v1/);
+  assert.doesNotThrow(() => new vm.Script(source));
+  assert.doesNotMatch(source, /PropertiesService|ArchiveDrive|ArchiveSheets|ScriptApp|getOAuthToken|PRIVATE_SENTINEL|must-not-appear/);
+  const withUntrustedParameters = backend.sandbox.doGet({ parameter: {
+    asset: "bridge", view: "artist", origin: "\"><script>alert(1)</script>", channel: "private-value", callback: "alert(2)"
+  } });
+  assert.equal(withUntrustedParameters.getContent(), source, "request values must not enter executable content");
+  assert.equal(backend.io.propertyReads, 0);
+  assert.equal(backend.io.driveCalls, 0);
+  assert.equal(backend.lock.count, 0);
+  assert.equal(backend.folders.size, 0);
+  assert.equal(backend.books.size, 0);
+  assert.equal(backend.files.size, 0);
+});
+
+test("unknown asset names return no executable source or caller-supplied content", () => {
+  const backend = makeBackend();
+  backend.properties.clear();
+  for (const asset of ["", "__proto__", "artist", "../Code.gs", "bridge;alert(1)", "<script>alert(1)</script>", ["bridge"], {}]) {
+    const page = backend.sandbox.doGet({ parameter: { asset } });
+    assert.equal(page.mimeType, undefined);
+    assert.equal(page.getContent(), "The exposure archive connection is unavailable.");
+    assert.doesNotMatch(page.getContent(), /<script\b|exposureBridgeClient_|alert\(|private/);
+  }
+  assert.equal(backend.io.propertyReads, 0);
+  assert.equal(backend.io.driveCalls, 0);
+  assert.equal(backend.lock.count, 0);
+});
+
+test("the bridge refuses undeployed and untrusted script URLs", () => {
+  for (const deploymentUrl of [null, "", "http://script.google.com/macros/s/example/exec", "https://script.google.com.attacker.example/macros/s/example/exec", "https://script.google.com/macros/s/example/dev", "https://user:password@script.google.com/macros/s/example/exec", "https://script.google.com/macros/s/example/exec?asset=other", "https://script.google.com/macros/s/example/exec\"><script>alert(1)</script>"]) {
+    const backend = makeBackend({ deploymentUrl });
+    const page = backend.sandbox.doGet({ parameter: { origin: "https://artist.example", channel: "a".repeat(32) } });
+    assert.equal(page.getContent(), "The exposure archive connection is unavailable.");
+    assert.doesNotMatch(page.getContent(), /<script\b|asset=bridge/);
   }
 });
 

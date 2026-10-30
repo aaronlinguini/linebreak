@@ -54,8 +54,13 @@ var EXPOSURE_CONFIG_ = Object.freeze({
 
 function doGet(e) {
   try {
-    var config = siteConfig_();
     var parameters = e && e.parameter ? e.parameter : {};
+    if (parameters.asset !== undefined) {
+      if (parameters.asset !== "bridge") throw apiError_("INVALID_ASSET", "This archive asset is unavailable.");
+      return ContentService.createTextOutput("(" + exposureBridgeClient_.toString() + ")();\n")
+        .setMimeType(ContentService.MimeType.JAVASCRIPT);
+    }
+    var config = siteConfig_();
     if (parameters.view === "artist") {
       requireOwner_();
       var artistHtml = HtmlService.createHtmlOutputFromFile("Artist").getContent();
@@ -73,7 +78,7 @@ function doGet(e) {
     var replacements = {
       "__PARENT_ORIGIN__": origin,
       "__CHANNEL__": channel,
-      "__BRIDGE_SCRIPT_URL__": config.siteUrl + "drive-bridge.js"
+      "__BRIDGE_SCRIPT_URL__": bridgeScriptUrl_()
     };
     Object.keys(replacements).forEach(function (token) {
       html = html.split(token).join(escapeHtml_(replacements[token]));
@@ -86,6 +91,14 @@ function doGet(e) {
       ? "Open the artist import page while signed into the account that deployed this project."
       : "The exposure archive connection is unavailable.");
   }
+}
+
+function bridgeScriptUrl_() {
+  var url = ScriptApp.getService().getUrl();
+  if (typeof url !== "string" || !/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(url)) {
+    throw apiError_("NOT_CONFIGURED", "The archive web app has not been deployed.");
+  }
+  return url + "?asset=bridge";
 }
 
 // The visitor API. No method accepts a caller-selected Drive file ID.
