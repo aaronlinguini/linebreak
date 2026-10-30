@@ -176,11 +176,12 @@ test("the local test page keeps CSS and JavaScript external and loads no archive
     assert.ok(fs.existsSync(path.join(root, reference[1].split("?")[0])));
     return reference[1];
   });
-  assert.deepEqual(references, ["project-config.js", "scripts.js?v=overlap-suppression-v2", "film-renderer.js?v=smooth-revised-v1", "tone-adjustments.js?v=tone-curve-v1", "local-test.js?v=tone-controls-v1"]);
+  assert.deepEqual(references, ["project-config.js", "scripts.js?v=result-rotation-v1", "film-renderer.js?v=smooth-revised-v1", "tone-adjustments.js?v=tone-curve-v1", "local-test.js?v=visible-tones-rotation-v1"]);
   assert.match(html, /<link\b[^>]*href="local-test\.css"/);
   const publicHtml = fs.readFileSync(path.join(root, "index.html"), "utf8");
   assert.doesNotMatch(publicHtml, /film-renderer\.js|local-test\.js|test-base-exposure/);
   assert.match(html, /Nothing is uploaded or automatically saved/);
+  assert.match(html, /<button\b[^>]*id="test-rotate"[^>]*>Rotate 90°<\/button>/);
 });
 
 test("the overlap control names its effect and explains both endpoints accessibly", () => {
@@ -191,11 +192,11 @@ test("the overlap control names its effect and explains both endpoints accessibl
   assert.match(html, /<p\b[^>]*id="test-balance-help"[^>]*>0%: saved addition\. Higher: less overlapping light in shadows, midtones and highlights; black still reveals the other photo\.<\/p>/);
 });
 
-test("optional tone controls are collapsed, labelled, neutral and excluded from the public page", () => {
+test("tone sliders remain visible, labelled, neutral and excluded from the public page", () => {
   const html = fs.readFileSync(path.join(root, "local-test.html"), "utf8");
-  const details = html.match(/<details\b[^>]*id="test-tone-panel"[^>]*>/)[0];
-  assert.doesNotMatch(details, /\bopen\b/);
-  assert.match(html, /<summary>Tone adjustments<\/summary>/);
+  assert.doesNotMatch(html, /<details\b[^>]*id="test-tone-panel"/);
+  assert.match(html, /<section\b[^>]*id="test-tone-panel"[^>]*aria-labelledby="test-tone-title"/);
+  assert.match(html, /<h2\b[^>]*id="test-tone-title"[^>]*>Tone adjustments<\/h2>/);
   for (const name of ["shadows", "highlights", "mids", "whites", "blacks"]) {
     const input = html.match(new RegExp(`<input\\b[^>]*id="test-${name}"[^>]*>`))[0];
     assert.match(input, /min="-100"/);

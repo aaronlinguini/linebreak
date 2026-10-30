@@ -33,6 +33,9 @@ function harness() {
   const renders = [];
   const processing = [];
   const toneRequests = [];
+  const rotations = [];
+  let rotationError = null;
+  let rotationGate;
   const mixers = [];
   function makeMixer(renderer) {
     const mix = (base, participant, output, start = 0, end = output.length) => {
@@ -91,6 +94,14 @@ function harness() {
         };
       }
     },
+    async rotateExposureCanvas(canvas, quarterTurns = 1) {
+      rotations.push({ canvas, quarterTurns });
+      const gate = rotationGate; rotationGate = null;
+      if (gate) await gate;
+      if (rotationError) throw rotationError;
+      if (quarterTurns % 2) [canvas.width, canvas.height] = [canvas.height, canvas.width];
+      return { blob: new Blob([`rotated-${quarterTurns}`]), width: canvas.width, height: canvas.height };
+    },
     createExposureProcessor({ mixerFactory }) {
       return {
         async loadPhoto(file) {
@@ -111,6 +122,7 @@ function harness() {
           const gate = nextGate;
           nextGate = null;
           if (gate) await gate;
+          canvas.width = 600; canvas.height = 400;
           return { blob: new Blob(["jpeg"]), width: 600, height: 400 };
         }
       };
@@ -130,7 +142,7 @@ function harness() {
     await fire("test-settings-download", "click");
     return JSON.parse(await urls.get(downloads.at(-1).href).text());
   }
-  return { elements, renders, processing, toneRequests, downloads, urls, revoked, fire, select, pair, recipe, pageListeners, blockNext(gate) { nextGate = gate; } };
+  return { elements, renders, processing, toneRequests, rotations, downloads, urls, revoked, fire, select, pair, recipe, pageListeners, blockNext(gate) { nextGate = gate; }, blockRotation(gate) { rotationGate = gate; }, failRotation(error) { rotationError = error; } };
 }
 
 test("trial settings affect only the trial, and downloads identify the completed treatment", async () => {
@@ -494,4 +506,85 @@ test("leaving the page releases all result URLs", async () => {
   assert.equal(h.elements.get("test-download").hidden, true);
   assert.equal(h.elements.get("test-reference-download").hidden, true);
   assert.equal(h.elements.get("test-settings-download").hidden, true);
+});
+
+
+test("rotation updates the trial preview, download and recipe without recomposing the photographs", async () => {
+  const h = harness();
+  assert.equal(h.elements.get("test-rotate").hidden, true);
+  await h.fire("test-rotate", "click");
+  assert.equal(h.rotations.length, 0);
+  await h.pair();
+  assert.equal(h.elements.get("test-rotate").hidden, false);
+  const before = await h.recipe();
+  await h.fire("test-download", "click");
+  const oldDownload = h.downloads.at(-1).href;
+  await h.fire("test-rotate", "click");
+  assert.equal(h.renders.length, 2, "rotation must not recompute either exposure");
+  assert.equal(h.rotations.length, 1);
+  assert.equal(h.rotations[0].canvas, h.elements.get("test-canvas"));
+  const after = await h.recipe();
+  assert.equal(after.trial.rotationDegrees, 90);
+  assert.equal(after.trial.width, 400);
+  assert.equal(after.trial.height, 600);
+  assert.deepEqual(after.trial.settings, before.trial.settings);
+  assert.deepEqual(after.reference, before.reference);
+  await h.fire("test-download", "click");
+  assert.notEqual(h.downloads.at(-1).href, oldDownload);
+  assert.ok(h.revoked.includes(oldDownload));
+  for (let turn = 0; turn < 3; turn++) await h.fire("test-rotate", "click");
+  const restored = await h.recipe();
+  assert.equal(restored.trial.rotationDegrees, 0);
+  assert.equal(restored.trial.width, 600);
+  assert.equal(restored.trial.height, 400);
+  assert.equal(h.renders.length, 2);
+});
+
+test("rotation persists through finishing edits and reset tones, but resets for new photos and reset trial", async () => {
+  const h = harness();
+  await h.pair();
+  await h.fire("test-rotate", "click");
+  h.elements.get("test-shadows").value = "20";
+  await h.fire("test-shadows");
+  assert.equal((await h.recipe()).trial.rotationDegrees, 90);
+  assert.equal(h.rotations.at(-1).quarterTurns, 1);
+  h.elements.get("test-base-exposure").value = "-0.5";
+  await h.fire("test-base-exposure");
+  assert.equal((await h.recipe()).trial.rotationDegrees, 90);
+  h.elements.get("test-monochrome").checked = false;
+  await h.fire("test-monochrome");
+  assert.equal((await h.recipe()).trial.rotationDegrees, 90);
+  h.elements.get("test-renderer").value = "linear";
+  await h.fire("test-renderer");
+  assert.equal((await h.recipe()).trial.rotationDegrees, 90);
+  await h.fire("test-tones-reset", "click");
+  assert.equal((await h.recipe()).trial.rotationDegrees, 90);
+  await h.fire("test-reset", "click");
+  assert.equal((await h.recipe()).trial.rotationDegrees, 0);
+  await h.fire("test-rotate", "click");
+  await h.select("test-participant", "replacement.jpg");
+  assert.equal((await h.recipe()).trial.rotationDegrees, 0);
+});
+
+test("rotation disables controls while pending and keeps the previous result after an error", async () => {
+  const h = harness();
+  await h.pair();
+  const before = await h.recipe();
+  let resume;
+  h.blockRotation(new Promise((resolve) => { resume = resolve; }));
+  const pending = h.fire("test-rotate", "click");
+  assert.equal(h.elements.get("test-rotate").disabled, true);
+  assert.equal(h.elements.get("test-shadows").disabled, true);
+  assert.equal(h.elements.get("test-download").disabled, true);
+  resume(); await pending;
+  assert.equal(h.elements.get("test-rotate").disabled, false);
+  const rotated = await h.recipe();
+  h.failRotation(new Error("Rotation failed."));
+  await h.fire("test-rotate", "click");
+  assert.equal(h.elements.get("test-canvas").hidden, false);
+  assert.equal(h.elements.get("test-download").disabled, false);
+  const failed = await h.recipe();
+  assert.deepEqual(failed.trial, rotated.trial);
+  assert.deepEqual(failed.reference, before.reference);
+  assert.match(h.elements.get("test-error").textContent, /Rotation failed/);
 });

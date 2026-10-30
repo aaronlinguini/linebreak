@@ -278,6 +278,48 @@ function createExposureProcessor({ mixerFactory = ExposureMath.createMixer } = {
   return Object.freeze({ loadPhoto, releasePhoto, develop });
 }
 
+// Rotate finished pixels only. Export before changing the displayed canvas so
+// an encoding failure leaves the current result and its download intact.
+async function rotateExposureCanvas(canvas, quarterTurns = 1) {
+  if (!Number.isInteger(quarterTurns) || quarterTurns < 0 || quarterTurns > 3) {
+    throw new RangeError("Rotation must use zero to three clockwise quarter turns.");
+  }
+  const width = canvas.width;
+  const height = canvas.height;
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
+    throw new RangeError("There is no finished image to rotate.");
+  }
+  const visibleContext = canvas.getContext("2d");
+  if (!visibleContext) throw new Error("This browser cannot rotate the image.");
+  const source = visibleContext.getImageData(0, 0, width, height).data;
+  const rotatedWidth = quarterTurns % 2 ? height : width;
+  const rotatedHeight = quarterTurns % 2 ? width : height;
+  const pixels = new ImageData(rotatedWidth, rotatedHeight);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const dx = quarterTurns === 1 ? height - 1 - y : quarterTurns === 2 ? width - 1 - x : quarterTurns === 3 ? y : x;
+      const dy = quarterTurns === 1 ? x : quarterTurns === 2 ? height - 1 - y : quarterTurns === 3 ? width - 1 - x : y;
+      const from = (y * width + x) * 4;
+      const to = (dy * rotatedWidth + dx) * 4;
+      for (let channel = 0; channel < 4; channel++) pixels.data[to + channel] = source[from + channel];
+    }
+  }
+  const prepared = document.createElement("canvas");
+  prepared.width = rotatedWidth;
+  prepared.height = rotatedHeight;
+  try {
+    const preparedContext = prepared.getContext("2d");
+    if (!preparedContext) throw new Error("This browser cannot rotate the image.");
+    preparedContext.putImageData(pixels, 0, 0);
+    const blob = await new Promise((resolve) => prepared.toBlob(resolve, "image/jpeg", 0.95));
+    if (!blob) throw new Error("The rotated image could not be created. Please retry.");
+    canvas.width = rotatedWidth;
+    canvas.height = rotatedHeight;
+    visibleContext.putImageData(pixels, 0, 0);
+    return { blob, width: rotatedWidth, height: rotatedHeight };
+  } finally { prepared.width = prepared.height = 1; }
+}
+
 function initializeExposureStudio() {
   const byId = (id) => document.getElementById(id);
   const ui = {
@@ -288,7 +330,7 @@ function initializeExposureStudio() {
     develop: byId("develop-button"), cancelSelection: byId("cancel-selection"),
     newPairing: byId("new-pairing-button"), reset: byId("reset-button"),
     participantInput: byId("participant-input"), cameraInput: byId("participant-camera-input"),
-    download: byId("download-button"), retry: byId("retry-button"),
+    download: byId("download-button"), rotate: byId("rotate-button"), retry: byId("retry-button"),
     status: byId("status"), error: byId("error"), busy: byId("busy-indicator")
   };
   const state = { working: false, ready: false, hasResult: false, participant: null,
@@ -326,6 +368,7 @@ function initializeExposureStudio() {
     ui.cancelSelection.disabled = state.working || pending;
     ui.allowReuse.disabled = state.working || pending;
     ui.download.disabled = !state.hasResult || state.working;
+    ui.rotate.disabled = !state.hasResult || state.working || pending;
     ui.newPairing.hidden = !completed || state.rePairUnavailable || workflow.operation?.receipt?.canRePair !== true;
     ui.newPairing.disabled = state.working || pending;
     ui.reset.disabled = state.working || pending;
@@ -478,6 +521,22 @@ function initializeExposureStudio() {
     clearError();
     if (workflow.pending) await finishSubmission(() => workflow.retry());
     else await connectArchive();
+  });
+  ui.rotate.addEventListener("click", async () => {
+    if (!state.hasResult || state.working || workflow.pending) return;
+    clearError();
+    setWorking(true, "Rotating…");
+    try {
+      const rotated = await rotateExposureCanvas(ui.canvas);
+      const downloadUrl = URL.createObjectURL(rotated.blob);
+      if (state.downloadUrl) URL.revokeObjectURL(state.downloadUrl);
+      state.downloadUrl = downloadUrl;
+      announce("Image rotated. Downloads use this orientation.");
+    } catch (error) {
+      ui.error.textContent = error instanceof Error ? error.message : "The image could not be rotated.";
+      ui.error.hidden = false;
+      announce("Your previous image is still available. Try rotating again.");
+    } finally { setWorking(false); }
   });
   ui.download.addEventListener("click", () => {
     if (!state.hasResult || state.working || !state.downloadUrl) return;

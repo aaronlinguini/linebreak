@@ -14,7 +14,7 @@ Open `local-test.html` with VS Code's Live Server and choose two photographs. Bo
 - Choose Reduced overlap, Current + contrast, Revised smooth, Saved smooth exposure, or the earlier Film curve, then move the base and participant exposure sliders separately. The range is −3 to +2 EV in half-stop steps. −1 EV halves that photograph's estimated exposure; +1 EV doubles it.
 - The black-and-white control starts from the artist's configuration and can be changed temporarily for the comparison. It affects both outputs.
 - The Contrast slider appears for Current + contrast and Reduced overlap, and ranges from 0 to 30. It changes only the right preview. The left stays at contrast 12; contrast zero on the right removes that tonal adjustment.
-- Open **Tone adjustments** for optional Shadows, Highlights, Mids, Whites, and Blacks controls. Positive values brighten the selected range; negative values darken it. **Reset tones** clears only these five controls.
+- Use the visible **Tone adjustments** sliders for optional Shadows, Highlights, Mids, Whites, and Blacks controls. Positive values brighten the selected range; negative values darken it. **Reset tones** clears only these five controls.
 - Reset trial restores Reduced overlap, Haze reduction 20%, contrast 12, 0/0 EV, and all five tone controls to zero. It preserves your colour choice. Download either result and the settings record before changing photographs if you want to keep the comparison.
 
 Nothing on this page is uploaded or automatically archived. Original files are unchanged.
@@ -65,7 +65,7 @@ This is a visual approximation for finished photographs, not a measured emulsion
 
 ## Optional finishing controls
 
-The collapsed **Tone adjustments** panel adds five −100 to +100 sliders: Blacks, Shadows, Mids, Highlights, and Whites. They adjust the finished trial after the selected exposure mixer and its contrast curve, without changing that mixer's calculation. All five at zero return the original mixer directly, so there is no added pixel pass or rounding difference. The left reference remains untouched.
+The always-visible **Tone adjustments** section adds five −100 to +100 sliders: Blacks, Shadows, Mids, Highlights, and Whites. They adjust the finished trial after the selected exposure mixer and its contrast curve, without changing that mixer's calculation. All five at zero return the original mixer directly, so there is no added pixel pass or rounding difference. The left reference remains untouched.
 
 Positive values brighten a range and negative values darken it. A smooth, monotonic curve shifts near-black, shadow, middle, highlight, and near-white brightness anchors at 0.05, 0.22, 0.5, 0.78, and 0.95. The curve joins these anchors and fixes pure black and pure white. These are broad, related tonal controls; they do not reproduce Lightroom's algorithms or recover clipped information.
 
@@ -74,6 +74,12 @@ The finishing stage measures weighted brightness from the encoded sRGB output, n
 **Reset tones** returns only the five tone controls to zero and preserves treatment, Haze reduction, EV, contrast, and colour choices. **Reset trial** restores the approved starting treatment at Haze reduction 20%, contrast 12, 0/0 EV, and zero tones, while preserving the colour checkbox. The controls work with all local treatments. A slider updates its readout while moving; releasing it generates the trial. The settings download records `settings.tones` and a separate `postProcessing` entry with version `tone-curve-v1` and the five values from the completed render. The reference has no tone settings or postprocessing entry.
 
 `tone-adjustments.js` is loaded only by the local comparison page. It is excluded from the seven public website files and does not alter archive rendering.
+
+## Finished-image rotation
+
+**Rotate 90°** beside the right result rotates the finished trial clockwise without developing another pair. The preview and JPEG download use the selected orientation. The fixed left reference is untouched. Rotation survives tone, EV, colour, and treatment edits and Reset tones; selecting a new photo or Reset trial returns to zero. The recipe records `trial.rotationDegrees` (0, 90, 180, or 270), width, and height. Nothing is uploaded from the local page.
+
+The public page also offers Rotate 90° for the preview and download. Its archive retains the originally created orientation; clicking Rotate does not create another archive copy.
 
 ## The revised smooth trial
 
@@ -123,6 +129,8 @@ The constants describe a visual trial for finished photographs. They are not mea
 Stock-specific calibration would require measured response data and controlled reference images. Exposure-duration and reciprocity effects cannot be reconstructed from the brightness of an arbitrary finished upload. They are not simulated by these generic curves. A gallery or a different hosting system would not by itself improve the exposure calculation.
 
 ## Return to the saved version
+
+The version before visible tone controls and finished-image rotation is saved as **`before-result-rotation`** at **`747fcaf`**. The new revision can be undone directly after preserving later edits.
 
 The exact version before optional tone controls is named **`before-tone-controls`**, pointing to **`43740ff`**. The exposure engine is unchanged by the tone-controls revision. Neutral tone settings bypass the extra stage entirely; restoring the checkpoint also restores the earlier interface.
 

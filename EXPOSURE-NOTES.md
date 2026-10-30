@@ -89,19 +89,27 @@ The earlier Dark/light balance implementation, including its arbitrary shadow bo
 
 ## Optional finishing curve
 
-The local comparison has a separate, collapsed **Tone adjustments** panel. Shadows, Highlights, Mids, Whites, and Blacks range from −100 to +100 and start at zero. They act on the right preview after the selected renderer, its monochrome conversion, contrast, and encoding. The renderer version remains `overlap-suppression-v2`; `scripts.js` and the exposure calculation are unchanged.
+The local comparison has a separate, always-visible **Tone adjustments** section. Shadows, Highlights, Mids, Whites, and Blacks range from −100 to +100 and start at zero. They act on the right preview after the selected renderer, its monochrome conversion, contrast, and encoding. The renderer version remains `overlap-suppression-v2`; the exposure calculation in `scripts.js` is unchanged.
 
 At zero, `ToneAdjustments.createMapper` returns no mapper and the page uses the original mixer directly, preserving exact pixels. With nonzero controls, `tone-adjustments.js` maps the finished encoded sRGB brightness through a smooth curve. It uses weighted display-space brightness, not linear luminance, with fixed endpoints 0 and 1 and adjustable anchors at 0.05, 0.22, 0.5, 0.78, and 0.95. Positive raises the selected range; negative lowers it. Adjacent ranges overlap through the curve. Colour moves toward black or white with one shared factor, preserving neutral gray and avoiding out-of-range channels; brightening can reduce saturation. This is a simple finishing curve rather than a reproduction of Lightroom's controls. Fixed endpoints cannot recover clipped black or white detail.
 
 The default approved preset is Reduced overlap at Haze reduction 20%, contrast 12, 0/0 EV, black and white enabled by the artist configuration, and all tones at zero. **Reset tones** changes only the five finishing values. **Reset trial** also restores treatment, Haze reduction 20%, contrast 12, and 0/0 EV while keeping the colour choice. The reference receives no finishing curve. Recipe downloads record the trial's five `settings.tones` values and separate `postProcessing` version `tone-curve-v1`, captured before the render begins. The local helper is excluded from public publishing and archive processing.
 
+The version before visible tone controls and finished-image rotation is saved as **`before-result-rotation`** at **`747fcaf`**. The new revision can be undone directly after preserving later edits.
+
 The project immediately before these optional controls is preserved as **`before-tone-controls`** at **`43740ff`**.
+
+## Finished-image rotation
+
+The shared `rotateExposureCanvas` helper rotates the finished canvas in quarter turns and exports the same orientation. It runs after composition and does not change source preparation, exposure mixing, monochrome conversion, or the optional tone curve. The local trial records its rotation and final dimensions, preserves orientation through setting changes, and leaves the fixed reference untouched. Reset tones preserves the orientation; Reset trial and new photo selections clear it.
+
+The public Rotate 90° button updates only the preview and download. The archived image retains its original orientation; rotation performs no extra archive write.
 
 ## Current addition with adjustable contrast
 
 The saved **Current + contrast** treatment remains selectable beside the fixed saved Current reference. Both use the existing additive pixel calculation in `scripts.js`. The right Contrast slider ranges from 0 to 30; the left stays at contrast 12. At contrast 12 and matching EV/colour settings, they produce the same pixels. Contrast zero on the right recovers the original unadjusted addition. The renderer version remains `linear-addition-c6a65ba`, and the recipe records the selected value in `settings.contrast`.
 
-The existing display-space contrast curve fixes black, white, and middle gray. Positive contrast makes darker tones darker and lighter tones lighter after addition; it does not use the smooth treatments' stronger local source suppression. This preserves Current's overlap operation while allowing its contrast to be judged separately. The adjustment can still compress subtle tones and cannot recover a channel already clipped by addition. It is an artistic tonal adjustment rather than a calibrated film response. Reduced overlap uses the same contrast control after its own combination; the three earlier film/smooth treatments use neutral contrast and keep their existing algorithms. The public page remains unchanged.
+The existing display-space contrast curve fixes black, white, and middle gray. Positive contrast makes darker tones darker and lighter tones lighter after addition; it does not use the smooth treatments' stronger local source suppression. This preserves Current's overlap operation while allowing its contrast to be judged separately. The adjustment can still compress subtle tones and cannot recover a channel already clipped by addition. It is an artistic tonal adjustment rather than a calibrated film response. Reduced overlap uses the same contrast control after its own combination; the three earlier film/smooth treatments use neutral contrast and keep their existing algorithms. The public exposure calculation remains unchanged.
 
 The exact version before this change is saved as **`before-current-contrast-trial`** at **`67ec935`**. The contrast trial is a separate change that can be undone directly.
 

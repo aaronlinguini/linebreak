@@ -10,6 +10,7 @@ function initializeLocalExposureTest() {
     base: byId("test-base"), participant: byId("test-participant"),
     baseCamera: byId("test-base-camera"), participantCamera: byId("test-participant-camera"),
     download: byId("test-download"), referenceDownload: byId("test-reference-download"),
+    rotate: byId("test-rotate"),
     settingsDownload: byId("test-settings-download"),
     renderer: byId("test-renderer"), baseExposure: byId("test-base-exposure"),
     participantExposure: byId("test-participant-exposure"), monochrome: byId("test-monochrome"),
@@ -46,9 +47,9 @@ function initializeLocalExposureTest() {
   const state = {
     base: null, participant: null, working: false, disposed: false,
     resultUrl: null, referenceUrl: null, settingsUrl: null,
-    referenceRecord: null, completed: null
+    referenceRecord: null, completed: null, rotationQuarterTurns: 0
   };
-  const controls = [ui.base, ui.participant, ui.baseCamera, ui.participantCamera, ui.renderer, ui.baseExposure, ui.participantExposure, ui.contrast, ui.balance, ui.monochrome, ui.reset, ui.tonesReset, ...toneInputs];
+  const controls = [ui.base, ui.participant, ui.baseCamera, ui.participantCamera, ui.renderer, ui.baseExposure, ui.participantExposure, ui.contrast, ui.balance, ui.monochrome, ui.reset, ui.tonesReset, ui.rotate, ...toneInputs];
   ui.monochrome.checked = PROJECT_SETTINGS.monochrome;
 
   function evLabel(value) {
@@ -69,12 +70,13 @@ function initializeLocalExposureTest() {
     ui.balanceControl.hidden = ui.renderer.value !== "balanced";
     ui.balance.disabled = state.working || ui.balanceControl.hidden;
   }
-  function updateTrialTitle(settings = { renderer: ui.renderer.value, baseExposure: Number(ui.baseExposure.value), participantExposure: Number(ui.participantExposure.value), contrast: Number(ui.contrast.value), balanceStrength: Number(ui.balance.value), tones: readTones() }) {
+  function updateTrialTitle(settings = { renderer: ui.renderer.value, baseExposure: Number(ui.baseExposure.value), participantExposure: Number(ui.participantExposure.value), contrast: Number(ui.contrast.value), balanceStrength: Number(ui.balance.value), tones: readTones() }, rotationDegrees = state.rotationQuarterTurns * 90) {
     const names = { balanced: "reduced overlap", revised: "revised smooth", smooth: "saved smooth exposure", film: "earlier film curve", linear: "current addition" };
     const contrast = ["linear", "balanced"].includes(settings.renderer) ? ` · contrast ${settings.contrast}` : "";
     const balance = settings.renderer === "balanced" ? ` · ${settings.balanceStrength}%` : "";
     const tones = settings.tones && Object.values(settings.tones).some((value) => value !== 0) ? " · tones adjusted" : "";
-    ui.trialTitle.textContent = `Trial · ${names[settings.renderer]}${balance}${contrast} · ${evLabel(settings.baseExposure)} / ${evLabel(settings.participantExposure)}${tones}`;
+    const rotation = rotationDegrees ? ` · rotated ${rotationDegrees}°` : "";
+    ui.trialTitle.textContent = `Trial · ${names[settings.renderer]}${balance}${contrast} · ${evLabel(settings.baseExposure)} / ${evLabel(settings.participantExposure)}${tones}${rotation}`;
   }
   function settingsFor(renderer, baseExposure, participantExposure, contrast = 0, balanceStrength = 0) {
     return {
@@ -91,6 +93,13 @@ function initializeLocalExposureTest() {
       button.hidden = !url;
       button.disabled = state.working || !url;
     }
+    ui.rotate.hidden = !state.resultUrl;
+    ui.rotate.disabled = state.working || !state.resultUrl;
+  }
+  function refreshSettingsDownload() {
+    const nextUrl = URL.createObjectURL(new Blob([JSON.stringify(state.completed, null, 2)], { type: "application/json" }));
+    releaseUrl("settingsUrl");
+    state.settingsUrl = nextUrl;
   }
   function clearResults(includeReference = true) {
     releaseUrl("resultUrl");
@@ -141,7 +150,7 @@ function initializeLocalExposureTest() {
       workingWidth: photo.width, workingHeight: photo.height
     };
   }
-  function renderRecord(settings, result) {
+  function renderRecord(settings, result, rotationQuarterTurns = null) {
     const models = {
       balanced: { rendererVersion: ExposureMath.balancedVersion, modelParameters: { ...ExposureMath.balancedParameters } },
       revised: { rendererVersion: FilmExposureMath.revisedVersion, modelParameters: { ...FilmExposureMath.revisedParameters } },
@@ -153,6 +162,7 @@ function initializeLocalExposureTest() {
       renderer: settings.renderer,
       ...models[settings.renderer],
       settings: { ...settings }, width: result.width, height: result.height,
+      ...(rotationQuarterTurns === null ? {} : { rotationDegrees: rotationQuarterTurns * 90 }),
       ...(settings.tones ? { postProcessing: { version: ToneAdjustments.version, tones: { ...settings.tones } } } : {}),
       format: "image/jpeg", quality: 0.95
     };
@@ -168,6 +178,7 @@ function initializeLocalExposureTest() {
       ),
       tones: readTones()
     };
+    const rotationQuarterTurns = state.rotationQuarterTurns;
     ui.status.textContent = "Developing comparison…";
     if (includeReference || !state.referenceRecord) {
       const reference = await processor.develop(state.base, state.participant, ui.referenceCanvas, referenceSettings);
@@ -177,7 +188,9 @@ function initializeLocalExposureTest() {
       ui.referenceCanvas.hidden = false;
       ui.referenceEmpty.hidden = true;
     }
-    const trial = await processor.develop(state.base, state.participant, ui.canvas, trialSettings);
+    let trial = await processor.develop(state.base, state.participant, ui.canvas, trialSettings);
+    if (state.disposed) return;
+    if (rotationQuarterTurns) trial = await rotateExposureCanvas(ui.canvas, rotationQuarterTurns);
     if (state.disposed) return;
     state.resultUrl = URL.createObjectURL(trial.blob);
     state.completed = {
@@ -186,10 +199,10 @@ function initializeLocalExposureTest() {
       sources: { base: state.base.sourceRecord, participant: state.participant.sourceRecord },
       preparation: { portraitRotation: "90-degrees-clockwise", fit: "contain-with-black-padding", maxEdge: 2400 },
       reference: state.referenceRecord,
-      trial: renderRecord(trialSettings, trial)
+      trial: renderRecord(trialSettings, trial, rotationQuarterTurns)
     };
-    state.settingsUrl = URL.createObjectURL(new Blob([JSON.stringify(state.completed, null, 2)], { type: "application/json" }));
-    updateTrialTitle(trialSettings);
+    refreshSettingsDownload();
+    updateTrialTitle(trialSettings, rotationQuarterTurns * 90);
     ui.canvas.hidden = false;
     ui.empty.hidden = true;
     ui.status.textContent = "Ready. Compare the images or adjust the trial.";
@@ -197,6 +210,7 @@ function initializeLocalExposureTest() {
   async function choosePhoto(key, input) {
     const file = input.files?.[0];
     if (!file || state.working || state.disposed) return;
+    state.rotationQuarterTurns = 0;
     clearError();
     clearResults();
     setWorking(true);
@@ -267,12 +281,41 @@ function initializeLocalExposureTest() {
     for (const { input } of toneControls) input.value = "0";
     return changeSettings();
   });
+  ui.rotate.addEventListener("click", async () => {
+    if (!state.completed || state.working || state.disposed) return;
+    clearError();
+    setWorking(true);
+    ui.status.textContent = "Rotating…";
+    try {
+      const result = await rotateExposureCanvas(ui.canvas);
+      if (state.disposed) return;
+      const nextUrl = URL.createObjectURL(result.blob);
+      releaseUrl("resultUrl");
+      state.resultUrl = nextUrl;
+      state.rotationQuarterTurns = (state.rotationQuarterTurns + 1) % 4;
+      state.completed = {
+        ...state.completed,
+        generatedAt: new Date().toISOString(),
+        trial: { ...state.completed.trial, width: result.width, height: result.height, rotationDegrees: state.rotationQuarterTurns * 90 }
+      };
+      refreshSettingsDownload();
+      updateTrialTitle(state.completed.trial.settings);
+      ui.status.textContent = "Trial rotated. Downloads use this orientation.";
+    } catch (error) {
+      if (!state.disposed) {
+        ui.error.textContent = error instanceof Error ? error.message : "The image could not be rotated.";
+        ui.error.hidden = false;
+        ui.status.textContent = "Your previous result is still available. Try rotating again.";
+      }
+    } finally { setWorking(false); }
+  });
   ui.reset.addEventListener("click", () => {
     if (state.working) return;
     ui.renderer.value = "balanced";
     ui.balance.value = "20";
     ui.contrast.value = "12";
     ui.baseExposure.value = ui.participantExposure.value = "0";
+    state.rotationQuarterTurns = 0;
     for (const { input } of toneControls) input.value = "0";
     return changeSettings();
   });

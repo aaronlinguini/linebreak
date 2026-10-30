@@ -8,10 +8,10 @@
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="local-test.css">
     <script src="project-config.js" defer></script>
-    <script src="scripts.js?v=overlap-suppression-v2" defer></script>
+    <script src="scripts.js?v=result-rotation-v1" defer></script>
     <script src="film-renderer.js?v=smooth-revised-v1" defer></script>
     <script src="tone-adjustments.js?v=tone-curve-v1" defer></script>
-    <script src="local-test.js?v=tone-controls-v1" defer></script>
+    <script src="local-test.js?v=visible-tones-rotation-v1" defer></script>
   </head>
   <body class="local-test">
     <header class="site-header">
@@ -35,7 +35,10 @@
             <canvas id="test-canvas" width="1" height="1" hidden aria-label="Adjustable trial double exposure"></canvas>
             <p id="test-busy" class="busy-indicator" hidden>Developing…</p>
           </div>
-          <button id="test-download" class="save-button" type="button" hidden disabled>Download trial</button>
+          <div class="comparison-actions">
+            <button id="test-download" class="save-button" type="button" hidden disabled>Download trial</button>
+            <button id="test-rotate" class="save-button" type="button" hidden disabled aria-label="Rotate trial 90 degrees clockwise">Rotate 90°</button>
+          </div>
         </section>
       </div>
 
@@ -97,8 +100,8 @@
         <button id="test-settings-download" class="save-button" type="button" hidden disabled>Download settings</button>
       </div>
 
-      <details id="test-tone-panel" class="tone-panel">
-        <summary>Tone adjustments</summary>
+      <section id="test-tone-panel" class="tone-panel" aria-labelledby="test-tone-title">
+        <h2 id="test-tone-title">Tone adjustments</h2>
         <p id="test-tone-help" class="control-help">Adjusts the finished trial only. Positive brightens; negative darkens. All five at zero keep the original result. Blacks and whites affect near-black and near-white tones.</p>
         <div class="tone-control-grid">
           <div class="exposure-control">
@@ -123,7 +126,7 @@
           </div>
         </div>
         <button id="test-tones-reset" class="save-button" type="button">Reset tones</button>
-      </details>
+      </section>
 
       <div class="feedback">
         <p id="test-status" class="status" role="status" aria-live="polite">Choose a base photo and a second photo.</p>

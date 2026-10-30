@@ -459,7 +459,7 @@ test("HTML keeps styling and executable code in their separate files", () => {
     assert.doesNotMatch(html, /javascript\s*:/i, file);
     if (file === "index.html") {
       assert.match(html, /<link\b[^>]*href=["']styles\.css["'][^>]*>/i);
-      assert.match(html, /<script\b[^>]*src=["']scripts\.js["']/i);
+      assert.match(html, /<script\b[^>]*src=["']scripts\.js(?:\?[^"']*)?["']/i);
     }
     const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)];
     assert.ok(scripts.length >= 1, file);
@@ -468,8 +468,9 @@ test("HTML keeps styling and executable code in their separate files", () => {
       assert.ok(reference, `${file} must use an external script`);
       assert.equal(body.trim(), "", `${file} must not contain JavaScript bodies`);
       if (file === "index.html") {
-        assert.match(reference[1], /^[A-Za-z0-9._/-]+\.js$/);
-        assert.ok(fs.existsSync(path.join(root, reference[1])), `missing external script ${reference[1]}`);
+        assert.match(reference[1], /^[A-Za-z0-9._/-]+\.js(?:\?[A-Za-z0-9._=&-]+)?$/);
+        const scriptPath = reference[1].split("?")[0];
+        assert.ok(fs.existsSync(path.join(root, scriptPath)), `missing external script ${reference[1]}`);
       } else {
         assert.equal(reference[1], "__BRIDGE_SCRIPT_URL__");
       }
