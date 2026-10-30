@@ -5,7 +5,7 @@
 const ToneAdjustments = (() => {
   const names = ["blacks", "shadows", "mids", "highlights", "whites"];
   const knots = [0, 0.05, 0.22, 0.5, 0.78, 0.95, 1];
-  const ranges = [0.04, 0.10, 0.12, 0.10, 0.04];
+  const ranges = [0.04, 0.10, 0.12, 0.10, 0];
   const tableSize = 4097;
 
   function createMapper(tones = {}) {
@@ -18,8 +18,9 @@ const ToneAdjustments = (() => {
     }
     if (values.every((value) => value === 0)) return null;
 
-    // These bounded offsets keep adjacent knots ordered even when neighbouring
-    // controls are at opposite extremes. Black and white endpoints stay fixed.
+    // Preserve the four other controls exactly. Whites adjusts the upper range
+    // afterward, including pure white when reduced, rather than one narrow knot.
+    const whites = values[4] / 100;
     const targets = [0, ...values.map((value, index) => knots[index + 1] + value / 100 * ranges[index]), 1];
     const secants = knots.slice(1).map((x, index) => (targets[index + 1] - targets[index]) / (x - knots[index]));
     // Limiting both endpoint tangents to each segment's secant prevents folds
@@ -33,10 +34,15 @@ const ToneAdjustments = (() => {
       const t = (x - knots[segment]) / width;
       const t2 = t * t;
       const t3 = t2 * t;
-      return (2 * t3 - 3 * t2 + 1) * targets[segment]
+      const tone = (2 * t3 - 3 * t2 + 1) * targets[segment]
         + (t3 - 2 * t2 + t) * width * tangents[segment]
         + (-2 * t3 + 3 * t2) * targets[segment + 1]
         + (t3 - t2) * width * tangents[segment + 1];
+      if (whites === 0) return tone;
+      // The upper-range ramp joins smoothly at 0.55. Its bounded strength keeps
+      // the curve monotone even at -100; increasing Whites may clip to white.
+      const upper = Math.max(0, (tone - 0.55) / 0.45);
+      return Math.max(0, Math.min(1, tone + whites * 0.20 * upper * upper));
     });
 
     return function adjust(output, start = 0, end = output.length) {
@@ -70,5 +76,5 @@ const ToneAdjustments = (() => {
     };
   }
 
-  return Object.freeze({ version: "tone-curve-v1", createMapper });
+  return Object.freeze({ version: "tone-curve-v2", createMapper });
 })();

@@ -19,20 +19,21 @@ function apply(settings, pixels, start, end) {
 }
 
 test("neutral tone controls skip processing and preserve every input byte", () => {
-  assert.equal(tones.version, "tone-curve-v1");
+  assert.equal(tones.version, "tone-curve-v2");
   assert.equal(tones.createMapper(), null);
   assert.equal(tones.createMapper(Object.fromEntries(names.map((name) => [name, 0]))), null);
   const pixels = [0,0,0,0, 255,255,255,255, 13,147,250,99];
   assert.deepEqual(apply({}, pixels), pixels);
 });
 
-test("each control raises and lowers its own tone region without changing the endpoints", () => {
+test("each control raises and lowers its tone region, with Whites able to lower pure white", () => {
   for (const [name, byte] of [["blacks",13],["shadows",56],["mids",128],["highlights",199],["whites",242]]) {
     const pixel = [byte,byte,byte,71];
     assert.ok(apply({ [name]: 100 },pixel)[0] > byte, `${name} must raise its tone region`);
     assert.ok(apply({ [name]: -100 },pixel)[0] < byte, `${name} must lower its tone region`);
     for (const value of [-100,100]) {
-      assert.deepEqual(apply({ [name]: value },[0,0,0,13,255,255,255,246]), [0,0,0,13,255,255,255,246]);
+      const white = name === "whites" && value < 0 ? 204 : 255;
+      assert.deepEqual(apply({ [name]: value },[0,0,0,13,255,255,255,246]), [0,0,0,13,white,white,white,246]);
     }
   }
 });
@@ -43,7 +44,7 @@ test("extreme combinations remain monotone and produce smooth neutral grayscale 
     const settings = Object.fromEntries(names.map((name, index) => [name, mask & (1 << index) ? 100 : -100]));
     const output = apply(settings, ramp);
     assert.equal(output[0], 0);
-    assert.equal(output[1020], 255);
+    assert.equal(output[1020], settings.whites < 0 ? 204 : 255);
     for (let index = 0; index < output.length; index += 4) {
       assert.equal(output[index], output[index + 1]);
       assert.equal(output[index], output[index + 2]);
@@ -54,6 +55,32 @@ test("extreme combinations remain monotone and produce smooth neutral grayscale 
       }
     }
   }
+});
+
+test("Whites visibly changes a broad bright range while preserving lower tones", () => {
+  const ramp = Array.from({ length: 256 }, (_, value) => [value,value,value,255]).flat();
+  let previous = null;
+  for (const whites of [-100,-50,0,50,100]) {
+    const output = apply({ whites },ramp);
+    for (let byte=0;byte<256;byte++) {
+      const index = byte*4;
+      if (byte<=140) assert.deepEqual(output.slice(index,index+4),ramp.slice(index,index+4), "Whites alone must preserve shadows and lower midtones");
+      if (previous) assert.ok(output[index]>=previous[index], "increasing Whites must never darken a tone");
+    }
+    previous=output;
+  }
+  assert.deepEqual(apply({ whites:-100 },[225,225,225,71,255,255,255,92]),[197,197,197,71,204,204,204,92]);
+  assert.deepEqual(apply({ whites:100 },[225,225,225,71,255,255,255,92]),[253,253,253,71,255,255,255,92]);
+});
+
+test("zero Whites preserves the other four controls' exact saved pixels", () => {
+  // Captured from fed6171's tone-curve-v1 before the Whites-only revision.
+  const pixels=[0,0,0,0,13,13,13,17,56,56,56,48,128,128,128,71,199,199,199,92,242,242,242,118,30,110,210,99,210,100,35,150,255,255,255,255];
+  for (const fixture of [
+    { settings:{blacks:40,shadows:-50,mids:20,highlights:60}, output:[0,0,0,0,17,17,17,17,43,43,43,48,134,134,134,71,214,214,214,92,242,242,242,118,29,106,202,99,211,105,42,150,255,255,255,255] },
+    { settings:{blacks:-100,shadows:100,mids:-100,highlights:100,whites:0}, output:[0,0,0,0,3,3,3,17,82,82,82,48,97,97,97,71,224,224,224,92,242,242,242,118,27,100,191,99,168,80,28,150,255,255,255,255] },
+    { settings:{blacks:100,shadows:-100,mids:100,highlights:-100,whites:0}, output:[0,0,0,0,23,23,23,17,31,31,31,48,158,158,158,71,173,173,173,92,242,242,242,118,52,124,214,99,221,137,88,150,255,255,255,255] }
+  ]) assert.deepEqual(apply(fixture.settings,pixels),fixture.output);
 });
 
 test("colour adjustments move all channels toward the same endpoint and leave alpha untouched", () => {

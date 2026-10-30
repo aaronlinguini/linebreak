@@ -10,7 +10,7 @@
     <script src="project-config.js" defer></script>
     <script src="scripts.js?v=result-rotation-v1" defer></script>
     <script src="film-renderer.js?v=smooth-revised-v1" defer></script>
-    <script src="tone-adjustments.js?v=tone-curve-v1" defer></script>
+    <script src="tone-adjustments.js?v=tone-curve-v2" defer></script>
     <script src="local-test.js?v=live-tones-v1" defer></script>
   </head>
   <body class="local-test">
@@ -67,7 +67,7 @@
           <aside class="editor-controls" aria-label="Image editing controls">
             <section id="test-tone-panel" class="tone-panel" aria-labelledby="test-tone-title">
               <h2 id="test-tone-title">Tone adjustments</h2>
-              <p id="test-tone-help" class="control-help">Adjusts the finished trial only. Positive brightens; negative darkens. All five at zero keep the original result. Blacks and whites affect near-black and near-white tones.</p>
+              <p id="test-tone-help" class="control-help">Adjusts the finished trial only. Positive brightens; negative darkens. All five at zero keep the original result. Whites adjusts the brightest tones, including white; Blacks adjusts near-black tones.</p>
               <div class="tone-control-grid">
                 <div class="exposure-control">
                   <label for="test-shadows">Shadows <output id="test-shadows-value" for="test-shadows">0</output></label>

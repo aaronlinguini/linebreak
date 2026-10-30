@@ -10,7 +10,7 @@ const root = path.resolve(__dirname, "..");
 const source = fs.readFileSync(path.join(root, "local-test.js"), "utf8");
 const html = fs.readFileSync(path.join(root, "local-test.html"), "utf8");
 
-function harness() {
+function harness({ colour = false } = {}) {
   const elements = new Map(), listeners = new Map(), timers = new Map();
   const renders = [], processing = [], rotations = [], downloads = [];
   const urls = new Map(), revoked = [], pageListeners = new Map(), encodings = [];
@@ -61,7 +61,7 @@ function harness() {
   }
   const gradient = Array.from({ length: 24 }, (_, index) => {
     const byte = [0,12,32,56,96,128,160,200,224,242,252,255][index % 12];
-    return [byte,byte,byte,255];
+    return colour && byte !== 255 ? [byte,Math.round(byte * 0.9),Math.round(byte * 0.7),255] : [byte,byte,byte,255];
   }).flat();
   function makeMixer(renderer) {
     return (base, participant, output, start = 0, end = output.length) => {
@@ -86,7 +86,7 @@ function harness() {
       createObjectURL(blob) { const url = `blob:comparison-${++nextUrl}`; urls.set(url, blob); return url; },
       revokeObjectURL(url) { revoked.push(url); }
     },
-    PROJECT_SETTINGS: { baseExposure: 0, participantExposure: 0, contrast: 0, monochrome: true },
+    PROJECT_SETTINGS: { baseExposure: 0, participantExposure: 0, contrast: 0, monochrome: !colour },
     FilmExposureMath: {
       version: "assumed-film-v1", parameters: { toe: -7, shoulder: 4 },
       smoothVersion: "smooth-exposure-v1", smoothParameters: { exposurePower: 2, whiteAnchor: 0.98 },
@@ -287,7 +287,7 @@ test("neutral tone controls preserve the original mixer and leave the reference 
   const recipe = await h.recipe();
   assert.equal(recipe.reference.settings.tones, undefined);
   assert.equal(recipe.reference.postProcessing, undefined);
-  assert.deepEqual(recipe.trial.postProcessing, { version: "tone-curve-v1", tones: zero });
+  assert.deepEqual(recipe.trial.postProcessing, { version: "tone-curve-v2", tones: zero });
 });
 
 test("every tone slider repaints real pixels on input without recomposing or accumulating changes", async () => {
@@ -313,6 +313,33 @@ test("every tone slider repaints real pixels on input without recomposing or acc
     await h.fire("test-tones-reset", "click");
     assert.deepEqual(h.pixels(), neutral, "neutral reset must restore exact cached pixels");
     assert.equal(h.renders.length, 2);
+  }
+});
+
+test("Whites changes flat white immediately and exports the same gray or colour preview", async () => {
+  for (const colour of [false, true]) {
+    const h = harness({ colour });
+    await h.pair();
+    const neutral = h.pixels();
+    const white = 11 * 4;
+    assert.deepEqual(neutral.slice(white, white + 4), [255,255,255,255]);
+    h.elements.get("test-whites").value = "-100";
+    await h.fire("test-whites", "input");
+    const darkened = h.pixels();
+    assert.deepEqual(darkened.slice(white, white + 4), [204,204,204,255], "negative Whites must lower even a flat clipped-white area");
+    assert.deepEqual(darkened.slice(0, 4), neutral.slice(0, 4), "black must remain fixed");
+    assert.deepEqual(darkened.slice(5 * 4, 6 * 4), neutral.slice(5 * 4, 6 * 4), "middle tones must remain unchanged by Whites alone");
+    assert.equal(h.renders.length, 2);
+    await h.fire("test-whites");
+    const recipe = await h.recipe();
+    assert.equal(recipe.trial.settings.monochrome, !colour);
+    assert.equal(recipe.trial.postProcessing.version, "tone-curve-v2");
+    assert.equal(recipe.trial.postProcessing.tones.whites, -100);
+    await h.fire("test-download", "click");
+    assert.deepEqual(JSON.parse(await h.urls.get(h.downloads.at(-1).href).text()).pixels, darkened);
+    await h.fire("test-tones-reset", "click");
+    assert.deepEqual(h.pixels(), neutral);
+    assert.equal(h.renders.length, 2, "Whites and Reset tones must use the existing neutral cache");
   }
 });
 
