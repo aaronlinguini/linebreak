@@ -17,7 +17,7 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
     "sharing-choice", "result-actions", "allow-reuse", "develop-button", "cancel-selection",
     "new-pairing-button", "reset-button", "participant-input", "participant-camera-input",
     "upload-label", "camera-label", "download-button", "rotate-button", "retry-button", "status", "error",
-    "busy-indicator", "output-options", "visitor-monochrome"];
+    "busy-indicator", "exposure-controls", "upload-instructions", "output-options", "visitor-monochrome"];
   const handlers = new Map();
   const elements = new Map(ids.map((id) => [id, {
     hidden: true, disabled: false, checked: false, files: [], value: "", textContent: "",
@@ -126,16 +126,22 @@ test("public photo choices are distinct and HTML has no inline code", () => {
   }
 });
 
-test("source and creation actions precede the colour and consent controls in reading order", () => {
+test("photo choices, permission and instructions precede the image, with colour controls after it", () => {
   const html = fs.readFileSync(path.join(root, "double-exposure.html"), "utf8");
+  const controls = html.indexOf('id="exposure-controls"');
+  const stage = html.match(/<div\b[^>]*class="[^"]*\bimage-stage\b[^"]*"/)?.index ?? -1;
+  const instructions = html.indexOf('id="upload-instructions"');
   const options = html.indexOf('id="output-options"');
   const browse = html.indexOf('id="source-actions"');
   const create = html.indexOf('id="sharing-choice"');
   const colour = html.indexOf('id="visitor-monochrome"');
   const consent = html.indexOf('id="allow-reuse"');
-  assert.ok(browse >= 0 && create >= 0 && options >= 0);
-  assert.ok(browse < options && create < options, "source and creation choices form the first column");
-  assert.ok(options < colour && colour < consent, "colour then consent belong to the options column");
+  assert.ok(controls >= 0 && stage >= 0 && options >= 0);
+  for (const [name, location] of [["photo choices", browse], ["creation actions", create], ["permission", consent], ["instructions", instructions]]) {
+    assert.ok(location >= 0 && location < stage, `${name} must be above the image`);
+  }
+  assert.ok(controls < browse && controls < consent, "photo selection and permission belong to the top controls");
+  assert.ok(stage < options && options < colour, "the black-and-white choice remains below the image");
   assert.match(html, /<label\b[^>]*for="allow-reuse"/);
   assert.doesNotMatch(html.match(/<input\b[^>]*id="allow-reuse"[^>]*>/)[0], /\bchecked(?:\s|=|>)/);
 });
@@ -167,15 +173,21 @@ test("the visitor checkbox starts from the artist default and sends either colou
       assert.equal(checkbox.checked, forceBlackAndWhite);
       assert.equal(checkbox.disabled, false);
       assert.equal(h.elements.get("output-options").hidden, false);
+      assert.equal(h.elements.get("exposure-controls").hidden, false);
+      assert.equal(h.elements.get("upload-instructions").hidden, false);
       checkbox.checked = visitorChoice;
       await h.select("participant-input", makeFile());
+      assert.equal(h.elements.get("upload-instructions").hidden, true);
       assert.equal(checkbox.checked, visitorChoice, "choosing a photograph retains the visitor selection");
       await h.click("develop-button");
       assert.equal(h.calls.start[0].choice.monochrome, visitorChoice);
       assert.equal(h.elements.get("output-options").hidden, true, "an archived result cannot be relabelled as another colour mode");
+      assert.equal(h.elements.get("exposure-controls").hidden, true);
       assert.equal(checkbox.disabled, true);
       h.click("reset-button");
       assert.equal(h.elements.get("output-options").hidden, false);
+      assert.equal(h.elements.get("exposure-controls").hidden, false);
+      assert.equal(h.elements.get("upload-instructions").hidden, false);
       assert.equal(checkbox.disabled, false);
       assert.equal(checkbox.checked, visitorChoice, "Start over retains the visitor's preference");
     }
@@ -190,9 +202,12 @@ test("the visitor colour choice is retained on Back and remains usable while the
   h.click("cancel-selection");
   assert.equal(h.elements.get("visitor-monochrome").checked, false);
   assert.equal(h.elements.get("output-options").hidden, false);
+  assert.equal(h.elements.get("exposure-controls").hidden, false);
+  assert.equal(h.elements.get("upload-instructions").hidden, false);
   const offline = harness({ configured: false, forceBlackAndWhite: true });
   await flush();
   assert.equal(offline.elements.get("output-options").hidden, false);
+  assert.equal(offline.elements.get("exposure-controls").hidden, false);
   assert.equal(offline.elements.get("visitor-monochrome").checked, true);
   assert.equal(offline.elements.get("visitor-monochrome").disabled, false);
 });
@@ -215,6 +230,7 @@ test("creating or retrying a pending save cannot change its colour choice throug
   await saving;
   assert.equal(h.workflow.pending, true);
   assert.equal(h.elements.get("output-options").hidden, true);
+  assert.equal(h.elements.get("exposure-controls").hidden, true);
   assert.equal(h.elements.get("visitor-monochrome").disabled, true);
   assert.equal(h.elements.get("allow-reuse").disabled, true);
 });
@@ -224,6 +240,7 @@ test("consent can be selected before either photo chooser and reaches Create wit
     const h = harness();
     await flush();
     assert.equal(h.elements.get("output-options").hidden, false);
+    assert.equal(h.elements.get("exposure-controls").hidden, false);
     assert.equal(h.elements.get("allow-reuse").checked, false);
     assert.equal(h.elements.get("allow-reuse").disabled, false);
     h.elements.get("allow-reuse").checked = true;
@@ -232,13 +249,16 @@ test("consent can be selected before either photo chooser and reaches Create wit
     await h.select(input, makeFile());
     assert.equal(h.elements.get("allow-reuse").checked, true, "choosing a photo preserves consent selected beforehand");
     assert.equal(h.elements.get("output-options").hidden, false);
+    assert.equal(h.elements.get("exposure-controls").hidden, false);
     assert.equal(h.calls.start.length, 0);
     await h.click("develop-button");
     assert.equal(h.calls.start[0].choice.allowReuse, true);
     assert.equal(h.elements.get("output-options").hidden, true);
+    assert.equal(h.elements.get("exposure-controls").hidden, true);
     h.click("reset-button");
     assert.equal(h.elements.get("allow-reuse").checked, false, "a new contribution requires a fresh opt-in");
     assert.equal(h.elements.get("output-options").hidden, false);
+    assert.equal(h.elements.get("exposure-controls").hidden, false);
   }
 });
 
@@ -290,6 +310,8 @@ test("back cancels the local selection before upload; unconfigured site shows no
   assert.equal(h.elements.get("source-actions").hidden, false);
   assert.equal(h.elements.get("allow-reuse").checked, false);
   assert.equal(h.elements.get("output-options").hidden, false);
+  assert.equal(h.elements.get("exposure-controls").hidden, false);
+  assert.equal(h.elements.get("upload-instructions").hidden, false);
   const offline = harness({ configured: false });
   await flush();
   assert.equal(offline.elements.get("participant-input").disabled, true);

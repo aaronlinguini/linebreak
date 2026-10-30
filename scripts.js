@@ -315,6 +315,7 @@ function initializeExposureStudio() {
     workspace: byId("workspace"), canvas: byId("canvas"),
     resultEmpty: byId("result-empty"), participantPreview: byId("participant-preview"),
     sourceActions: byId("source-actions"), sharingChoice: byId("sharing-choice"),
+    exposureControls: byId("exposure-controls"), uploadInstructions: byId("upload-instructions"),
     outputOptions: byId("output-options"), monochrome: byId("visitor-monochrome"),
     resultActions: byId("result-actions"), allowReuse: byId("allow-reuse"),
     develop: byId("develop-button"), cancelSelection: byId("cancel-selection"),
@@ -354,6 +355,8 @@ function initializeExposureStudio() {
       input.disabled = state.working || !state.ready || selected || pending;
     }
     ui.sourceActions.hidden = selected || state.hasResult;
+    ui.uploadInstructions.hidden = selected;
+    ui.exposureControls.hidden = state.hasResult || pending;
     ui.outputOptions.hidden = state.hasResult || pending;
     ui.monochrome.disabled = state.working || pending || state.hasResult;
     ui.sharingChoice.hidden = !selected || state.hasResult || pending;

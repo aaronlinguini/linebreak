@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#050505">
     <title>Double Exposure</title>
-    <link rel="stylesheet" href="styles.css?v=exposure-controls-v1">
+    <link rel="stylesheet" href="styles.css?v=exposure-layout-v2">
     <script src="project-config.js" defer></script>
     <script src="drive-storage.js" defer></script>
     <script src="archive-workflow.js?v=visitor-monochrome-v1" defer></script>
-    <script src="scripts.js?v=exposure-controls-v1" defer></script>
+    <script src="scripts.js?v=exposure-layout-v2" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">Skip to photograph</a>
@@ -22,14 +22,8 @@
     </header>
 
     <main id="workspace" class="workspace" aria-busy="false">
-      <div class="image-stage">
-        <p id="result-empty" class="empty-state">Use the bottons below to select a photo from your library or take a photo with your camera.</p>
-        <img id="participant-preview" hidden alt="Your selected photograph">
-        <canvas id="canvas" width="1" height="1" hidden aria-label="Your double exposure"></canvas>
-        <p id="busy-indicator" class="busy-indicator" hidden>Developing…</p>
-      </div>
-
-      <div class="exposure-controls">
+      <div id="exposure-controls" class="exposure-controls">
+        <p id="upload-instructions" class="upload-instructions">Use the buttons below to select a photo from your library or take a photo with your camera. The photo that you provide will be combined with another image to create a double exposure. You may choose whether you want your upload to be added to the library of base photos upon which new double exposures can be made.</p>
         <div class="exposure-buttons">
           <div id="source-actions" class="actions source-actions">
             <div class="file-picker">
@@ -51,19 +45,27 @@
           </div>
         </div>
 
-        <div id="output-options" class="output-options">
-          <label for="visitor-monochrome">
-            <input id="visitor-monochrome" type="checkbox" disabled>
-            Black and white
+        <div class="library-option">
+          <label class="checkbox-label library-choice" for="allow-reuse">
+            <input id="allow-reuse" type="checkbox" aria-describedby="library-note">
+            <span>Add my uploaded photo to the library of base photos</span>
           </label>
-          <div class="library-option">
-            <label class="library-choice" for="allow-reuse">
-              <input id="allow-reuse" type="checkbox" aria-describedby="library-note">
-              <span>Add my uploaded photo to the library of base photos upon which new double exposures can be made.</span>
-            </label>
-            <p id="library-note" class="library-note">Your uploaded photo will only be added to the base-photo library if you check this box.</p>
-          </div>
+          <p id="library-note" class="library-note">Your uploaded photo will only be added to the base-photo library if you check this box.</p>
         </div>
+      </div>
+
+      <div class="image-stage">
+        <p id="result-empty" class="empty-state">Your double exposure will appear here.</p>
+        <img id="participant-preview" hidden alt="Your selected photograph">
+        <canvas id="canvas" width="1" height="1" hidden aria-label="Your double exposure"></canvas>
+        <p id="busy-indicator" class="busy-indicator" hidden>Developing…</p>
+      </div>
+
+      <div id="output-options" class="output-options">
+        <label class="checkbox-label" for="visitor-monochrome">
+          <input id="visitor-monochrome" type="checkbox" disabled>
+          Black and white
+        </label>
       </div>
 
       <div id="result-actions" class="actions" hidden>
