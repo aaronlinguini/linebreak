@@ -176,7 +176,7 @@ test("the local test page keeps CSS and JavaScript external and loads no archive
     assert.ok(fs.existsSync(path.join(root, reference[1].split("?")[0])));
     return reference[1];
   });
-  assert.deepEqual(references, ["project-config.js", "scripts.js?v=overlap-suppression-v2", "film-renderer.js?v=smooth-revised-v1", "local-test.js?v=overlap-suppression-v2"]);
+  assert.deepEqual(references, ["project-config.js", "scripts.js?v=overlap-suppression-v2", "film-renderer.js?v=smooth-revised-v1", "tone-adjustments.js?v=tone-curve-v1", "local-test.js?v=tone-controls-v1"]);
   assert.match(html, /<link\b[^>]*href="local-test\.css"/);
   const publicHtml = fs.readFileSync(path.join(root, "index.html"), "utf8");
   assert.doesNotMatch(publicHtml, /film-renderer\.js|local-test\.js|test-base-exposure/);
@@ -189,6 +189,24 @@ test("the overlap control names its effect and explains both endpoints accessibl
   assert.match(html, /<label\b[^>]*for="test-balance">Haze reduction /);
   assert.match(html, /<input\b[^>]*id="test-balance"[^>]*aria-describedby="test-balance-help"/);
   assert.match(html, /<p\b[^>]*id="test-balance-help"[^>]*>0%: saved addition\. Higher: less overlapping light in shadows, midtones and highlights; black still reveals the other photo\.<\/p>/);
+});
+
+test("optional tone controls are collapsed, labelled, neutral and excluded from the public page", () => {
+  const html = fs.readFileSync(path.join(root, "local-test.html"), "utf8");
+  const details = html.match(/<details\b[^>]*id="test-tone-panel"[^>]*>/)[0];
+  assert.doesNotMatch(details, /\bopen\b/);
+  assert.match(html, /<summary>Tone adjustments<\/summary>/);
+  for (const name of ["shadows", "highlights", "mids", "whites", "blacks"]) {
+    const input = html.match(new RegExp(`<input\\b[^>]*id="test-${name}"[^>]*>`))[0];
+    assert.match(input, /min="-100"/);
+    assert.match(input, /max="100"/);
+    assert.match(input, /value="0"/);
+    assert.match(input, /aria-describedby="test-tone-help"/);
+    assert.match(html, new RegExp(`<label\\b[^>]*for="test-${name}"`));
+  }
+  assert.match(html, /<button\b[^>]*id="test-tones-reset"[^>]*>Reset tones<\/button>/);
+  const publicHtml = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  assert.doesNotMatch(publicHtml, /tone-adjustments|test-tone-panel|test-shadows/);
 });
 
 test("a failed local selection clears the previous result, reports the error, and allows another try", async () => {
@@ -218,6 +236,7 @@ test("a failed local selection clears the previous result, reports the error, an
     PROJECT_SETTINGS: { baseExposure: 0, participantExposure: 0, contrast: 0, monochrome: false },
     ExposureMath: { balancedVersion: "overlap-suppression-v2", balancedParameters: {} },
     FilmExposureMath: { version: "assumed-film-v1" },
+    ToneAdjustments: { version: "tone-curve-v1", createMapper() { return null; } },
     createExposureProcessor() {
       return {
         async loadPhoto(file) {

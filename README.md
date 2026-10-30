@@ -4,7 +4,7 @@ Participants add a photograph to create a double exposure. The Google connection
 
 ## Try it
 
-To test without Google, right-click `local-test.html` in VS Code and choose **Open with Live Server**. Choose your base photo and a second photo. The left preview keeps the saved **Current** treatment at zero EV and contrast 12. The right starts with **Reduced overlap (trial)** at the same settings, with **Haze reduction 100%**. Higher values reduce overlapping light across shadows, midtones, and highlights. Dark areas leave the brighter photograph clearer; two dark areas stay closer to their original darkness. Move Haze reduction to 0% to reproduce the saved Current treatment. Current + contrast, Revised smooth, Saved smooth exposure, and the earlier film curve remain available. Adjust each photograph's exposure separately and compare black and white with colour. Both results use the same full-frame preparation and JPEG export. Download the results and settings to keep a record; nothing is uploaded or automatically archived there. See [FILM-EXPERIMENT.md](FILM-EXPERIMENT.md) for comparisons and how to return to the saved version.
+To test without Google, right-click `local-test.html` in VS Code and choose **Open with Live Server**. Choose your base photo and a second photo. The left preview keeps the saved **Current** treatment at zero EV and contrast 12. The right starts with **Reduced overlap (trial)** at the same settings, with **Haze reduction 20%**, matching the approved screenshot preset. All five optional tone controls start at zero. Increasing Haze reduction reduces overlapping light across shadows, midtones, and highlights. Dark areas leave the brighter photograph clearer; two dark areas stay closer to their original darkness. Move Haze reduction to 0% to reproduce the saved Current treatment. Current + contrast, Revised smooth, Saved smooth exposure, and the earlier film curve remain available. Adjust each photograph's exposure separately and compare black and white with colour. Open **Tone adjustments** for optional Shadows, Highlights, Mids, Whites, and Blacks finishing controls; **Reset tones** clears only those five controls. Both results use the same full-frame preparation and JPEG export. Download the results and settings to keep a record; nothing is uploaded or automatically archived there. See [FILM-EXPERIMENT.md](FILM-EXPERIMENT.md) for comparisons and how to return to the saved version.
 
 There is no frontend installation or build. To test automatic archiving on the main `index.html` page, first deploy and connect the Google archive: follow [GOOGLE-SETUP.md](GOOGLE-SETUP.md).
 
@@ -38,6 +38,7 @@ python3 -m http.server 8000 --bind 127.0.0.1
 - `styles.css`: shared page styling and responsive layouts.
 - `scripts.js`: photo loading, pairing, light processing, and downloads.
 - `local-test.html`, `local-test.js`, and `local-test.css`: browser-only comparison controls and layout without Google.
+- `tone-adjustments.js`: optional finishing curve for the local test only; excluded from the public website files.
 - `film-renderer.js`: experimental revised/saved smooth-exposure and assumed film-response models, loaded only by the local comparison page.
 - `project-config.js`: the public Google deployment URL, artist colour option, and connection timeouts.
 - `archive-workflow.js`: original → develop → result archive workflow, consent, another pairing, and retries.
@@ -71,6 +72,14 @@ A rendered JPEG does not retain its original scene exposure or a measured film/d
 Portrait photographs are rotated 90 degrees clockwise into landscape orientation before processing, for both the base and participant image. Each full photograph is fitted into the base frame without cropping or stretching; different proportions leave black padding, which contributes no exposure. Results use up to 2,400 pixels on the longest edge, and are smaller if either source would otherwise be enlarged. The archive and optional download contain the same JPEG bytes. Rotation and resizing affect working images and results; the participant original is uploaded unchanged.
 
 JPEG, PNG, WebP, and AVIF are accepted, up to 30 MB per file. HEIC and RAW need to be exported to a supported format first. Transparent image regions contribute black (no light).
+
+## Optional local tone adjustments
+
+The approved starting preset is Reduced overlap at Haze reduction 20%, contrast 12, 0/0 EV, and black and white enabled. **Tone adjustments** starts collapsed, with all five sliders at zero. Zero bypasses the finishing stage completely; the exposure engine and its original pixel calculation are unchanged.
+
+Each slider ranges from −100 to +100. Positive brightens its tonal region; negative darkens it. Blacks and Whites affect near-black and near-white values, Shadows and Highlights affect broader dark and bright values, and Mids affects the middle range. Their smooth curve affects nearby tones too. These are simple finishing controls, not replicas of Lightroom's processing. Pure black and white remain fixed, and clipped detail cannot be recovered.
+
+The controls affect only the finished right preview, after exposure processing and any contrast adjustment. They work with every local treatment. **Reset tones** restores only the five sliders to zero. **Reset trial** also restores Reduced overlap, Haze reduction 20%, contrast 12, and 0/0 EV, while preserving the colour checkbox. Downloads record the finishing settings separately from the exposure renderer. The public page has no new controls.
 
 ## Artist colour option
 
@@ -107,6 +116,8 @@ The approved Current + contrast version immediately before Dark/light balance is
 The earlier Dark/light balance version, including its shadow boost and original control, is preserved as **`balance-v1-checkpoint`** at **`f9abbd7`**. The Reduced overlap revision is recorded separately so the exact prior code can be restored.
 
 The Reduced overlap version before the black-and-white conversion fix is saved as **`colour-overlap-checkpoint`** at **`a7f543e`**. Its colour output is preserved by the fix; the old monochrome calculation can be restored from that checkpoint.
+
+The exact project before optional tone controls is saved as **`before-tone-controls`** at **`43740ff`**. The tone controls are a separate change; setting all five to zero also bypasses their processing entirely.
 
 In VS Code, open **Source Control** to see changed files and saved history. To save a version manually, stage the intended files, enter a short description, and commit. Saving a file alone does not create a Git version.
 

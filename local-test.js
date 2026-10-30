@@ -17,15 +17,30 @@ function initializeLocalExposureTest() {
     balance: byId("test-balance"), balanceValue: byId("test-balance-value"), balanceControl: byId("test-balance-control"),
     baseValue: byId("test-base-value"), participantValue: byId("test-participant-value"),
     reset: byId("test-reset"), trialTitle: byId("trial-title"),
+    tonesReset: byId("test-tones-reset"),
     status: byId("test-status"), error: byId("test-error")
   };
+  const toneControls = ["shadows", "highlights", "mids", "whites", "blacks"].map((name) => ({
+    name, input: byId(`test-${name}`), output: byId(`test-${name}-value`)
+  }));
+  const toneInputs = toneControls.map(({ input }) => input);
   const processor = createExposureProcessor({
     mixerFactory(settings) {
-      if (settings.renderer === "balanced") return ExposureMath.createBalancedMixer(settings);
-      if (settings.renderer === "revised") return FilmExposureMath.createRevisedMixer(settings);
-      if (settings.renderer === "smooth") return FilmExposureMath.createSmoothMixer(settings);
-      if (settings.renderer === "film") return FilmExposureMath.createMixer(settings);
-      return ExposureMath.createMixer(settings);
+      const factories = {
+        balanced: ExposureMath.createBalancedMixer,
+        revised: FilmExposureMath.createRevisedMixer,
+        smooth: FilmExposureMath.createSmoothMixer,
+        film: FilmExposureMath.createMixer,
+        linear: ExposureMath.createMixer
+      };
+      const mix = (factories[settings.renderer] || ExposureMath.createMixer)(settings);
+      const adjustTones = settings.tones ? ToneAdjustments.createMapper(settings.tones) : null;
+      // Neutral controls return the original mixer, with no extra pixel pass.
+      if (!adjustTones) return mix;
+      return (base, participant, output, start = 0, end = base.length) => {
+        mix(base, participant, output, start, end);
+        adjustTones(output, start, end);
+      };
     }
   });
   const state = {
@@ -33,7 +48,7 @@ function initializeLocalExposureTest() {
     resultUrl: null, referenceUrl: null, settingsUrl: null,
     referenceRecord: null, completed: null
   };
-  const controls = [ui.base, ui.participant, ui.baseCamera, ui.participantCamera, ui.renderer, ui.baseExposure, ui.participantExposure, ui.contrast, ui.balance, ui.monochrome, ui.reset];
+  const controls = [ui.base, ui.participant, ui.baseCamera, ui.participantCamera, ui.renderer, ui.baseExposure, ui.participantExposure, ui.contrast, ui.balance, ui.monochrome, ui.reset, ui.tonesReset, ...toneInputs];
   ui.monochrome.checked = PROJECT_SETTINGS.monochrome;
 
   function evLabel(value) {
@@ -45,18 +60,21 @@ function initializeLocalExposureTest() {
     ui.participantValue.textContent = evLabel(ui.participantExposure.value);
     ui.contrastValue.textContent = ui.contrast.value;
     ui.balanceValue.textContent = `${ui.balance.value}%`;
+    for (const { input, output } of toneControls) output.textContent = Number(input.value) > 0 ? `+${input.value}` : input.value;
   }
+  const readTones = () => Object.fromEntries(toneControls.map(({ name, input }) => [name, Number(input.value)]));
   function updateTreatmentControls() {
     ui.contrastControl.hidden = !["linear", "balanced"].includes(ui.renderer.value);
     ui.contrast.disabled = state.working || ui.contrastControl.hidden;
     ui.balanceControl.hidden = ui.renderer.value !== "balanced";
     ui.balance.disabled = state.working || ui.balanceControl.hidden;
   }
-  function updateTrialTitle(settings = { renderer: ui.renderer.value, baseExposure: Number(ui.baseExposure.value), participantExposure: Number(ui.participantExposure.value), contrast: Number(ui.contrast.value), balanceStrength: Number(ui.balance.value) }) {
+  function updateTrialTitle(settings = { renderer: ui.renderer.value, baseExposure: Number(ui.baseExposure.value), participantExposure: Number(ui.participantExposure.value), contrast: Number(ui.contrast.value), balanceStrength: Number(ui.balance.value), tones: readTones() }) {
     const names = { balanced: "reduced overlap", revised: "revised smooth", smooth: "saved smooth exposure", film: "earlier film curve", linear: "current addition" };
     const contrast = ["linear", "balanced"].includes(settings.renderer) ? ` · contrast ${settings.contrast}` : "";
     const balance = settings.renderer === "balanced" ? ` · ${settings.balanceStrength}%` : "";
-    ui.trialTitle.textContent = `Trial · ${names[settings.renderer]}${balance}${contrast} · ${evLabel(settings.baseExposure)} / ${evLabel(settings.participantExposure)}`;
+    const tones = settings.tones && Object.values(settings.tones).some((value) => value !== 0) ? " · tones adjusted" : "";
+    ui.trialTitle.textContent = `Trial · ${names[settings.renderer]}${balance}${contrast} · ${evLabel(settings.baseExposure)} / ${evLabel(settings.participantExposure)}${tones}`;
   }
   function settingsFor(renderer, baseExposure, participantExposure, contrast = 0, balanceStrength = 0) {
     return {
@@ -135,17 +153,21 @@ function initializeLocalExposureTest() {
       renderer: settings.renderer,
       ...models[settings.renderer],
       settings: { ...settings }, width: result.width, height: result.height,
+      ...(settings.tones ? { postProcessing: { version: ToneAdjustments.version, tones: { ...settings.tones } } } : {}),
       format: "image/jpeg", quality: 0.95
     };
   }
   async function renderResults(includeReference) {
     // Capture all controls before awaiting; the recipe belongs to these outputs.
     const referenceSettings = settingsFor("linear", 0, 0, 12);
-    const trialSettings = settingsFor(
-      ui.renderer.value, Number(ui.baseExposure.value), Number(ui.participantExposure.value),
-      ["linear", "balanced"].includes(ui.renderer.value) ? Number(ui.contrast.value) : 0,
-      ui.renderer.value === "balanced" ? Number(ui.balance.value) : 0
-    );
+    const trialSettings = {
+      ...settingsFor(
+        ui.renderer.value, Number(ui.baseExposure.value), Number(ui.participantExposure.value),
+        ["linear", "balanced"].includes(ui.renderer.value) ? Number(ui.contrast.value) : 0,
+        ui.renderer.value === "balanced" ? Number(ui.balance.value) : 0
+      ),
+      tones: readTones()
+    };
     ui.status.textContent = "Developing comparison…";
     if (includeReference || !state.referenceRecord) {
       const reference = await processor.develop(state.base, state.participant, ui.referenceCanvas, referenceSettings);
@@ -234,18 +256,24 @@ function initializeLocalExposureTest() {
   ui.participant.addEventListener("change", () => choosePhoto("participant", ui.participant));
   ui.baseCamera.addEventListener("change", () => choosePhoto("base", ui.baseCamera));
   ui.participantCamera.addEventListener("change", () => choosePhoto("participant", ui.participantCamera));
-  for (const slider of [ui.baseExposure, ui.participantExposure, ui.contrast, ui.balance]) {
+  for (const slider of [ui.baseExposure, ui.participantExposure, ui.contrast, ui.balance, ...toneInputs]) {
     slider.addEventListener("input", updateReadouts);
     slider.addEventListener("change", () => changeSettings());
   }
   ui.renderer.addEventListener("change", () => changeSettings());
   ui.monochrome.addEventListener("change", () => changeSettings(true));
+  ui.tonesReset.addEventListener("click", () => {
+    if (state.working) return;
+    for (const { input } of toneControls) input.value = "0";
+    return changeSettings();
+  });
   ui.reset.addEventListener("click", () => {
     if (state.working) return;
     ui.renderer.value = "balanced";
-    ui.balance.value = "100";
+    ui.balance.value = "20";
     ui.contrast.value = "12";
     ui.baseExposure.value = ui.participantExposure.value = "0";
+    for (const { input } of toneControls) input.value = "0";
     return changeSettings();
   });
   ui.download.addEventListener("click", () => {

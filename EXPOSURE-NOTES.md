@@ -66,7 +66,7 @@ The supplied film curve remains selectable beside the fixed saved Current refere
 
 ## Reduced overlap trial
 
-The default adjustable result uses **Reduced overlap (trial)**. It starts at 0/0 EV, contrast 12, and **Haze reduction 100%**, beside the approved saved Current treatment at 0/0 EV and contrast 12. It removes the earlier dark-overlap boost and reduces extra overlapping light throughout shadows, midtones, and highlights.
+The default adjustable result uses **Reduced overlap (trial)**. It starts at 0/0 EV, contrast 12, and **Haze reduction 20%**, matching the approved screenshot preset, beside the approved saved Current treatment at 0/0 EV and contrast 12. It removes the earlier dark-overlap boost and reduces extra overlapping light throughout shadows, midtones, and highlights.
 
 It decodes each source channel to linear light and applies the ordinary `2 ** EV` multiplier. Let `M` be the brighter adjusted value, `m` the darker, and `s = balanceStrength / 100`:
 
@@ -86,6 +86,16 @@ The settings record retains the internal `balanceStrength` name, renderer versio
 The Reduced overlap implementation before this black-and-white conversion fix is preserved as **`colour-overlap-checkpoint`** at **`a7f543e`**. Its colour output remains unchanged; the checkpoint also preserves the old monochrome result.
 
 The earlier Dark/light balance implementation, including its arbitrary shadow boost, is preserved as **`balance-v1-checkpoint`** at **`f9abbd7`**. The approved Current + contrast version is preserved as **`current-contrast-checkpoint`** at **`c1cd211`**. The left preview still uses its contrast-12 treatment.
+
+## Optional finishing curve
+
+The local comparison has a separate, collapsed **Tone adjustments** panel. Shadows, Highlights, Mids, Whites, and Blacks range from −100 to +100 and start at zero. They act on the right preview after the selected renderer, its monochrome conversion, contrast, and encoding. The renderer version remains `overlap-suppression-v2`; `scripts.js` and the exposure calculation are unchanged.
+
+At zero, `ToneAdjustments.createMapper` returns no mapper and the page uses the original mixer directly, preserving exact pixels. With nonzero controls, `tone-adjustments.js` maps the finished encoded sRGB brightness through a smooth curve. It uses weighted display-space brightness, not linear luminance, with fixed endpoints 0 and 1 and adjustable anchors at 0.05, 0.22, 0.5, 0.78, and 0.95. Positive raises the selected range; negative lowers it. Adjacent ranges overlap through the curve. Colour moves toward black or white with one shared factor, preserving neutral gray and avoiding out-of-range channels; brightening can reduce saturation. This is a simple finishing curve rather than a reproduction of Lightroom's controls. Fixed endpoints cannot recover clipped black or white detail.
+
+The default approved preset is Reduced overlap at Haze reduction 20%, contrast 12, 0/0 EV, black and white enabled by the artist configuration, and all tones at zero. **Reset tones** changes only the five finishing values. **Reset trial** also restores treatment, Haze reduction 20%, contrast 12, and 0/0 EV while keeping the colour choice. The reference receives no finishing curve. Recipe downloads record the trial's five `settings.tones` values and separate `postProcessing` version `tone-curve-v1`, captured before the render begins. The local helper is excluded from public publishing and archive processing.
+
+The project immediately before these optional controls is preserved as **`before-tone-controls`** at **`43740ff`**.
 
 ## Current addition with adjustable contrast
 

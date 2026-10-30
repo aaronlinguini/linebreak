@@ -44,8 +44,16 @@
 .monochrome-control input { accent-color: #d0d0d0; }
 .test-controls .save-button { font-size: 12px; }
 .test-controls select:focus-visible { outline: 1px solid var(--foreground); outline-offset: 4px; }
+.tone-panel { margin-top: 28px; border-top: 1px solid #292929; padding-top: 16px; }
+.tone-panel summary { width: fit-content; padding-block: 10px; font-size: 13px; cursor: pointer; }
+.tone-panel summary:focus-visible { outline: 1px solid var(--foreground); outline-offset: 4px; }
+.tone-panel > .control-help { margin-block: 8px 20px; max-width: 620px; }
+.tone-control-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 18px 28px; }
+.tone-control-grid .exposure-control { width: 100%; }
+.tone-panel > .save-button { margin-top: 12px; font-size: 12px; }
 .test-controls input:disabled,
-.test-controls select:disabled { opacity: .5; cursor: wait; }
+.test-controls select:disabled,
+.tone-panel input:disabled { opacity: .5; cursor: wait; }
 
 @media (max-width: 780px) {
   .local-test .site-header,

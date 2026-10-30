@@ -10,7 +10,8 @@
     <script src="project-config.js" defer></script>
     <script src="scripts.js?v=overlap-suppression-v2" defer></script>
     <script src="film-renderer.js?v=smooth-revised-v1" defer></script>
-    <script src="local-test.js?v=overlap-suppression-v2" defer></script>
+    <script src="tone-adjustments.js?v=tone-curve-v1" defer></script>
+    <script src="local-test.js?v=tone-controls-v1" defer></script>
   </head>
   <body class="local-test">
     <header class="site-header">
@@ -28,7 +29,7 @@
           <button id="test-reference-download" class="save-button" type="button" hidden disabled>Download saved version</button>
         </section>
         <section class="comparison-panel" aria-labelledby="trial-title">
-          <h2 id="trial-title">Trial · reduced overlap · contrast 12</h2>
+          <h2 id="trial-title">Trial · reduced overlap · 20% · contrast 12</h2>
           <div class="image-stage">
             <p id="test-empty" class="empty-state">Choose two photographs.</p>
             <canvas id="test-canvas" width="1" height="1" hidden aria-label="Adjustable trial double exposure"></canvas>
@@ -73,8 +74,8 @@
           </select>
         </div>
         <div id="test-balance-control" class="exposure-control">
-          <label for="test-balance">Haze reduction <output id="test-balance-value" for="test-balance">100%</output></label>
-          <input id="test-balance" type="range" min="0" max="100" step="5" value="100" aria-describedby="test-balance-help">
+          <label for="test-balance">Haze reduction <output id="test-balance-value" for="test-balance">20%</output></label>
+          <input id="test-balance" type="range" min="0" max="100" step="5" value="20" aria-describedby="test-balance-help">
           <p id="test-balance-help" class="control-help">0%: saved addition. Higher: less overlapping light in shadows, midtones and highlights; black still reveals the other photo.</p>
         </div>
         <div id="test-contrast-control" class="exposure-control">
@@ -95,6 +96,34 @@
         <button id="test-reset" class="save-button" type="button">Reset trial</button>
         <button id="test-settings-download" class="save-button" type="button" hidden disabled>Download settings</button>
       </div>
+
+      <details id="test-tone-panel" class="tone-panel">
+        <summary>Tone adjustments</summary>
+        <p id="test-tone-help" class="control-help">Adjusts the finished trial only. Positive brightens; negative darkens. All five at zero keep the original result. Blacks and whites affect near-black and near-white tones.</p>
+        <div class="tone-control-grid">
+          <div class="exposure-control">
+            <label for="test-shadows">Shadows <output id="test-shadows-value" for="test-shadows">0</output></label>
+            <input id="test-shadows" type="range" min="-100" max="100" step="1" value="0" aria-describedby="test-tone-help">
+          </div>
+          <div class="exposure-control">
+            <label for="test-highlights">Highlights <output id="test-highlights-value" for="test-highlights">0</output></label>
+            <input id="test-highlights" type="range" min="-100" max="100" step="1" value="0" aria-describedby="test-tone-help">
+          </div>
+          <div class="exposure-control">
+            <label for="test-mids">Mids <output id="test-mids-value" for="test-mids">0</output></label>
+            <input id="test-mids" type="range" min="-100" max="100" step="1" value="0" aria-describedby="test-tone-help">
+          </div>
+          <div class="exposure-control">
+            <label for="test-whites">Whites <output id="test-whites-value" for="test-whites">0</output></label>
+            <input id="test-whites" type="range" min="-100" max="100" step="1" value="0" aria-describedby="test-tone-help">
+          </div>
+          <div class="exposure-control">
+            <label for="test-blacks">Blacks <output id="test-blacks-value" for="test-blacks">0</output></label>
+            <input id="test-blacks" type="range" min="-100" max="100" step="1" value="0" aria-describedby="test-tone-help">
+          </div>
+        </div>
+        <button id="test-tones-reset" class="save-button" type="button">Reset tones</button>
+      </details>
 
       <div class="feedback">
         <p id="test-status" class="status" role="status" aria-live="polite">Choose a base photo and a second photo.</p>
