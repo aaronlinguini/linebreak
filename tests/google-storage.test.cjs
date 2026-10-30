@@ -16,7 +16,7 @@ function harness() {
   let nextId = 0;
   const files = new Map(), books = new Map();
   const calls = { get: [], create: [], list: [], update: [], fetch: [], sheets: [], valuesGet: [], valuesUpdate: [] };
-  const controls = { pages: null, httpCode: 200, body: null, failValueWrite: false, failGet: null };
+  const controls = { pages: null, httpCode: 200, body: null, failValueWrite: false, failGet: null, onFetch: null };
   class Blob {
     constructor(bytes, mimeType, name) { this.bytes = [...bytes]; this.mimeType = mimeType; this.name = name; }
     getName() { return this.name; }
@@ -68,9 +68,10 @@ function harness() {
       calls.list.push(clone(options));
       if (controls.pages) return clone(controls.pages[options.pageToken ? Number(options.pageToken) : 0]);
       const parent = options.q.match(/^'([^']+)' in parents/)[1];
-      const wantFolder = options.q.includes("mimeType = '");
+      const onlyFolders = options.q.includes(`mimeType = '${folderType}'`);
+      const excludeFolders = options.q.includes(`mimeType != '${folderType}'`);
       return { files: [...files.values()].map(item => item.metadata).filter(file => file.parents.includes(parent) &&
-        (file.mimeType === folderType) === wantFolder && !file.trashed) };
+        (!onlyFolders || file.mimeType === folderType) && (!excludeFolders || file.mimeType !== folderType) && !file.trashed) };
     }
   } };
   const Sheets = { Spreadsheets: {
@@ -129,6 +130,7 @@ function harness() {
       calls.fetch.push({ url, options: clone(options) });
       const id = url.match(/\/files\/([A-Za-z0-9_-]+)\?alt=media$/)?.[1];
       assert.ok(id, "downloads go only to an internal Drive file ID");
+      if (controls.onFetch) controls.onFetch(id);
       const item = files.get(id);
       return { getResponseCode: () => controls.httpCode,
         getBlob: () => new Blob(controls.body || item.bytes, "application/octet-stream", "download") };
@@ -140,7 +142,7 @@ function harness() {
 
 function backendHarness() {
   const h = harness();
-  const properties = new Map([["SITE_URL", "https://artist.example/exposures/"]]);
+  const properties = new Map([["SITE_URL", "https://artist.example/exposures/"], ["PROJECT_OWNER_EMAIL", "owner@example.test"]]);
   const identity = { active: "owner@example.test", effective: "owner@example.test" };
   const signed = bytes => Array.from(bytes, value => value > 127 ? value - 256 : value);
   let locked = false;
@@ -252,6 +254,108 @@ test("partial or cyclic listings fail instead of returning a destructive partial
   assert.throws(() => root.getFiles(), /incomplete/);
   h.controls.pages = [{ files: [], nextPageToken: "1" }, { files: [], nextPageToken: "1" }];
   assert.throws(() => root.getFiles(), /could not be completed/);
+});
+
+test("the artist reader accepts photos dropped into its folder without granting managed-archive access", () => {
+  const h = harness();
+  const artist = h.addFile({ mimeType: folderType, isAppAuthorized: false, appProperties: {} }, []);
+  const photo = h.addFile({ name: "dropped.jpg", parents: [artist.id], isAppAuthorized: false, appProperties: {} }, [1, -2, 3]);
+  const folder = h.drive.getArtistFolderById(artist.id);
+  const files = folder.getFiles();
+  assert.equal(files.next().getId(), photo.id);
+  assert.equal(files.hasNext(), false);
+  const file = h.drive.getArtistFileById(photo.id, artist.id);
+  assert.equal(file.getName(), "dropped.jpg");
+  assert.deepEqual(file.getBlob().getBytes(), [1, -2, 3]);
+  assert.throws(() => h.drive.getFolderById(artist.id), error => error.exposureCode_ === "ACCESS_NOT_GRANTED");
+  assert.throws(() => h.drive.getFileById(photo.id), error => error.exposureCode_ === "ACCESS_NOT_GRANTED");
+  assert.equal(h.calls.create.length, 0, "reading manually added photos must not copy them into another file");
+  assert.equal(h.calls.update.length, 0, "reading does not add app markers or change the user's photos");
+});
+
+test("artist inventory fully paginates and filters unrelated files even when the API returns them", () => {
+  const h = harness();
+  const artist = h.addFile({ mimeType: folderType, isAppAuthorized: false, appProperties: {} }, []);
+  const first = h.addFile({ name: "chosen.jpg", parents: [artist.id], isAppAuthorized: false, appProperties: {} });
+  const second = h.addFile({ name: "chosen.jpg", mimeType: "image/png", parents: [artist.id], isAppAuthorized: false, appProperties: {} });
+  h.controls.pages = [
+    { files: [first, h.addFile({ name: "chosen.jpg", parents: ["unrelated"] }), h.addFile({ name: "chosen.jpg", parents: [artist.id], trashed: true })], nextPageToken: "1" },
+    { files: [second, h.addFile({ name: "different.jpg", parents: [artist.id] }),
+      h.addFile({ name: "chosen.jpg", mimeType: folderType, parents: [artist.id] }),
+      h.addFile({ name: "chosen.jpg", mimeType: "application/vnd.google-apps.shortcut", parents: [artist.id], shortcutDetails: { targetId: first.id } }),
+      h.addFile({ name: "chosen.jpg", mimeType: "text/plain", parents: [artist.id] })] }
+  ];
+  const files = h.drive.getArtistFolderById(artist.id).getFilesByName("chosen.jpg");
+  assert.equal(files.next().getId(), first.id);
+  assert.equal(files.next().getId(), second.id);
+  assert.equal(files.hasNext(), false);
+  assert.equal(h.calls.list.length, 2);
+  assert.equal(h.calls.list[1].pageToken, "1");
+  assert.ok(h.calls.list.every(call => call.q.includes(`'${artist.id}' in parents`)));
+  assert.equal(h.calls.fetch.length, 0, "listing metadata does not download every photograph");
+});
+
+test("artist folders and files reject invalid IDs, wrong parents, unsupported types and deleted content", () => {
+  const h = harness();
+  const artist = h.addFile({ mimeType: folderType, isAppAuthorized: false, appProperties: {} }, []);
+  const image = h.addFile({ parents: [artist.id], isAppAuthorized: false, appProperties: {} });
+  const trashedFolder = h.addFile({ mimeType: folderType, trashed: true });
+  for (const id of [image.id, trashedFolder.id, "missing", "https://example.test/folder", "../folder", "folder\nother", 8]) {
+    assert.throws(() => h.drive.getArtistFolderById(id));
+  }
+  for (const overrides of [{ parents: ["unrelated"] }, { mimeType: folderType },
+    { mimeType: "application/vnd.google-apps.shortcut" }, { mimeType: "text/plain" }, { trashed: true },
+    { size: "unknown" }, { size: "0" }, { size: String(30 * 1024 * 1024 + 1) }, { capabilities: { canDownload: false } }]) {
+    const file = h.addFile({ parents: [artist.id], isAppAuthorized: false, appProperties: {}, ...overrides });
+    assert.throws(() => h.drive.getArtistFileById(file.id, artist.id).getBlob());
+  }
+  for (const id of ["https://example.test/image", "../image", "image?alt=media", 9]) {
+    assert.throws(() => h.drive.getArtistFileById(id, artist.id));
+  }
+  assert.equal(h.calls.fetch.length, 0);
+});
+
+test("artist wrappers cannot create, move or mark files despite broader read permission", () => {
+  const h = harness();
+  const artist = h.addFile({ mimeType: folderType, isAppAuthorized: false, appProperties: {} }, []);
+  const photo = h.addFile({ parents: [artist.id], isAppAuthorized: false, appProperties: {} });
+  const folder = h.drive.getArtistFolderById(artist.id);
+  const file = h.drive.getArtistFileById(photo.id, artist.id);
+  for (const item of [folder, file]) {
+    assert.throws(() => item.createFolder("another"), error => error.exposureCode_ === "READ_ONLY_SOURCE");
+    assert.throws(() => item.createFile(new h.Blob([1], "image/jpeg", "another.jpg")), error => error.exposureCode_ === "READ_ONLY_SOURCE");
+    assert.throws(() => item.moveTo({ getId: () => artist.id }), error => error.exposureCode_ === "READ_ONLY_SOURCE");
+  }
+  assert.equal(h.calls.create.length, 0);
+  assert.equal(h.calls.update.length, 0);
+});
+
+test("artist downloads check current folder membership before and after the media request", () => {
+  const h = harness();
+  const artist = h.addFile({ mimeType: folderType, isAppAuthorized: false, appProperties: {} }, []);
+  const photo = h.addFile({ parents: [artist.id], isAppAuthorized: false, appProperties: {} });
+  const file = h.drive.getArtistFileById(photo.id, artist.id);
+  h.files.get(photo.id).metadata.parents = ["moved-out"];
+  assert.throws(() => file.getBlob());
+  assert.equal(h.calls.fetch.length, 0, "a stale wrapper cannot download a file moved outside the artist folder");
+  h.files.get(photo.id).metadata.parents = [artist.id];
+  h.controls.onFetch = id => { h.files.get(id).metadata.parents = ["moved-during-download"]; };
+  assert.throws(() => file.getBlob());
+  assert.equal(h.calls.fetch.length, 1, "bytes are rejected if membership changes during the download");
+});
+
+test("artist downloads retain fixed endpoints and reject redirects and partial listings", () => {
+  const h = harness();
+  const artist = h.addFile({ mimeType: folderType, isAppAuthorized: false, appProperties: {} }, []);
+  const photo = h.addFile({ parents: [artist.id], isAppAuthorized: false, appProperties: {} });
+  h.controls.httpCode = 302;
+  assert.throws(() => h.drive.getArtistFileById(photo.id, artist.id).getBlob(), error => !error.message.includes("private-test-token"));
+  assert.equal(h.calls.fetch[0].url, `https://www.googleapis.com/drive/v3/files/${photo.id}?alt=media`);
+  assert.equal(h.calls.fetch[0].options.followRedirects, false);
+  h.controls.pages = [{ files: [photo], incompleteSearch: true }];
+  assert.throws(() => h.drive.getArtistFolderById(artist.id).getFiles(), /incomplete/);
+  h.controls.pages = [{ files: [photo], nextPageToken: "1" }, { files: [], nextPageToken: "1" }];
+  assert.throws(() => h.drive.getArtistFolderById(artist.id).getFiles(), /could not be completed/);
 });
 
 test("image downloads use the documented fixed media endpoint, private OAuth token and no redirects", () => {
@@ -407,6 +511,37 @@ test("the real backend archives through the limited adapters with consent, origi
   assert.equal(h.api("bootstrap").participantCount, 1, "retrying an earlier opt-out result cannot revoke a later opt-in");
   assert.ok(h.calls.valuesUpdate.every(call => call.options.valueInputOption === "RAW"));
   assert.ok(h.calls.fetch.every(call => call.options.followRedirects === false));
+});
+
+test("the real backend discovers a Drive-dropped photo and pairs it without an artist import or extra copy", () => {
+  const h = backendHarness();
+  h.sandbox.setupProject();
+  const artistFolderId = h.properties.get("EXPOSURE_ARTIST_FOLDER_ID");
+  const original = image(31, "dropped-directly-in-Drive.jpg");
+  const photo = h.addFile({ name: original.name, parents: [artistFolderId], isAppAuthorized: false, appProperties: {} },
+    Buffer.from(original.base64, "base64"));
+  const untouchedMetadata = clone(photo);
+  const createsBeforeScan = h.calls.create.length;
+  const updatesBeforeScan = h.calls.update.length;
+
+  const collection = h.api("bootstrap");
+  assert.equal(collection.artistCount, 1);
+  assert.equal(collection.totalEligible, 1);
+  assert.equal(h.calls.create.length, createsBeforeScan, "discovery indexes the existing Drive photo instead of importing another copy");
+  const source = h.records("Sources").find(source => source.kind === "artist");
+  assert.equal(source.sourceId, photo.id);
+  assert.equal(source.nameJson, JSON.stringify(original.name));
+  assert.equal(source.eligible, true);
+  assert.equal(source.modifiedAt, new Date(photo.modifiedTime).toISOString());
+
+  const paired = h.api("begin", { submissionId: crypto.randomUUID(), original: image(32), allowReuse: false });
+  assert.equal(paired.base.id, photo.id);
+  assert.equal(paired.base.name, original.name);
+  assert.equal(paired.base.base64, original.base64);
+  assert.equal(h.records("Submissions")[0].baseSha256, source.sha256, "the selected base content is pinned for retries");
+  assert.deepEqual(h.files.get(photo.id).metadata, untouchedMetadata, "the user-managed photo is never renamed, marked or moved");
+  assert.equal(h.calls.update.length, updatesBeforeScan);
+  assert.equal([...h.files.values()].filter(file => file.metadata.parents.includes(artistFolderId)).length, 1);
 });
 
 test("the real owner RPC denies anonymous and other-account calls before reaching the limited adapters", () => {

@@ -1,100 +1,62 @@
-# Connect the limited-access Google archive
+# Google archive: project account and Drive-folder intake
 
-The image effect already works without Google in `local-test.html`. The Google connection supplies base photographs and saves originals, finished exposures, consent, and duplicate checks. It runs on Google's infrastructure; you do not rent a server or connect your Google account to an AI assistant.
+The double-exposure tool runs in the browser. The Google program supplies base photographs and saves participant originals, completed JPEGs, consent, and duplicate checks. It runs on Google's infrastructure; you do not rent a server or connect a Google account to an AI assistant.
 
-The [project website](https://aaronlinguini.github.io/double-exposure-online-project/) uses [a separate public repository](https://github.com/aaronlinguini/double-exposure-online-project). On October 30, 2026, the five limited-access files were installed in the existing Apps Script project and verified against the local files after reloading. Drive v3 and Sheets v4 are enabled. Setup completed at **1:07:41 PM**, creating the app's folders and index spreadsheet. **Version 1 was deployed successfully at 1:19 PM**, executing as the owner with **Anyone** access explicitly approved by the user. **Keep the current `EXPOSURE_*_ID` properties; do not repeat the old-folder migration.**
+## Current status — October 30, 2026
 
-The deployed endpoint is [the Google web app](https://script.google.com/macros/s/AKfycbw89JT4EFAoXcpYM3M8ywS3LSF2jsAUOr3Pc5SlNls-BG_S128SweTPooYdDuPnbuM2/exec). The current version accepts base photos through the [private artist import page](https://script.google.com/macros/s/AKfycbw89JT4EFAoXcpYM3M8ywS3LSF2jsAUOr3Pc5SlNls-BG_S128SweTPooYdDuPnbuM2/exec?view=artist). **The user instead prefers dragging files directly into the Drive folder. That workflow change is pending an access decision; it is not implemented, and no broader permission has been requested or granted by the assistant.** Direct folder intake would require a revised reader and authorization, such as Drive-wide read-only access for this account, or running the program in a separate project account with access only to the shared base-photo folder and its own project files. The current limited-access grant does not automatically authorize files dropped into Drive.
+The user chose the dedicated account **aaron.double.exposure.project@gmail.com** so they can add base photos by dragging files into Google Drive. The new [Apps Script project](https://script.google.com/home/projects/1gj7CIChAW6rMFOmP_Pb16TWSAwUKzZQxnOUOvvEUvDFOwQxKo65lYols/edit) exists in that account. Its manifest is visible, and these Script Properties have been configured:
 
-Verified deployment checks:
+| Property | Current value |
+| --- | --- |
+| `PROJECT_OWNER_EMAIL` | `aaron.double.exposure.project@gmail.com` |
+| `SITE_URL` | `https://aaronlinguini.github.io/double-exposure-online-project/` |
+| `UPLOADS_PAUSED` | `true` |
+| `ALLOWED_ORIGINS` | `http://127.0.0.1:5500,http://localhost:5500` |
 
-- In signed-in Chrome, the artist page reported **Collection ready**, initially **0 photographs**, and showed the correct project folder links.
-- In an actual **Chrome Incognito** session, the artist page denied access with **Open the artist import page while signed into the account that deployed this project.** The in-app browser was also signed in and was not used as evidence of anonymous access.
-- `project-config.js` contains the deployed endpoint. Only that file changed in public GitHub commit [`f78b742c33036a64ded4d2cf5ee6f80775bf4b89`](https://github.com/aaronlinguini/double-exposure-online-project/commit/f78b742c33036a64ded4d2cf5ee6f80775bf4b89). [GitHub Pages run 41098445169](https://github.com/aaronlinguini/double-exposure-online-project/actions/runs/41098445169) completed successfully. The existing nine-file publication checks passed **8/8**.
-- `UPLOADS_PAUSED=true` is retained. The public Incognito page reported submissions temporarily unavailable; that visible message alone does not establish a particular server error code.
+**The five files are installed in the new account's “Photo archive” project and verified byte for byte against the tested local files after reloading.** Drive v3 and Sheets v4 appear in Services. All **247 automated checks pass**, including folder discovery without the import API, read-only source boundaries, metadata caching, batched index writes, legacy schema migration, and stable retries. The first setup run opened Google's **“Google hasn't verified this app”** warning in the project account. That warning and the access approval are left for the user; the assistant has not approved or bypassed them. **Authorization, actual folder creation, deployment, and live Drive checks remain pending.** Do not tell the user that direct-folder uploads are live yet.
 
-Artist imports and real original/result uploads, duplicate handling, consent, another pairing, and phone/tablet checks remain pending. Automated tests simulate Google services and do not replace those live checks.
+The [public website](https://aaronlinguini.github.io/double-exposure-online-project/) and [public repository](https://github.com/aaronlinguini/double-exposure-online-project) still point to the earlier personal-account deployment. That deployment and its folders remain unchanged and paused as a rollback reference. The public endpoint must change only after the new project is set up, deployed, and checked.
 
-The pre-install Google files, old Script Properties, and installation verification are backed up locally under the Git-ignored `secrets/google-before-limited-access-2026-10-30/` directory. The new setup links are saved in the Git-ignored `secrets/google-archive-links-2026-10-30.json`. Existing Drive folders and their contents were not changed. The obsolete permission-request tab for the older code was closed without approval. Resolve the requested folder-intake workflow before proceeding with photo intake. The instructions below describe the currently deployed import-page implementation; setup and deployment instructions remain references for a fresh installation or a later update.
+There is no need to share a personal Drive folder for the default setup. The new program will create all project folders in the dedicated account, and the user can drag photos into that account's **My_photos** folder. The optional import page remains available as a fallback; it is not required for normal photo intake in this version.
 
-## What permission the program requests
+## Keep the two Google projects separate
 
-The new manifest contains only these OAuth scopes:
+- The new project-account program is the migration target linked above. It starts with its own archive folders and index.
+- The older [personal-account project](https://script.google.com/home/projects/1wDfc-rqQgk1T-TJYM3vSWkhLnQ5Hl31CTXs_Jl-DgVpdbbcaX9QO7Q14/edit) and [Version 1 endpoint](https://script.google.com/macros/s/AKfycbw89JT4EFAoXcpYM3M8ywS3LSF2jsAUOr3Pc5SlNls-BG_S128SweTPooYdDuPnbuM2/exec) are retained. Do not install the broader-read manifest into that personal-account project.
+- Do not copy the old personal-account `EXPOSURE_*_ID` values into the new project. They refer to the old archive and do not transfer ownership or app authorization.
+- Once setup creates the new project's IDs, **keep them**. Do not repeat the old manual-folder migration or clear working IDs; that would create another archive.
+- Pre-install personal-account files and properties are in the Git-ignored `secrets/google-before-limited-access-2026-10-30/`. Earlier archive links and deployment details are in the Git-ignored `secrets/` directory. They describe the old deployment, not a completed new-account setup.
+
+## Permissions in the project account
+
+The revised manifest requests:
 
 | Scope | Purpose |
 | --- | --- |
-| `https://www.googleapis.com/auth/drive.file` | Create and access the project's app-created Drive files, folders, and index spreadsheet |
-| `https://www.googleapis.com/auth/userinfo.email` | Verify that artist operations are performed by the project's owner |
-| `https://www.googleapis.com/auth/script.external_request` | Download authorized source-image bytes from Google's fixed Drive API endpoint |
+| `https://www.googleapis.com/auth/drive.readonly` | Read photos placed directly into the configured Drive folder |
+| `https://www.googleapis.com/auth/drive.file` | Create and update the app's own archive files, folders, and index spreadsheet |
+| `https://www.googleapis.com/auth/userinfo.email` | Verify the executing project account and owner operations |
+| `https://www.googleapis.com/auth/script.external_request` | Download source-image bytes from Google's fixed Drive API endpoint |
 
-There is no account-wide `drive` or `spreadsheets` scope. Sheets operations use the Sheets API with `drive.file`; they do not request access to every spreadsheet. The external-request scope is a network permission, not full Drive access. The implementation uses it only for the fixed Google Drive media endpoint, keeps its Google token on Google's side, and does not accept a caller-supplied download URL.
+**`drive.readonly` can view and download all Drive files accessible to the project account.** It is not a Google-enforced restriction to one folder. The separate account keeps unrelated personal files outside that grant unless they are shared with it. The code narrows artist reads to supported images directly inside the configured base-photo folder, and checks membership again around each download.
 
-The program also checks that each file is app-authorized and carries this project's private marker. **A folder ID alone does not grant access.** Manually creating a folder or dropping a new photograph into one does not authorize that photograph. Artist photographs are imported from your device through the owner-only page so the program creates and indexes its own authorized files.
+There is no account-wide Drive write/delete scope and no account-wide Sheets write scope. Archive writes still require app-created, app-authorized files carrying the private project marker. The source reader cannot create, move, rename, or delete artist photos. Sheets operations use Advanced Sheets with access to the app's own index. Google access tokens stay server-side; the browser receives photo data and result confirmations, not those tokens.
 
-Google documentation: [Drive per-file scope](https://developers.google.com/workspace/drive/api/guides/api-specific-auth), [Sheets scope choices](https://developers.google.com/workspace/sheets/api/scopes), [advanced services](https://developers.google.com/apps-script/guides/services/advanced).
+Before setup or any project read, the backend verifies that its effective Google account matches the required `PROJECT_OWNER_EMAIL`. Owner tools also check the signed-in caller. The broader-read version belongs in the dedicated project account.
 
-## 1. Prepare the public files
+Google references: [Drive scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth), [Sheets scopes](https://developers.google.com/workspace/sheets/api/scopes), [advanced services](https://developers.google.com/apps-script/guides/services/advanced).
 
-Run this in the working project:
+## Finish the one-time Google setup
 
-```sh
-node scripts/prepare-public-site.cjs
-```
+These are the remaining reference steps for the new account. Installing and editing code does not itself grant OAuth permissions.
 
-Publish only the generated `.public-site/` contents to the website repository. This release contains the original seven runtime files plus the artist page's two external assets:
+1. Save the current five Google project files: **Code.gs**, **Storage.gs**, **Bridge.html**, **Artist.html**, and **appsscript.json**. Their local source is in `google-apps-script/`. Keep JavaScript and CSS external to the HTML; leave the `__...__` replacement markers intact.
+2. Verify **Drive API v3** and **Google Sheets API v4** appear in Services. The manifest declares both. A default Apps Script Cloud project normally enables the corresponding APIs with these services; a custom Cloud project may require enabling them in its own console.
+3. Keep the four Script Properties in the status table above. No old archive IDs need to be entered into this fresh project.
+4. While signed into **aaron.double.exposure.project@gmail.com**, select **setupProject** in the function selector and run it. Review and approve Google's request yourself if you accept it. The consent account must be the project account. Google may display an unverified-app notice; the assistant does not approve or bypass it for you.
+5. Wait for **Execution completed**. Run setup again if authorization interrupted the first attempt. The log prints links to the newly created folders and index; repeated successful setup reuses the saved IDs.
 
-- `index.html`
-- `styles.css`
-- `scripts.js`
-- `project-config.js`
-- `archive-workflow.js`
-- `drive-storage.js`
-- `drive-bridge.js`
-- `artist-import.js`
-- `artist-import.css`
-
-Do not publish the working repository, its history, test pages, private photographs, or `google-apps-script/`. The artist JavaScript and CSS contain no credentials; the owner-only HTML is served by Google after its owner check. Both the page request and every artist RPC are checked on the server.
-
-The site base is `https://aaronlinguini.github.io/double-exposure-online-project/`. Keep the repository path and trailing slash. The bridge and artist assets must be accessible under this same base. Rebuild the generated directory after public-source edits.
-
-## 2. Install the new files in Apps Script
-
-You perform these steps in [Google Apps Script](https://script.google.com/). Reuse your existing `setupProject_` project. The title's underscore is unrelated to the function names.
-
-1. Replace **Code.gs** with [google-apps-script/Code.gs](google-apps-script/Code.gs).
-2. Add a **Script** file named **Storage** and copy [google-apps-script/Storage.gs](google-apps-script/Storage.gs) into it.
-3. Add or replace the **HTML** file **Bridge** using [google-apps-script/Bridge.html](google-apps-script/Bridge.html).
-4. Add an **HTML** file named **Artist** using [google-apps-script/Artist.html](google-apps-script/Artist.html).
-5. In **Project Settings**, enable **Show appsscript.json manifest file in editor**. Replace that file with [google-apps-script/appsscript.json](google-apps-script/appsscript.json), then save the project.
-6. Check **Services** in the editor. **Drive API v3** and **Google Sheets API v4** must be enabled, as declared in the new manifest. Add any missing service with **Services → +**. With an Apps Script default Cloud project, adding an advanced service enables its corresponding API. With a custom Cloud project, also enable the Drive and Sheets APIs in that project's Google Cloud console.
-
-The editor should now contain **Code.gs**, **Storage.gs**, **Bridge.html**, **Artist.html**, and **appsscript.json**. Do not mix the older Code.gs or manifest with this release. Do not replace the `__...__` markers in the HTML: the server fills them using the configured site base. Authored JavaScript and CSS remain external.
-
-**Replace the old manifest before authorizing anything.** If Google asks for access to all Drive files or all spreadsheets, stop and check the installed files and manifest. If you previously approved the older broad request, revoke that project's connection yourself through **Google Account → Security → Your connections to third-party apps and services**, then authorize the new version when running setup. Revoking a grant does not delete your Drive files. Do not revoke an unrelated application.
-
-## 3. Configure the site and migrate old folder settings
-
-In Apps Script, open **Project Settings → Script Properties**:
-
-| Property | Value |
-| --- | --- |
-| `SITE_URL` | `https://aaronlinguini.github.io/double-exposure-online-project/` |
-| `UPLOADS_PAUSED` | `true` until you are ready for the live check |
-| `ALLOWED_ORIGINS` | Optional local previews, for example `http://127.0.0.1:5500,http://localhost:5500` |
-
-Keep any existing colour-independent intake settings you want to retain. They are described below.
-
-For the first migration from the earlier manual-folder setup, **record the old IDs somewhere private, then remove these Script Properties as one group**:
-
-- `EXPOSURE_ROOT_FOLDER_ID`
-- `EXPOSURE_ARTIST_FOLDER_ID`
-- `EXPOSURE_ORIGINALS_FOLDER_ID`
-- `EXPOSURE_RESULTS_FOLDER_ID`
-- `EXPOSURE_SPREADSHEET_ID`, if present
-
-These old IDs point to files created outside the limited-access app. They do not become authorized by copying them into JavaScript or Script Properties. This migration does not delete, move, or change sharing on the old folders, their contents, or any old index.
-
-The new setup creates this separate private project:
+Default archive layout, entirely in the project account:
 
 ```text
 Double_exposure_web_project (app)
@@ -104,104 +66,91 @@ Double_exposure_web_project (app)
 └── Double exposure index
 ```
 
-Use the new links returned by setup or the artist page. Earlier links to the manually created folders are not the new app's archive. **After successful limited-access setup, keep the new `EXPOSURE_*_ID` properties.** Removing them again would start another archive.
+The index contains **Sources**, **Submissions**, and **Usage** tabs. Setup does not make these files public.
 
-## 4. Run setup and review the limited permission request
+## Add and manage base photographs in Google Drive
 
-1. Open **Code.gs** in the Apps Script editor.
-2. In the function selector beside **Run**, choose **`setupProject`**, without a trailing underscore.
-3. Click **Run**, review Google's requested access yourself, and authorize only if you accept that access.
-4. Wait for **Execution completed** in the execution log. If authorization interrupted the run, run `setupProject` again.
+After setup returns the new folder links:
 
-The log prints links to the new folders and index spreadsheet. The spreadsheet has **Sources**, **Submissions**, and **Usage** tabs. Setup does not make them public. Running setup again reuses the saved app-created files.
+1. Open **My_photos** in the dedicated account's Google Drive.
+2. Drag or upload the chosen base photos directly into that folder. The program reads JPEG, PNG, WebP, and AVIF files up to 30 MB each. Export HEIC or RAW files first.
+3. Keep photos directly inside **My_photos**. This reader does not recurse through subfolders or follow Drive shortcuts.
 
-Google may still display an unverified-app notice. It means Google has not verified the app, not that the new permissions are account-wide. Check the actual requested access. This walkthrough is not a reason to bypass a warning without reviewing it.
+No import app or scheduled trigger is needed for normal use. With visitor uploads enabled, the program checks for folder changes when the site connects and before a new pairing. A completed scan is reused for up to one minute. Reload the site or use Retry after adding photographs. While visitor uploads are paused, run **refreshArtistCollection** in the project account's Apps Script editor to check the collection; the optional owner page can also check it.
 
-## 5. Deploy, then import your base photographs
+Each scan reads at most **10 new or changed images** and **64 MiB** of their data. Large additions progress across later requests rather than downloading the whole folder at once. Files with unchanged modification time, size, and type reuse their recorded hashes. The program is not an always-running folder watcher: without site or owner requests, it does not scan in the background.
 
-**Current project: deployment is already complete. The private import page supports the current per-file workflow; direct Drive-folder intake is pending the access decision above. Do not create another deployment for initial setup.** The deployment instructions below describe a fresh project.
+Byte-identical artist photos get only one eligible source-pool entry. Duplicate index records retain their metadata so later scans do not download them again. The program does not delete duplicate files that the user placed in Drive. Moving or deleting a base photo makes it ineligible after the next successful scan; already saved results remain archived. If a photo changes or disappears after it was assigned to a pending exposure, the pinned checksum prevents a retry from silently substituting different image content.
 
-In Apps Script, choose **Deploy → New deployment → Web app**:
+Base photos can be supplied to visitors for random pairings even though the Drive folders remain private. Photos displayed on future gallery pages are a separate selection; adding a base does not create a gallery page.
 
-- **Execute as:** Me, the archive owner.
-- **Who has access:** Anyone, including visitors not signed into Google.
+The optional `/exec?view=artist` page is still owner-only. Its old upload control works only for an app-owned artist folder; direct Drive-folder management is the intended workflow. The folder can later be changed to an explicitly shared source folder accessible to the project account, but that is not required for this setup.
 
-The public visitor endpoint supports only the archive workflow. The artist page separately checks the signed-in owner's identity. Some Workspace organizations prohibit anonymous web apps; that restriction must be resolved before launch.
+## Deploy and connect the new backend
 
-Copy the deployed URL ending in **`/exec`**. Do not use `/dev`, which is an editor-only test deployment.
+After the new setup succeeds, create a **Web app** deployment in the new account:
 
-To add your base photographs, open that URL with **`?view=artist`** appended, for example:
+- **Execute as:** Me, the project account.
+- **Who has access:** Anyone, so visitors can use the service without Google sign-in.
 
-```text
-https://script.google.com/macros/s/YOUR-DEPLOYMENT-ID/exec?view=artist
+This publishes the submission service, not the Drive folders or index. The artist page and artist RPCs separately verify the owner. Review the actual deployment settings before publishing. Copy the deployed URL ending in **`/exec`**, not the editor-only `/dev` test URL.
+
+Then set `googleScriptUrl` in `project-config.js` to that new `/exec` URL. Preserve `forceBlackAndWhite` and the connection timeouts. Rebuild the public package with:
+
+```sh
+node scripts/prepare-public-site.cjs
 ```
 
-Sign into the account that owns the Apps Script project. Choose photographs from your device and press **Import photographs**. Imports preserve the original bytes, add usable base photos to the index automatically, and skip identical files rather than creating extra copies. Partial batch failures are shown per file; retry explicitly if needed. A timed-out confirmation may already have saved the file, so the retry checks for the existing copy.
+Publish only the generated `.public-site/` contents to GitHub Pages. The approved release still has nine public files:
 
-Accepted formats are JPEG, PNG, WebP, and AVIF, up to 30 MB each. Export HEIC and RAW first. The **Check collection** button checks the app's known collection and removals; it does not grant access to new files manually dropped into Drive. The owner can also run `refreshArtistCollection` from the editor for that check. Owner imports remain available while visitor uploads are paused and do not consume the visitor intake allowance.
+- `index.html`, `styles.css`, `scripts.js`, `project-config.js`
+- `archive-workflow.js`, `drive-storage.js`, `drive-bridge.js`
+- `artist-import.js`, `artist-import.css`
 
-Import at least one photo different from the participant's upload; two distinct bases are needed to test **Try another pairing**. Keep the archive folders and spreadsheet private. Eligible source photographs are supplied through the visitor API to make new exposures, even though there is no public gallery.
+Do not publish the working repository, its history, `google-apps-script/`, docs, tests, secrets, local experiments, or private photos. The two optional owner-page assets contain no credentials. Future home/gallery pages and selected public images must be added deliberately to the publication allowlist; never publish every project file automatically.
 
-## 6. Connect the public website
+Keep `SITE_URL` as the HTTPS repository base, including its path and trailing slash, even if the double-exposure tool later moves to its own page. Google loads the external bridge and optional artist assets from that base. Local HTTP previews need their exact origins in `ALLOWED_ORIGINS`; `file://` cannot connect to the archive.
 
-**Current project: the endpoint is already configured and published.** These instructions are for a future endpoint change or a fresh project.
+## Verify before opening visitor submissions
 
-Set `googleScriptUrl` in `project-config.js` to your deployed `/exec` URL. Preserve the other options:
+Keep `UPLOADS_PAUSED=true` until the new account, archive, base photos, deployment, and website endpoint are ready. Add at least two distinct bases to test another pairing. Then set it to **false** for the live check:
 
-```js
-const EXPOSURE_CONFIG = Object.freeze({
-  googleScriptUrl: "https://script.google.com/macros/s/YOUR-DEPLOYMENT-ID/exec",
-  forceBlackAndWhite: true,
-  connectionTimeoutMs: 30000,
-  requestTimeoutMs: 120000
-});
-```
+1. Confirm new photos dropped into **My_photos** become eligible without using the import upload control. Check duplicate files and a later folder addition. The first scan may need several requests for a large batch.
+2. Open the public site in a genuinely signed-out/private browser. Submit a different photo with future reuse unchecked. Wait for **Double exposure saved**.
+3. Verify its exact original in **participant_uploads**, its JPEG in **Completed_double_exposures**, and a completed row with `allowReuse=false`. The participant source must remain ineligible for future pairings.
+4. Submit another photo with future reuse checked. It joins future pairings only after its completed result is saved. Random selection does not guarantee it is selected immediately.
+5. Reuse an identical original and test **Try another pairing**. Confirm one archived participant original, a separate result per exposure, and avoidance of the immediately previous base.
+6. Retry an interrupted save. Confirm stable submission/base/result identity. A changed or removed assigned artist photo must fail clearly rather than silently replace the base.
+7. Verify `/exec?view=artist` denies signed-out and different-account visitors while the project owner can use it. Do not treat another signed-in browser as an anonymous test.
+8. Test library selection, camera capture, cancellation, and portrait input on actual phones/tablets. Desktop layout tests do not prove camera-picker or HEIC-conversion behavior.
 
-Rebuild `.public-site/` and publish the updated public files through GitHub Pages. The deployment URL is public configuration, not a password or token. Google tokens remain in the private Google program and are never sent to the participant or artist JavaScript.
+Do not describe the real archive workflow as tested until these checks pass. If preparation stops, keep or restore `UPLOADS_PAUSED=true`.
 
-## 7. Run the live check
+## Archive behavior and later updates
 
-After setup, deployment, artist imports, and website configuration are complete, set Script Property **`UPLOADS_PAUSED`** to **`false`** and save. Keep it `true` while preparation is incomplete.
+Participant originals keep the exact bytes supplied by their device's picker. Identical originals reuse the saved participant file; cropped or re-exported versions have different bytes and count as different files. Finished exposures never join the source pool. A participant original becomes eligible only with opt-in and a saved finished result. `INCLUDE_PARTICIPANT_PHOTOS=false` disables all participant bases while retaining the archive.
 
-1. Open the public site in a private window without signing that visitor into Google. Upload a different photo, leave future reuse unchecked, and wait for **Double exposure saved**.
-2. Verify the original in the new **participant_uploads** folder and the JPEG in **Completed_double_exposures**. In **Submissions**, verify `status = complete`, `allowReuse = false`, and the original, base, and result IDs. The participant source must remain ineligible for future pairing.
-3. Download the result and compare it to the archived JPEG. The site downloads the same blob it sent to the archive, before optional finished-image rotation.
-4. Submit a different photo with future reuse checked. Its source becomes eligible only after its finished result is saved. A random future pairing may select it; selection is not guaranteed immediately.
-5. Submit an identical original again and use **Try another pairing**. Confirm that each exposure gets its own completed record and result, but the identical original is not saved again. Another pairing should avoid its immediately preceding base.
-6. Open `/exec?view=artist` anonymously and from a different Google account. Both must be denied; the owner alone can see folder links and import photographs.
-7. Test library selection and camera capture on actual phones/tablets, including cancellation and portrait input.
+Retry saving keeps the same submission and assigned base in the open browser session. Keep that tab open until completion; closing it can leave a saved original without a finished result. The new **Sources** schema has nine columns, adding `modifiedAt`; **Submissions** has sixteen, adding `baseSha256`. Existing compatible indexes gain those fields, and earlier assigned bases are pinned before inventory changes. Do not manually edit source hashes, consent, submission tokens, or the Usage ledger.
 
-Do not declare the real Google connection tested until these checks pass. If you pause uploads afterward, set `UPLOADS_PAUSED` back to `true`.
+The public image treatment remains **Saved Current, contrast 12, 0/0 EV**. `forceBlackAndWhite` in `project-config.js` controls finished monochrome output; archived originals retain their supplied colour and orientation. Local experimental sliders are separate from the public page.
 
-## Retries, settings, and later updates
+Later backend edits require saving the Google files and deploying a new version through **Manage deployments → Edit → New version**. Keeping the deployment preserves its `/exec` address. Frontend edits publish through GitHub Pages. A local file edit does not update either service automatically.
 
-The visitor workflow saves the untouched original, develops a JPEG, then archives that JPEG. It reports success only after Google confirms the completed pairing record. **Retry saving** keeps the same submission, base, original, and result in that open browser session. It does not silently choose a different base. Keep the tab open until saving finishes; closing it or losing the device can leave a pending original without a completed result.
-
-An identical original reuses its existing participant file. Cropped or re-exported photographs have different bytes and count as different files. Finished double exposures never become source photos. A participant original joins the source pool only with their opt-in and a completed result. Set `INCLUDE_PARTICIPANT_PHOTOS` to `false` to disable all participant bases while continuing to archive originals and results.
-
-The saved public image treatment is still **Saved Current, contrast 12, 0/0 EV**. `forceBlackAndWhite` in `project-config.js` controls monochrome output; original uploaded files are preserved. Local experimental sliders remain local.
-
-For a local HTTP preview, add the exact preview origin to `ALLOWED_ORIGINS`; `SITE_URL` must still be the published HTTPS site so Google can load the external assets. `file://` cannot connect to the archive.
-
-For backend changes, replace the saved Google files and use **Manage deployments → Edit → New version**. Retaining the deployment preserves its `/exec` address. Frontend changes are published through GitHub Pages. A saved local file does not automatically update Google or GitHub.
-
-The complete prior project is preserved as **`before-limited-drive-access`**, commit **`f458bb2`**. Reverting local code does not itself change a deployed Google version or revoke an OAuth grant; those are separate manual operations.
+The old import-page implementation is retained at local commit **`6e966b3`**. Earlier checkpoints remain in Git, including **`before-limited-drive-access`** at **`f458bb2`**. Restoring local files does not switch a deployed Google version, republish GitHub Pages, or revoke an OAuth grant.
 
 ## Intake and storage limits
 
-These optional Script Properties control visitor intake:
+Optional Script Properties control visitor intake:
 
 | Property | Default | Effect |
 | --- | --- | --- |
-| `REQUESTS_PER_MINUTE` | `120` | Global visitor API requests per fixed UTC minute, including retries and connection checks |
+| `REQUESTS_PER_MINUTE` | `120` | Global visitor API attempts per fixed UTC minute, including retries and connection checks |
 | `SUBMISSIONS_PER_DAY` | `200` | New visitor submissions per UTC day, including another pairing; retries reuse their submission |
-| `UPLOAD_BYTES_PER_DAY` | `1073741824` | Newly stored visitor original/result bytes per UTC day; duplicates and recovered files are not charged again |
-| `UPLOADS_PAUSED` | `false` | Set to `true` to temporarily close visitor requests; owner setup and imports still work |
+| `UPLOAD_BYTES_PER_DAY` | `1073741824` | Newly saved visitor original/result bytes per UTC day; duplicates and recovered files are not charged again |
+| `UPLOADS_PAUSED` | `false` | Set true to close visitor requests while keeping owner setup/checks available |
 
-The daily byte limit is **an adjustable intake allowance, not a 1 GB total archive limit**. It does not change your Google storage plan. Counters reset at midnight UTC. A reached allowance can pause completion after an original was saved; its retry can finish after the allowance resets or is raised. These limits contain global usage, not per-person fairness or every form of abuse.
+The daily byte allowance is adjustable; it is not a 1 GB total archive limit or a change to the Google storage plan. Counters reset at midnight UTC. A limit can pause completion after an original is saved; its retry can finish after the allowance resets or is raised. Limits contain global usage, not per-person fairness or every possible form of abuse. The private Usage ledger reserves writes before saving files, and unused older reservations must fit the current day's allowance. Abandoned attempts can conservatively consume allowance; malformed limits or accounting close visitor uploads until corrected.
 
-The private **Usage** tab reserves submissions and new files before writes. Retries reuse reservations; abandoned attempts may conservatively consume allowance. An unused reservation from an earlier day must fit today's allowance before a new file is created. Existing files are not charged retroactively. Do not edit Usage or the internal `EXPOSURE_REQUEST_WINDOW` property. Missing optional settings use defaults; malformed settings or accounting close visitor uploads until corrected.
+The project account's storage and Google service quotas still apply. Public results use up to 2,400 pixels on the longest edge and JPEG uploads up to 12 MB. Large collections and sustained traffic need a real load check. Google Sheets also has per-user API quotas, so bounded image reads alone do not establish a supported collection or visitor capacity.
 
-The project uses the owning account's storage and Apps Script quotas. Originals keep their uploaded resolution; working images and results use up to 2,400 pixels on the longest edge. Finished JPEG uploads are limited to 12 MB. Large archives and sustained visitor traffic require a live load check.
-
-Google documentation: [Web apps](https://developers.google.com/apps-script/guides/web), [authorization and revoking grants](https://developers.google.com/apps-script/guides/services/authorization), [HTML-service RPC](https://developers.google.com/apps-script/guides/html/communication), [external asset requirements](https://developers.google.com/apps-script/guides/html/restrictions), [quotas](https://developers.google.com/apps-script/guides/services/quotas).
+Google references: [web apps](https://developers.google.com/apps-script/guides/web), [authorization](https://developers.google.com/apps-script/guides/services/authorization), [HTML-service RPC](https://developers.google.com/apps-script/guides/html/communication), [external assets](https://developers.google.com/apps-script/guides/html/restrictions), [Apps Script quotas](https://developers.google.com/apps-script/guides/services/quotas), [Sheets quotas](https://developers.google.com/workspace/sheets/api/limits).

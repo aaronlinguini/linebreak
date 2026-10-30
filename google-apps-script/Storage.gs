@@ -1,6 +1,8 @@
 /*
- * Small adapters for the archive's Drive and Sheets operations. All Google
- * access uses drive.file; every file must also carry this app's private marker.
+ * Small adapters for the archive's Drive and Sheets operations. Archive writes
+ * use drive.file and require this app's private marker. The artist-folder reader
+ * uses drive.readonly so photos dropped directly into Drive can be discovered.
+ * Run this version from the dedicated project account, not a personal account.
  * Enable Advanced Drive v3 and Sheets v4. Binary downloads use only the fixed
  * Drive API media endpoint and need script.external_request as well.
  */
@@ -17,7 +19,7 @@ var ArchiveDrive = (function () {
     return error;
   }
   function accessFailure() {
-    return failure("ACCESS_NOT_GRANTED", "This file or folder was not created by the limited-access project. Use the project's import page; existing manually created folder IDs must be cleared before initial setup.");
+    return failure("ACCESS_NOT_GRANTED", "This archive file or folder was not created by the limited-access project. Use the archive IDs saved by setup; manually added photos are read through the separately configured base-photo folder.");
   }
   function validId(id) {
     if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(id)) throw accessFailure();
@@ -55,12 +57,11 @@ var ArchiveDrive = (function () {
     return wrap(remember(file).id);
   }
   function quote(value) { return "'" + String(value).replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'"; }
-  function children(id, folders, name) {
-    if (get(id).mimeType !== folderType) throw accessFailure();
-    var query = quote(id) + " in parents and trashed = false and mimeType " +
-      (folders ? "= " : "!= ") + quote(folderType) +
-      " and appProperties has { key='exposureArchive' and value='" + marker + "' }";
-    if (name !== undefined) query += " and name = " + quote(name);
+  function iterator(items) {
+    var index = 0;
+    return { hasNext: function () { return index < items.length; }, next: function () { return items[index++]; } };
+  }
+  function list(query, select) {
     var found = [], pageToken, seenTokens = Object.create(null);
     do {
       var options = { q: query, fields: "nextPageToken,incompleteSearch,files(" + fields + ")", pageSize: 1000 };
@@ -68,21 +69,32 @@ var ArchiveDrive = (function () {
       var page = Drive.Files.list(options);
       if (page.incompleteSearch) throw failure("ARCHIVE_UNAVAILABLE", "The archive file listing was incomplete. Please retry.");
       (page.files || []).forEach(function (file) {
-        // A manually dropped-in file is not implicitly authorized by its parent.
-        if (managed(file) && (file.parents || []).indexOf(id) >= 0 &&
-            (file.mimeType === folderType) === folders && (name === undefined || file.name === name)) {
-          found.push(wrap(remember(file).id));
-        }
+        var selected = select(file);
+        if (selected) found.push(selected);
       });
       pageToken = page.nextPageToken;
       if (pageToken && seenTokens[pageToken]) throw failure("ARCHIVE_UNAVAILABLE", "The archive file listing could not be completed. Please retry.");
       if (pageToken) seenTokens[pageToken] = true;
     } while (pageToken);
-    var index = 0;
-    return { hasNext: function () { return index < found.length; }, next: function () { return found[index++]; } };
+    return iterator(found);
   }
-  function blobFor(id) {
-    var file = get(id);
+  function children(id, folders, name) {
+    if (get(id).mimeType !== folderType) throw accessFailure();
+    var query = quote(id) + " in parents and trashed = false and mimeType " +
+      (folders ? "= " : "!= ") + quote(folderType) +
+      " and appProperties has { key='exposureArchive' and value='" + marker + "' }";
+    if (name !== undefined) query += " and name = " + quote(name);
+    return list(query, function (file) {
+      // External artist files never enter this managed-file cache or writer.
+      if (managed(file) && (file.parents || []).indexOf(id) >= 0 &&
+          (file.mimeType === folderType) === folders && (name === undefined || file.name === name)) {
+        return wrap(remember(file).id);
+      }
+      return null;
+    });
+  }
+  function blobFor(id, file) {
+    file = file || get(id);
     var size = Number(file.size);
     if (!/^image\/(jpeg|png|webp|avif)$/.test(file.mimeType) || file.capabilities?.canDownload !== true ||
         !Number.isSafeInteger(size) || size < 1 || size > 30 * 1024 * 1024) {
@@ -98,6 +110,92 @@ var ArchiveDrive = (function () {
     var blob = response.getBlob();
     if (blob.getBytes().length !== size) throw failure("ARCHIVE_UNAVAILABLE", "The archive photograph changed while it was being read. Please retry.");
     return blob.setName(file.name).setContentType(file.mimeType);
+  }
+
+  function artistFailure() {
+    return failure("BASE_UNAVAILABLE", "The photograph or configured base-photo folder is unavailable.");
+  }
+  function artistMetadata(id) {
+    validId(id);
+    var file;
+    try { file = Drive.Files.get(id, { fields: fields }); }
+    catch (error) {
+      if (/\b(?:401|403|404)\b|not found|insufficient permission|permission denied/i.test(String(error.message))) throw artistFailure();
+      throw error;
+    }
+    if (!file || file.id !== id || file.trashed === true) throw artistFailure();
+    return file;
+  }
+  function artistFolder(id) {
+    var file = artistMetadata(id);
+    if (file.mimeType !== folderType) throw artistFailure();
+    return file;
+  }
+  function artistImage(file, folderId) {
+    return file && file.trashed !== true && /^image\/(jpeg|png|webp|avif)$/.test(file.mimeType) &&
+      Array.isArray(file.parents) && file.parents.indexOf(folderId) >= 0;
+  }
+  function artistFile(id, folderId) {
+    validId(folderId);
+    var file = artistMetadata(id);
+    if (!artistImage(file, folderId)) throw artistFailure();
+    return file;
+  }
+  function artistChildren(id, name) {
+    artistFolder(id);
+    var query = quote(id) + " in parents and trashed = false and (" +
+      ["image/jpeg", "image/png", "image/webp", "image/avif"].map(function (type) { return "mimeType = " + quote(type); }).join(" or ") + ")";
+    if (name !== undefined) query += " and name = " + quote(name);
+    return list(query, function (file) {
+      if (artistImage(file, id) && (name === undefined || file.name === name)) {
+        return artistWrap(validId(file.id), id, file);
+      }
+      return null;
+    });
+  }
+  function artistWrap(id, folderId, initial) {
+    var current = initial;
+    var isFolder = folderId === undefined;
+    function read(fresh) {
+      if (fresh || !current) current = isFolder ? artistFolder(id) : artistFile(id, folderId);
+      return current;
+    }
+    function readOnly() {
+      throw failure("READ_ONLY_SOURCE", "Manage base photographs directly in Google Drive; this source reader cannot change them.");
+    }
+    function listImages(name) {
+      if (!isFolder) throw artistFailure();
+      return artistChildren(id, name);
+    }
+    return {
+      getId: function () { return id; },
+      getName: function () { return read().name; },
+      getMimeType: function () { return read().mimeType; },
+      getSize: function () { return Number(read().size || 0); },
+      getUrl: function () { return isFolder ? "https://drive.google.com/drive/folders/" + id : "https://drive.google.com/file/d/" + id + "/view"; },
+      getDateCreated: function () { return new Date(read().createdTime); },
+      getLastUpdated: function () { return new Date(read().modifiedTime); },
+      isTrashed: function () { return read().trashed === true; },
+      getBlob: function () {
+        if (isFolder) throw artistFailure();
+        artistFolder(folderId);
+        var before = read(true);
+        var blob = blobFor(id, before);
+        var after = read(true);
+        artistFolder(folderId);
+        if (before.modifiedTime !== after.modifiedTime || before.mimeType !== after.mimeType ||
+            Number(before.size) !== Number(after.size) || after.capabilities?.canDownload !== true) {
+          throw failure("BASE_UNAVAILABLE", "The base photograph changed while it was being read. Please retry.");
+        }
+        return blob;
+      },
+      getFiles: function () { return listImages(); },
+      getFilesByName: listImages,
+      getFoldersByName: function () { throw failure("UNSUPPORTED_SOURCE_OPERATION", "Only photographs directly inside the base-photo folder are listed."); },
+      createFolder: readOnly,
+      createFile: readOnly,
+      moveTo: readOnly
+    };
   }
   function wrap(id) {
     return {
@@ -132,6 +230,11 @@ var ArchiveDrive = (function () {
     createFolder: function (name) { return create(name, folderType); },
     getFolderById: function (id) { if (get(id).mimeType !== folderType) throw accessFailure(); return wrap(id); },
     getFileById: function (id) { if (get(id).mimeType === folderType) throw accessFailure(); return wrap(id); },
+    getArtistFolderById: function (id) { return artistWrap(id, undefined, artistFolder(id)); },
+    getArtistFileById: function (id, folderId) {
+      artistFolder(folderId);
+      return artistWrap(id, folderId, artistFile(id, folderId));
+    },
     markCreatedSpreadsheet: function (id) {
       validId(id);
       // Called only immediately after Sheets.Spreadsheets.create returned this ID.

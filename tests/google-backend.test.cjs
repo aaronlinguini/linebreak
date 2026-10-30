@@ -17,13 +17,14 @@ const submissionId = (number) => `11111111-1111-4111-8111-${String(number).padSt
 // In-memory fakes implement the Google service boundary. The application's
 // real Apps Script is executed unchanged, so persistence and retry assertions
 // exercise its actual public API rather than a second implementation of it.
-function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "owner@example.test" } = {}) {
+function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "owner@example.test", projectOwnerEmail = "owner@example.test" } = {}) {
   let nextId = 0;
   let timestamp = Date.parse("2026-10-29T12:00:00Z");
   const files = new Map();
   const folders = new Map();
   const books = new Map();
-  const properties = new Map([["SITE_URL", "https://artist.example/exposures/"]]);
+  const properties = new Map([["SITE_URL", "https://artist.example/exposures/"], ["PROJECT_OWNER_EMAIL", projectOwnerEmail]]);
+  const io = { driveCalls: 0, blobReads: 0, listings: 0, sheetWrites: Object.create(null) };
   const logs = [];
   const failures = { sheetWrite: null, fileCreate: false };
   const iterator = (values) => { let index = 0; return { hasNext: () => index < values.length, next: () => values[index++] }; };
@@ -53,7 +54,7 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
     getId() { return this.id; }
     getName() { return this.blob.name; }
     setName(value) { this.blob.name = value; return this; }
-    getBlob() { return this.blob.copyBlob(); }
+    getBlob() { io.blobReads++; return this.blob.copyBlob(); }
     getMimeType() { return this.blob.type; }
     getSize() { return this.blob.bytes.length; }
     getUrl() { return `https://drive.google.com/file/d/${this.id}/view`; }
@@ -77,7 +78,7 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
       if (failures.fileCreate) { failures.fileCreate = false; throw new Error("Simulated Drive write failure"); }
       return new File(blob, this);
     }
-    getFiles() { return iterator(this.files.filter((file) => !file.trashed)); }
+    getFiles() { io.listings++; return iterator(this.files.filter((file) => !file.trashed)); }
     getFilesByName(name) { return iterator(this.files.filter((file) => !file.trashed && file.getName() === name)); }
     getFoldersByName(name) { return iterator(this.folders.filter((folder) => folder.name === name)); }
     addFile(file) { file.moveTo(this); return this; }
@@ -89,6 +90,7 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
     }
     getValue() { return this.getValues()[0][0]; }
     setValues(values) {
+      io.sheetWrites[this.sheet.name] = (io.sheetWrites[this.sheet.name] || 0) + 1;
       if (failures.sheetWrite?.(this.sheet, values)) { failures.sheetWrite = null; throw new Error("Simulated temporary Sheet write failure"); }
       values.forEach((row, y) => row.forEach((value, x) => {
         this.sheet.rows[this.row + y - 1] ??= [];
@@ -138,10 +140,17 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
     Logger: { log: (...values) => logs.push(values.join(" ")) },
     ArchiveDrive: {
       reset() {},
-      createFolder: (name) => new Folder(name),
+      createFolder: (name) => { io.driveCalls++; return new Folder(name); },
       getFoldersByName: (name) => iterator(Array.from(folders.values()).filter((folder) => folder.name === name)),
-      getFolderById: (key) => { if (!folders.has(key)) throw new Error(`No folder ${key}`); return folders.get(key); },
-      getFileById: (key) => { if (!files.has(key)) throw new Error(`No file ${key}`); return files.get(key); }
+      getFolderById: (key) => { io.driveCalls++; if (!folders.has(key)) throw new Error(`No folder ${key}`); return folders.get(key); },
+      getFileById: (key) => { io.driveCalls++; if (!files.has(key)) throw new Error(`No file ${key}`); return files.get(key); },
+      getArtistFolderById: (key) => { io.driveCalls++; if (!folders.has(key)) throw new Error(`No artist folder ${key}`); return folders.get(key); },
+      getArtistFileById: (key, folderId) => {
+        io.driveCalls++;
+        const file = files.get(key);
+        if (!file || file.trashed || file.folder?.getId() !== folderId) throw new Error(`Artist file unavailable ${key}`);
+        return file;
+      }
     },
     ArchiveSheets: { reset() {}, create: (name) => new Book(name), openById: (key) => { if (!books.has(key)) throw new Error(`No book ${key}`); return books.get(key); }, flush() {} },
     LockService: { getScriptLock: () => lock },
@@ -189,7 +198,11 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
   const refresh = () => sandbox.refreshArtistCollection();
   const advance = (milliseconds) => { timestamp += milliseconds; };
   const usage = () => clone([...books.values()][0].getSheetByName("Usage").rows.slice(1));
-  return { sandbox, properties, files, folders, books, logs, failures, lock, source, api, data, folder, seed, begin, completePayload, setup, refresh, advance, usage, Blob };
+  const records = (name) => {
+    const rows = [...books.values()][0].getSheetByName(name).rows;
+    return clone(rows.slice(1).map((values) => Object.fromEntries(rows[0].map((header, index) => [header, values[index] ?? ""]))));
+  };
+  return { sandbox, properties, files, folders, books, logs, failures, lock, source, api, data, folder, seed, begin, completePayload, setup, refresh, advance, usage, records, Blob, io };
 }
 
 test("owner setup is repeatable and creates distinct private storage roles", () => {
@@ -212,7 +225,7 @@ test("an existing archive index gains consent columns without changing older rec
   sheet.rows = sheet.rows.map((row) => row.slice(0, 13));
   const before = sheet.rows[1].slice();
   assert.equal(backend.data("bootstrap").totalEligible, 1);
-  assert.deepEqual(sheet.rows[0].slice(13), ["allowReuse", "parentSubmissionId"]);
+  assert.deepEqual(sheet.rows[0].slice(13), ["allowReuse", "parentSubmissionId", "baseSha256"]);
   assert.deepEqual(sheet.rows[1].slice(0, 13), before);
   assert.equal(backend.data("begin", { submissionId: old.submissionId, original: original(22) }).originalId, old.originalId);
 });
@@ -274,8 +287,9 @@ test("another pairing reuses an authenticated original, chooses a different base
   assert.equal(backend.folder("Double exposure").files.length, 2);
   const rows = [...backend.books.values()][0].getSheetByName("Submissions").rows;
   const secondRow = rows.find((row) => row.includes(second.submissionId));
-  assert.equal(secondRow.at(-2), true, "a re-pair inherits consent");
-  assert.equal(secondRow.at(-1), first.submissionId);
+  assert.equal(secondRow[13], true, "a re-pair inherits consent");
+  assert.equal(secondRow[14], first.submissionId);
+  assert.match(secondRow[15], /^[a-f0-9]{64}$/, "the assigned base's content is pinned");
 });
 
 test("a re-pair cannot reuse the same base when no alternative is available", () => {
@@ -425,6 +439,7 @@ test("artist import ignores non-images, avoids duplicate weighting, and updates 
 
 test("a temporary artist-file read error does not erase the usable collection during refresh", () => {
   const backend = makeBackend(); backend.setup(); const artist = backend.seed(); backend.refresh();
+  artist.date = new Date("2026-10-29T13:00:00Z");
   const read = artist.getBlob.bind(artist);
   let shouldFail = true;
   artist.getBlob = () => { if (shouldFail) { shouldFail = false; throw new Error("Temporary Drive read failure"); } return read(); };
@@ -521,10 +536,11 @@ test("the owner identity check has its required email scope in the manifest", ()
   assert.ok(manifest.oauthScopes.includes("https://www.googleapis.com/auth/userinfo.email"));
 });
 
-test("Google authorization is limited to project files, owner identity and media requests", () => {
+test("Google authorization permits artist reads while keeping writes limited to app-created files", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(project, "google-apps-script", "appsscript.json"), "utf8"));
   assert.deepEqual(manifest.oauthScopes.slice().sort(), [
     "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/drive.readonly",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/script.external_request"
   ].sort());
@@ -777,4 +793,208 @@ test("older indexes gain a usage ledger without changing their sources or submis
   assert.deepEqual(book.getSheetByName("Submissions").rows, before);
   assert.deepEqual(backend.begin(1, 22), first);
   assert.equal(backend.usage().length, 0, "migration does not retroactively charge existing files");
+});
+
+test("folder intake requires the configured project account before any Drive operation", () => {
+  const mismatch = makeBackend({ activeEmail: "personal@example.test", effectiveEmail: "personal@example.test" });
+  assert.throws(() => mismatch.setup(), (error) => error.exposureCode_ === "OWNER_ACCOUNT_MISMATCH");
+  assert.equal(mismatch.io.driveCalls, 0);
+  assert.equal(mismatch.folders.size, 0);
+
+  const missing = makeBackend();
+  missing.properties.delete("PROJECT_OWNER_EMAIL");
+  assert.throws(() => missing.setup(), (error) => error.exposureCode_ === "NOT_CONFIGURED");
+  assert.equal(missing.io.driveCalls, 0);
+
+  const backend = makeBackend(); backend.setup(); backend.seed();
+  backend.properties.set("PROJECT_OWNER_EMAIL", "different-project@example.test");
+  const calls = backend.io.driveCalls;
+  assert.equal(backend.api("bootstrap").error.code, "OWNER_ACCOUNT_MISMATCH");
+  assert.equal(backend.io.driveCalls, calls, "visitor access must not read files under the wrong effective account");
+});
+
+test("ordinary Drive-folder photos are discovered automatically without an import RPC", () => {
+  const backend = makeBackend(); backend.setup();
+  const first = backend.seed(1, "a photograph.jpg");
+  backend.seed(2, "another.jpg");
+  backend.seed(1, "a renamed copy.jpg");
+  const locks = backend.lock.count;
+  const status = backend.data("bootstrap");
+  assert.equal(status.artistCount, 2);
+  assert.equal(status.totalEligible, 2);
+  assert.equal(backend.lock.count, locks + 1, "automatic refresh shares the existing visitor lock");
+  assert.equal(backend.lock.held, false);
+  assert.equal(backend.folder("Artist").files.length, 3, "indexing does not create extra photograph copies");
+  assert.equal(backend.folder("Participant").files.length, 0);
+  const rows = backend.records("Sources");
+  assert.equal(rows.length, 3, "duplicates retain metadata so later scans need not download them again");
+  assert.equal(rows.filter((row) => row.eligible).length, 2);
+  for (const row of rows) assert.match(row.modifiedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.ok(rows.some((row) => row.sourceId === first.getId()));
+});
+
+test("automatic folder refresh caches unchanged images including duplicate files", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.seed(1, "duplicate.jpg");
+  backend.data("bootstrap");
+  const reads = backend.io.blobReads;
+  const listings = backend.io.listings;
+  const refreshed = backend.properties.get("EXPOSURE_ARTIST_REFRESHED_AT");
+  assert.equal(reads, 2);
+  assert.ok(refreshed);
+  backend.advance(59999);
+  backend.data("bootstrap");
+  assert.equal(backend.io.listings, listings, "ordinary requests within a minute reuse the last complete inventory");
+  backend.advance(1);
+  assert.equal(backend.data("bootstrap").artistCount, 1);
+  assert.equal(backend.io.listings, listings + 1);
+  assert.equal(backend.io.blobReads, reads, "metadata-matching duplicate files also skip binary reads");
+  assert.notEqual(backend.properties.get("EXPOSURE_ARTIST_REFRESHED_AT"), refreshed);
+});
+
+test("artist scans batch index writes and unchanged folders consume no new Source writes", () => {
+  const backend = makeBackend(); backend.setup();
+  backend.seed(1); backend.seed(2); backend.seed(3); backend.seed(1, "duplicate.jpg");
+  const initialWrites = backend.io.sheetWrites.Sources;
+  assert.equal(backend.data("bootstrap").artistCount, 3);
+  assert.equal(backend.io.sheetWrites.Sources, initialWrites + 1, "one index write covers the whole new batch, including its inactive duplicate");
+
+  backend.advance(60000);
+  const indexedWrites = backend.io.sheetWrites.Sources;
+  assert.equal(backend.data("bootstrap").artistCount, 3);
+  assert.equal(backend.io.sheetWrites.Sources, indexedWrites, "a complete metadata scan of unchanged active and duplicate rows makes no Source write");
+
+  backend.seed(4); backend.seed(5); backend.seed(6);
+  backend.advance(60000);
+  assert.equal(backend.data("bootstrap").artistCount, 6);
+  assert.equal(backend.io.sheetWrites.Sources, indexedWrites + 1, "several new photos still require only one index write");
+  assert.equal(backend.records("Sources").length, 7, "the update preserves earlier records as well as the duplicate's cached metadata");
+});
+
+test("changed file metadata invalidates the cached artist hash", () => {
+  const backend = makeBackend(); backend.setup(); const artist = backend.seed(1);
+  backend.data("bootstrap");
+  const before = backend.io.blobReads;
+  artist.blob = new backend.Blob(jpeg(2), "image/jpeg", "replaced.jpg");
+  artist.date = new Date("2026-10-29T12:01:00Z");
+  backend.advance(60000);
+  assert.equal(backend.data("bootstrap").artistCount, 1);
+  assert.equal(backend.io.blobReads, before + 1);
+  const source = backend.records("Sources").find((record) => record.sourceId === artist.getId());
+  assert.equal(source.sha256, crypto.createHash("sha256").update(jpeg(2)).digest("hex"));
+  assert.equal(source.nameJson, '"replaced.jpg"');
+  assert.equal(source.modifiedAt, artist.date.toISOString());
+  assert.equal(Buffer.from(backend.begin(1, 22).base.base64, "base64").equals(jpeg(2)), true);
+});
+
+test("a begin retry never substitutes an edited artist file for its pinned base", () => {
+  const backend = makeBackend(); backend.setup(); const artist = backend.seed(1);
+  const first = backend.begin(1, 22);
+  const pinned = backend.records("Submissions")[0].baseSha256;
+  assert.equal(pinned, crypto.createHash("sha256").update(jpeg(1)).digest("hex"));
+  artist.blob = new backend.Blob(jpeg(2), "image/jpeg", artist.getName());
+  artist.date = new Date("2026-10-29T12:01:00Z");
+  backend.seed(3, "alternative.jpg");
+  backend.advance(60000);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const retry = backend.api("begin", { submissionId: first.submissionId, original: original(22) });
+    assert.equal(retry.ok, false);
+    assert.equal(retry.error.code, "BASE_UNAVAILABLE");
+    assert.equal(retry.error.originalSaved, true);
+    assert.equal(backend.records("Submissions")[0].baseId, first.base.id);
+    assert.equal(backend.records("Submissions")[0].baseSha256, pinned);
+  }
+  assert.equal(backend.folder("Participant").files.length, 1);
+});
+
+test("metadata caching never replaces content verification for a previously assigned base", () => {
+  const backend = makeBackend(); backend.setup(); const artist = backend.seed(1);
+  const first = backend.begin(1, 22);
+  const pinned = backend.records("Submissions")[0].baseSha256;
+  // Even if a source keeps the same size and modification time, its actual
+  // bytes must still match the photograph that this submission was assigned.
+  artist.blob = new backend.Blob(jpeg(2), "image/jpeg", artist.getName());
+  const retry = backend.api("begin", { submissionId: first.submissionId, original: original(22) });
+  assert.equal(retry.ok, false);
+  assert.equal(retry.error.code, "BASE_UNAVAILABLE");
+  assert.equal(backend.records("Submissions")[0].baseSha256, pinned);
+  artist.blob = new backend.Blob(jpeg(1), "image/jpeg", artist.getName());
+  assert.deepEqual(backend.begin(1, 22), first, "restoring the assigned content allows the same stable retry");
+  assert.equal(backend.folder("Participant").files.length, 1);
+});
+
+test("legacy assigned bases are durably pinned before a refresh can change their source hash", () => {
+  const backend = makeBackend(); backend.setup(); const artist = backend.seed(1);
+  const first = backend.begin(1, 22);
+  const sheet = [...backend.books.values()][0].getSheetByName("Submissions");
+  sheet.rows = sheet.rows.map((row) => row.slice(0, 15));
+  const oldHash = crypto.createHash("sha256").update(jpeg(1)).digest("hex");
+  artist.blob = new backend.Blob(jpeg(2), "image/jpeg", artist.getName());
+  artist.date = new Date("2026-10-29T12:01:00Z");
+  backend.advance(60000);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const retry = backend.api("begin", { submissionId: first.submissionId, original: original(22) });
+    assert.equal(retry.error.code, "BASE_UNAVAILABLE");
+    assert.equal(backend.records("Submissions")[0].baseSha256, oldHash);
+  }
+});
+
+test("an eight-column source index gains modification metadata without changing existing source data", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.data("bootstrap");
+  const sheet = [...backend.books.values()][0].getSheetByName("Sources");
+  sheet.rows = sheet.rows.map((row) => row.slice(0, 8));
+  const before = sheet.rows[1].slice();
+  backend.advance(60000);
+  assert.equal(backend.data("bootstrap").artistCount, 1);
+  assert.equal(sheet.rows[0][8], "modifiedAt");
+  assert.deepEqual(sheet.rows[1].slice(0, 8), before);
+  assert.match(sheet.rows[1][8], /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test("an incomplete artist listing preserves existing eligibility and is retried without a fresh timestamp", () => {
+  const backend = makeBackend(); backend.setup(); const first = backend.seed(1); const removed = backend.seed(2);
+  backend.data("bootstrap");
+  const refreshed = backend.properties.get("EXPOSURE_ARTIST_REFRESHED_AT");
+  removed.setTrashed(true);
+  backend.advance(60000);
+  const folder = backend.folder("Artist");
+  const list = folder.getFiles.bind(folder);
+  folder.getFiles = () => {
+    let position = 0;
+    return { hasNext: () => position < 2, next() { if (position++ === 0) return first; throw new Error("Incomplete Drive listing"); } };
+  };
+  backend.api("bootstrap");
+  assert.equal(backend.properties.get("EXPOSURE_ARTIST_REFRESHED_AT"), refreshed);
+  assert.equal(backend.records("Sources").find((record) => record.sourceId === removed.getId()).eligible, true);
+  folder.getFiles = list;
+  assert.equal(backend.data("bootstrap").artistCount, 1);
+  assert.equal(backend.records("Sources").find((record) => record.sourceId === removed.getId()).eligible, false);
+  assert.notEqual(backend.properties.get("EXPOSURE_ARTIST_REFRESHED_AT"), refreshed);
+});
+
+test("transient image-read failures preserve known eligibility without marking the scan fresh", () => {
+  const backend = makeBackend(); backend.setup(); const artist = backend.seed(1);
+  backend.data("bootstrap");
+  const refreshed = backend.properties.get("EXPOSURE_ARTIST_REFRESHED_AT");
+  artist.date = new Date("2026-10-29T12:01:00Z");
+  backend.advance(60000);
+  const read = artist.getBlob.bind(artist);
+  artist.getBlob = () => { throw new Error("Temporary Drive read failure"); };
+  backend.api("bootstrap");
+  assert.equal(backend.properties.get("EXPOSURE_ARTIST_REFRESHED_AT"), refreshed);
+  assert.equal(backend.records("Sources")[0].eligible, true);
+  artist.getBlob = read;
+  assert.equal(backend.data("bootstrap").artistCount, 1);
+  assert.notEqual(backend.properties.get("EXPOSURE_ARTIST_REFRESHED_AT"), refreshed);
+});
+
+test("large new-folder batches make bounded progress without delaying every photo until a new minute", () => {
+  const backend = makeBackend(); backend.setup();
+  for (let index = 1; index <= 11; index++) backend.seed(index);
+  const refreshed = backend.properties.get("EXPOSURE_ARTIST_REFRESHED_AT");
+  assert.equal(backend.data("bootstrap").artistCount, 10);
+  assert.equal(backend.io.blobReads, 10);
+  assert.equal(backend.properties.get("EXPOSURE_ARTIST_REFRESHED_AT"), refreshed, "deferred files are not a complete fresh inventory");
+  assert.equal(backend.data("bootstrap").artistCount, 11);
+  assert.equal(backend.io.blobReads, 11, "the next request reuses ten cached files and reads only the deferred file");
+  assert.ok(backend.properties.get("EXPOSURE_ARTIST_REFRESHED_AT"));
 });
