@@ -1,0 +1,426 @@
+"use strict";
+
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
+const crypto = require("node:crypto");
+
+const source = fs.readFileSync(path.join(__dirname, "../google-apps-script/Storage.gs"), "utf8");
+const folderType = "application/vnd.google-apps.folder";
+const sheetType = "application/vnd.google-apps.spreadsheet";
+const clone = value => JSON.parse(JSON.stringify(value));
+
+function harness() {
+  let nextId = 0;
+  const files = new Map(), books = new Map();
+  const calls = { get: [], create: [], list: [], update: [], fetch: [], sheets: [], valuesGet: [], valuesUpdate: [] };
+  const controls = { pages: null, httpCode: 200, body: null, failValueWrite: false, failGet: null };
+  class Blob {
+    constructor(bytes, mimeType, name) { this.bytes = [...bytes]; this.mimeType = mimeType; this.name = name; }
+    getName() { return this.name; }
+    getContentType() { return this.mimeType; }
+    getBytes() { return [...this.bytes]; }
+    setName(name) { this.name = name; return this; }
+    setContentType(mimeType) { this.mimeType = mimeType; return this; }
+  }
+  function addFile(overrides = {}, bytes = [1, 2, -1]) {
+    const id = overrides.id || `file-${++nextId}`;
+    const file = { id, name: "image.jpg", mimeType: "image/jpeg", size: String(bytes.length), parents: [], trashed: false,
+      isAppAuthorized: true, appProperties: { exposureArchive: "drive-file-v1" }, capabilities: { canDownload: true },
+      createdTime: "2026-10-30T00:00:00Z", modifiedTime: "2026-10-30T01:00:00Z", ...overrides };
+    files.set(id, { metadata: file, bytes: [...bytes] });
+    return file;
+  }
+  function book(id) {
+    const item = books.get(id);
+    if (!item) throw new Error("Spreadsheet not found");
+    return item;
+  }
+  function parseTitle(range) { return range.replace(/^'|'$/g, "").replace(/''/g, "'"); }
+  const Drive = { Files: {
+    get(id, options) {
+      calls.get.push({ id, options: clone(options) });
+      if (controls.failGet) throw new Error(controls.failGet);
+      if (!files.has(id)) throw new Error("404 File not found");
+      return clone(files.get(id).metadata);
+    },
+    create(resource, media, options) {
+      assert.equal(arguments.length, 3, "metadata creates must explicitly pass a null media argument");
+      assert.ok(options.fields.includes("isAppAuthorized"));
+      assert.ok(options.fields.includes("appProperties"));
+      assert.ok(media === null || media instanceof Blob);
+      calls.create.push({ resource: clone(resource), media, options: clone(options) });
+      return clone(addFile(resource, media ? media.getBytes() : []));
+    },
+    update(resource, id, media, options) {
+      assert.equal(media, null);
+      calls.update.push({ resource: clone(resource), id, options: clone(options) });
+      const item = files.get(id);
+      if (!item) throw new Error("404 File not found");
+      Object.assign(item.metadata, clone(resource));
+      if (options.removeParents) item.metadata.parents = item.metadata.parents.filter(parent => !options.removeParents.split(",").includes(parent));
+      if (options.addParents) item.metadata.parents.push(options.addParents);
+      return clone(item.metadata);
+    },
+    list(options) {
+      calls.list.push(clone(options));
+      if (controls.pages) return clone(controls.pages[options.pageToken ? Number(options.pageToken) : 0]);
+      const parent = options.q.match(/^'([^']+)' in parents/)[1];
+      const wantFolder = options.q.includes("mimeType = '");
+      return { files: [...files.values()].map(item => item.metadata).filter(file => file.parents.includes(parent) &&
+        (file.mimeType === folderType) === wantFolder && !file.trashed) };
+    }
+  } };
+  const Sheets = { Spreadsheets: {
+    create(resource) {
+      calls.sheets.push({ action: "create", resource: clone(resource) });
+      const file = addFile({ name: resource.properties.title, mimeType: sheetType, appProperties: {} }, []);
+      books.set(file.id, { spreadsheetId: file.id, sheets: resource.sheets.map((sheet, index) => ({ properties: {
+        sheetId: index, title: sheet.properties.title, gridProperties: { rowCount: 2, columnCount: 2 }
+      } })), values: { Sheet1: [] } });
+      return { spreadsheetId: file.id };
+    },
+    get(id, options) {
+      calls.sheets.push({ action: "get", id, options: clone(options) });
+      const item = book(id);
+      return clone({ spreadsheetId: id, sheets: item.sheets });
+    },
+    batchUpdate(body, id) {
+      calls.sheets.push({ action: "batchUpdate", id, body: clone(body) });
+      const item = book(id);
+      for (const request of body.requests) {
+        if (request.addSheet) {
+          const title = request.addSheet.properties.title;
+          item.sheets.push({ properties: { sheetId: item.sheets.length, title, gridProperties: { rowCount: 2, columnCount: 2 } } });
+          item.values[title] = [];
+        } else {
+          const change = request.updateSheetProperties.properties;
+          item.sheets.find(sheet => sheet.properties.sheetId === change.sheetId).properties.gridProperties = clone(change.gridProperties);
+        }
+      }
+      return {};
+    },
+    Values: {
+      get(id, range, options) {
+        calls.valuesGet.push({ id, range, options: clone(options) });
+        return { values: clone(book(id).values[parseTitle(range)]) };
+      },
+      update(body, id, range, options) {
+        calls.valuesUpdate.push({ body: clone(body), id, range, options: clone(options) });
+        if (controls.failValueWrite) { controls.failValueWrite = false; throw new Error("Temporary write failure"); }
+        const match = range.match(/^'(.*)'!([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
+        assert.ok(match, "values writes use a bounded quoted A1 range");
+        const column = [...match[2]].reduce((value, char) => value * 26 + char.charCodeAt(0) - 64, 0);
+        const row = Number(match[3]);
+        const rows = book(id).values[match[1].replace(/''/g, "'")];
+        body.values.forEach((line, y) => line.forEach((value, x) => {
+          rows[row + y - 1] ??= [];
+          rows[row + y - 1][column + x - 1] = value;
+        }));
+        return {};
+      }
+    }
+  } };
+  const sandbox = vm.createContext({ Drive, Sheets,
+    ScriptApp: { getOAuthToken: () => "private-test-token" },
+    UrlFetchApp: { fetch(url, options) {
+      calls.fetch.push({ url, options: clone(options) });
+      const id = url.match(/\/files\/([A-Za-z0-9_-]+)\?alt=media$/)?.[1];
+      assert.ok(id, "downloads go only to an internal Drive file ID");
+      const item = files.get(id);
+      return { getResponseCode: () => controls.httpCode,
+        getBlob: () => new Blob(controls.body || item.bytes, "application/octet-stream", "download") };
+    } }
+  });
+  vm.runInContext(source, sandbox);
+  return { drive: sandbox.ArchiveDrive, sheets: sandbox.ArchiveSheets, files, books, calls, controls, addFile, Blob, sandbox };
+}
+
+function backendHarness() {
+  const h = harness();
+  const properties = new Map([["SITE_URL", "https://artist.example/exposures/"]]);
+  const identity = { active: "owner@example.test", effective: "owner@example.test" };
+  const signed = bytes => Array.from(bytes, value => value > 127 ? value - 256 : value);
+  let locked = false;
+  Object.assign(h.sandbox, {
+    console: { log() {} },
+    PropertiesService: { getScriptProperties: () => ({
+      getProperty: key => properties.get(key) ?? null,
+      setProperty(key, value) { properties.set(key, String(value)); return this; }
+    }) },
+    Session: {
+      getActiveUser: () => ({ getEmail: () => identity.active }),
+      getEffectiveUser: () => ({ getEmail: () => identity.effective })
+    },
+    LockService: { getScriptLock: () => ({
+      tryLock() { assert.equal(locked, false, "backend execution must not nest locks"); locked = true; return true; },
+      releaseLock() { assert.equal(locked, true); locked = false; }
+    }) },
+    Utilities: {
+      DigestAlgorithm: { SHA_256: "SHA_256" },
+      computeDigest(algorithm, bytes) { assert.equal(algorithm, "SHA_256"); return signed(crypto.createHash("sha256").update(Buffer.from(bytes)).digest()); },
+      base64Decode: value => signed(Buffer.from(value, "base64")),
+      base64Encode: bytes => Buffer.from(bytes).toString("base64"),
+      newBlob: (bytes, mimeType, name) => new h.Blob(bytes, mimeType, name),
+      getUuid: () => crypto.randomUUID()
+    }
+  });
+  // This loads the real business logic over the real storage adapters, with
+  // mocks only at the external Google API boundary.
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../google-apps-script/Code.gs"), "utf8"), h.sandbox);
+  function api(action, payload = {}) {
+    const response = clone(h.sandbox.exposureApi({ action, payload }));
+    assert.equal(response.ok, true, JSON.stringify(response.error));
+    return response.data;
+  }
+  function artist(action, payload = {}) {
+    const response = clone(h.sandbox.artistApi({ action, payload }));
+    assert.equal(response.ok, true, JSON.stringify(response.error));
+    return response.data;
+  }
+  function records(name) {
+    const rows = h.books.get(properties.get("EXPOSURE_SPREADSHEET_ID")).values[name];
+    return rows.slice(1).map(row => Object.fromEntries(rows[0].map((header, index) => [header, row[index] ?? ""])));
+  }
+  return { ...h, properties, identity, api, artist, records };
+}
+
+function image(marker, name = `photo-${marker}.jpg`) {
+  return { name, mimeType: "image/jpeg", base64: Buffer.from([0xff,0xd8,0xff,0xe0,0x00,0x10,marker,0xff,0xd9]).toString("base64") };
+}
+
+test("folder and image creation use app markers, explicit Drive v3 media signatures and exact parents", () => {
+  const h = harness();
+  const root = h.drive.createFolder("Project");
+  const artist = root.createFolder("My_photos");
+  const image = artist.createFile(new h.Blob([9, 8, -1], "image/jpeg", "source.jpg"));
+  assert.equal(image.getName(), "source.jpg");
+  assert.equal(image.getSize(), 3);
+  assert.equal(image.getMimeType(), "image/jpeg");
+  assert.deepEqual(h.calls.create[0].resource.appProperties, { exposureArchive: "drive-file-v1" });
+  assert.deepEqual(h.calls.create[1].resource.parents, [root.getId()]);
+  assert.deepEqual(h.calls.create[2].resource.parents, [artist.getId()]);
+  assert.equal(h.calls.create[0].media, null);
+  assert.match(root.getUrl(), /^https:\/\/drive.google.com\/drive\/folders\//);
+});
+
+test("unapproved, unmarked, trashed and wrong-kind configured IDs fail before any download", () => {
+  const h = harness();
+  for (const override of [{ isAppAuthorized: false }, { isAppAuthorized: undefined }, { appProperties: {} }, { trashed: true }]) {
+    const file = h.addFile(override);
+    assert.throws(() => h.drive.getFileById(file.id), error => error.exposureCode_ === "ACCESS_NOT_GRANTED");
+  }
+  const folder = h.addFile({ mimeType: folderType });
+  const image = h.addFile();
+  assert.throws(() => h.drive.getFileById(folder.id), /limited-access/);
+  assert.throws(() => h.drive.getFolderById(image.id), /limited-access/);
+  for (const id of ["https://example.test/file", "file?id=1", "../file", "file\nother", "__proto__", "constructor", 5]) assert.throws(() => h.drive.getFileById(id), /limited-access/);
+  assert.equal(h.calls.fetch.length, 0);
+});
+
+test("missing-file denial is useful to the owner while transient API failures remain retryable", () => {
+  const h = harness();
+  assert.throws(() => h.drive.getFolderById("missing"), error => error.exposureCode_ === "ACCESS_NOT_GRANTED");
+  h.controls.failGet = "503 Backend temporarily unavailable";
+  assert.throws(() => h.drive.getFileById("known-file"), /503 Backend temporarily unavailable/);
+});
+
+test("listing paginates completely and excludes unmarked, wrong-parent, wrong-name and wrong-kind files", () => {
+  const h = harness();
+  const root = h.drive.createFolder("Root");
+  const file = h.addFile({ name: "chosen.jpg", parents: [root.getId()] });
+  const second = h.addFile({ name: "chosen.jpg", parents: [root.getId()] });
+  h.controls.pages = [
+    { files: [file, h.addFile({ name: "chosen.jpg", parents: [root.getId()], appProperties: {} }), h.addFile({ name: "chosen.jpg", parents: ["other"] })], nextPageToken: "1" },
+    { files: [second, h.addFile({ name: "other.jpg", parents: [root.getId()] }), h.addFile({ name: "chosen.jpg", mimeType: folderType, parents: [root.getId()] })] }
+  ];
+  const files = root.getFilesByName("chosen.jpg");
+  assert.equal(files.next().getId(), file.id);
+  assert.equal(files.next().getId(), second.id);
+  assert.equal(files.hasNext(), false);
+  assert.equal(h.calls.list.length, 2);
+  assert.equal(h.calls.list[1].pageToken, "1");
+  assert.ok(h.calls.list[0].q.includes(`'${root.getId()}' in parents`));
+  assert.ok(h.calls.list[0].q.includes("appProperties has"));
+});
+
+test("partial or cyclic listings fail instead of returning a destructive partial refresh", () => {
+  const h = harness(), root = h.drive.createFolder("Root");
+  h.controls.pages = [{ files: [], incompleteSearch: true }];
+  assert.throws(() => root.getFiles(), /incomplete/);
+  h.controls.pages = [{ files: [], nextPageToken: "1" }, { files: [], nextPageToken: "1" }];
+  assert.throws(() => root.getFiles(), /could not be completed/);
+});
+
+test("image downloads use the documented fixed media endpoint, private OAuth token and no redirects", () => {
+  const h = harness(), file = h.addFile({ name: "artist.jpg" }, [1, -2, 3]);
+  const blob = h.drive.getFileById(file.id).getBlob();
+  assert.deepEqual(blob.getBytes(), [1, -2, 3]);
+  assert.equal(blob.getName(), "artist.jpg");
+  assert.equal(blob.getContentType(), "image/jpeg");
+  assert.deepEqual(h.calls.fetch, [{ url: `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`, options: {
+    method: "get", headers: { Authorization: "Bearer private-test-token" }, followRedirects: false, muteHttpExceptions: true
+  } }]);
+  assert.equal(JSON.stringify(blob).includes("private-test-token"), false);
+});
+
+test("downloads fail safely on nonimages, unknown size, oversized files, denied content and changed length", () => {
+  const h = harness();
+  for (const override of [{ mimeType: "text/plain" }, { size: "not-known" }, { size: "0" }, { size: String(30 * 1024 * 1024 + 1) }, { capabilities: {} }]) {
+    const file = h.addFile(override);
+    assert.throws(() => h.drive.getFileById(file.id).getBlob(), /cannot be downloaded/);
+  }
+  assert.equal(h.calls.fetch.length, 0);
+  const file = h.addFile();
+  for (const status of [302, 401, 403, 404, 500]) {
+    h.controls.httpCode = status;
+    assert.throws(() => h.drive.getFileById(file.id).getBlob(), error => !error.message.includes("private-test-token") && /could not be downloaded/.test(error.message));
+  }
+  h.controls.httpCode = 200;
+  h.controls.body = [1];
+  assert.throws(() => h.drive.getFileById(file.id).getBlob(), /changed while it was being read/);
+});
+
+test("metadata caches are reset between executions so revoked access is not retained", () => {
+  const h = harness(), file = h.addFile();
+  h.drive.getFileById(file.id).getName();
+  h.drive.getFileById(file.id).getSize();
+  assert.equal(h.calls.get.length, 1);
+  h.files.get(file.id).metadata.isAppAuthorized = false;
+  h.drive.reset();
+  assert.throws(() => h.drive.getFileById(file.id), /limited-access/);
+  assert.equal(h.calls.get.length, 2);
+});
+
+test("new spreadsheets are tagged before normal access, and moves target only authorized project folders", () => {
+  const h = harness();
+  const spreadsheet = h.sheets.create("Index");
+  assert.deepEqual(h.calls.update[0].resource, { appProperties: { exposureArchive: "drive-file-v1" } });
+  const root = h.drive.createFolder("Project");
+  h.drive.getFileById(spreadsheet.getId()).moveTo(root);
+  assert.deepEqual(h.files.get(spreadsheet.getId()).metadata.parents, [root.getId()]);
+  const writes = h.calls.update.length;
+  h.drive.getFileById(spreadsheet.getId()).moveTo(root);
+  assert.equal(h.calls.update.length, writes, "moving an already placed file is a no-op");
+  const unrelated = h.addFile({ mimeType: folderType, appProperties: {} });
+  assert.throws(() => h.drive.getFileById(spreadsheet.getId()).moveTo({ getId: () => unrelated.id }), /limited-access/);
+});
+
+test("Sheets values stay literal with RAW writes, quoted names, rectangular padding and synchronous caches", () => {
+  const h = harness(), book = h.sheets.create("Index");
+  assert.equal(book.getSheetByName("Sources"), null);
+  const sheet = book.insertSheet("Artist's Sources");
+  assert.equal(sheet.getLastRow(), 0);
+  sheet.getRange(1, 1, 1, 3).setValues([["=IMPORTXML(\"url\")", "2026-10-30", true]]);
+  assert.deepEqual(Array.from(sheet.getRange(1, 1, 2, 4).getValues(), line => Array.from(line)), [["=IMPORTXML(\"url\")", "2026-10-30", true, ""], ["", "", "", ""]]);
+  assert.equal(sheet.getLastRow(), 1);
+  assert.equal(sheet.getLastColumn(), 3);
+  assert.equal(h.calls.valuesUpdate[0].range, "'Artist''s Sources'!A1:C1");
+  assert.equal(h.calls.valuesUpdate[0].options.valueInputOption, "RAW");
+  assert.equal(h.calls.valuesGet.filter(call => call.range === "'Artist''s Sources'").length, 1);
+  const literalRange = sheet.getRange(2, 1);
+  assert.equal(literalRange.setNumberFormat("@"), literalRange);
+  assert.throws(() => literalRange.setNumberFormat("0.00"), /Only literal archive text/);
+});
+
+test("Sheet writes grow the actual grid, reject malformed ranges and preserve cache on failed writes", () => {
+  const h = harness(), book = h.sheets.create("Index"), sheet = book.getSheetByName("Sheet1");
+  sheet.getRange(1, 1, 1, 3).setValues([["one", "two", "three"]]);
+  h.controls.failValueWrite = true;
+  assert.throws(() => sheet.getRange(2, 1).setValues([["not-saved"]]), /Temporary write failure/);
+  assert.equal(sheet.getLastRow(), 1);
+  assert.deepEqual(Array.from(sheet.getRange(2, 1).getValues()[0]), [""]);
+  sheet.getRange(4, 28).setValues([["last"]]);
+  assert.equal(h.calls.valuesUpdate.at(-1).range, "'Sheet1'!AB4:AB4");
+  assert.equal(sheet.getLastRow(), 4);
+  assert.equal(sheet.getLastColumn(), 28);
+  assert.deepEqual(h.books.get(book.getId()).sheets[0].properties.gridProperties, { rowCount: 4, columnCount: 28 });
+  for (const args of [[0,1], [1,-1], [1,1,0,1], [1,1,1,NaN]]) assert.throws(() => sheet.getRange(...args), /range is invalid/);
+  for (const data of [[], [[1,2]], [[null]], [[{}]], [[Infinity]]]) assert.throws(() => sheet.getRange(1,1).setValues(data), /row data is invalid/);
+});
+
+test("Sheets cache reset reads current external values and denies unrelated spreadsheets", () => {
+  const h = harness(), book = h.sheets.create("Index"), sheet = book.getSheetByName("Sheet1");
+  sheet.getRange(1, 1).setValues([["before"]]);
+  h.books.get(book.getId()).values.Sheet1[0][0] = "after";
+  h.sheets.reset();
+  assert.deepEqual(Array.from(h.sheets.openById(book.getId()).getSheetByName("Sheet1").getRange(1, 1).getValues()[0]), ["after"]);
+  const unrelated = h.addFile({ mimeType: sheetType, appProperties: {} });
+  const gets = h.calls.sheets.length;
+  assert.throws(() => h.sheets.openById(unrelated.id), /limited-access/);
+  assert.equal(h.calls.sheets.length, gets);
+});
+
+test("the real backend archives through the limited adapters with consent, original deduplication and unique usage reservations", () => {
+  const h = backendHarness();
+  const links = h.sandbox.setupProject();
+  const setupIds = [...h.properties.entries()].filter(([key]) => key.startsWith("EXPOSURE_") && key.endsWith("_ID"));
+  const initialFiles = h.files.size;
+  h.sandbox.setupProject();
+  assert.equal(h.files.size, initialFiles, "rerunning setup must reuse app-created folders and index");
+  assert.deepEqual([...h.properties.entries()].filter(([key]) => key.startsWith("EXPOSURE_") && key.endsWith("_ID")), setupIds);
+  assert.ok(links.sheet.includes(h.properties.get("EXPOSURE_SPREADSHEET_ID")));
+
+  const imported = h.artist("import", { image: image(1, "artist.jpg") });
+  assert.equal(imported.imported, true);
+  assert.equal(imported.artistCount, 1);
+  assert.equal(h.artist("import", { image: image(1, "renamed-identical.jpg") }).duplicate, true);
+  assert.equal(h.api("bootstrap").totalEligible, 1);
+
+  const settings = { baseExposure: 0, participantExposure: 0, contrast: 12, monochrome: true };
+  const firstId = crypto.randomUUID();
+  const first = h.api("begin", { submissionId: firstId, original: image(2), allowReuse: false });
+  assert.equal(h.records("Sources").find(source => source.kind === "participant").eligible, false);
+  const firstResult = { submissionId: firstId, token: first.token, result: image(3), width: 720, height: 480, settings };
+  const completedFirst = h.api("complete", firstResult);
+  assert.equal(completedFirst.saved, true);
+  assert.equal(h.api("bootstrap").participantCount, 0, "an unconsented original stays outside future pairings");
+
+  const secondId = crypto.randomUUID();
+  const second = h.api("begin", { submissionId: secondId, original: image(2, "same-photo-again.jpg"), allowReuse: true });
+  assert.equal(second.originalId, first.originalId, "byte-identical uploads must reuse the same original file");
+  assert.equal(h.api("bootstrap").participantCount, 0, "opt-in does not become eligible before a saved result");
+  h.api("complete", { submissionId: secondId, token: second.token, result: image(4), width: 720, height: 480, settings });
+  const sourcePool = h.api("bootstrap");
+  assert.equal(sourcePool.artistCount, 1);
+  assert.equal(sourcePool.participantCount, 1);
+  assert.equal(sourcePool.totalEligible, 2);
+
+  const originals = [...h.files.values()].filter(file => file.metadata.parents.includes(h.properties.get("EXPOSURE_ORIGINALS_FOLDER_ID")));
+  const results = [...h.files.values()].filter(file => file.metadata.parents.includes(h.properties.get("EXPOSURE_RESULTS_FOLDER_ID")));
+  assert.equal(originals.length, 1);
+  assert.equal(results.length, 2);
+  assert.deepEqual(Buffer.from(originals[0].bytes), Buffer.from(image(2).base64, "base64"), "the original archive preserves exact bytes");
+  assert.deepEqual(h.records("Submissions").map(row => [row.status, row.allowReuse]), [["complete", false], ["complete", true]]);
+
+  const usage = h.records("Usage");
+  assert.equal(usage.length, 5, "two submissions, one original and two result reservations");
+  assert.equal(new Set(usage.map(row => row.key)).size, usage.length);
+  assert.equal(usage.filter(row => row.kind === "submission").length, 2);
+  assert.equal(usage.filter(row => row.kind === "file").reduce((sum, row) => sum + row.bytes, 0), 27);
+
+  h.api("complete", firstResult);
+  assert.equal(h.records("Usage").length, 5, "a completed save retry must not charge a second reservation");
+  assert.equal([...h.files.values()].filter(file => file.metadata.parents.includes(h.properties.get("EXPOSURE_RESULTS_FOLDER_ID"))).length, 2);
+  assert.equal(h.api("bootstrap").participantCount, 1, "retrying an earlier opt-out result cannot revoke a later opt-in");
+  assert.ok(h.calls.valuesUpdate.every(call => call.options.valueInputOption === "RAW"));
+  assert.ok(h.calls.fetch.every(call => call.options.followRedirects === false));
+});
+
+test("the real owner RPC denies anonymous and other-account calls before reaching the limited adapters", () => {
+  const h = backendHarness();
+  h.sandbox.setupProject();
+  const before = JSON.stringify(Object.fromEntries(Object.entries(h.calls).map(([name, calls]) => [name, calls.length])));
+  for (const active of ["", "other@example.test"]) {
+    h.identity.active = active;
+    for (const action of ["status", "import", "refresh"]) {
+      const response = h.sandbox.artistApi({ action, payload: { image: image(9), email: "owner@example.test" } });
+      assert.equal(response.ok, false);
+      assert.equal(response.error.code, "OWNER_REQUIRED");
+    }
+    assert.throws(() => h.sandbox.setupProject(), error => error.exposureCode_ === "OWNER_REQUIRED");
+  }
+  assert.equal(JSON.stringify(Object.fromEntries(Object.entries(h.calls).map(([name, calls]) => [name, calls.length]))), before);
+});

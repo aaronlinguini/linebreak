@@ -18,13 +18,15 @@ To test on a real phone or tablet, use the published HTTPS URL or Live Server's 
 
 Before public use, check both library selection and native camera capture on an actual iPhone/iPad and Android device, including cancellation and a portrait photograph. Desktop viewport checks verify layout, not a physical device's camera chooser or HEIC conversion.
 
-1. Upload artist photographs to the project's Drive folder and import them through the private Apps Script owner function.
+1. Open your deployed Google web app with `?view=artist`, sign in as its owner, and import base photographs from your device. Each import is automatically indexed; identical files are not saved twice. New files manually dropped into Drive are not automatically authorized or imported.
 2. On the website, choose **Upload a photo** or **Take a photo**. Review the selected photo, choose whether it may be used in future pairings, then press **Create double exposure**. The future-use checkbox starts unchecked.
 3. Wait for **Double exposure saved.** Downloading a copy is optional. If another eligible base is available, **Try another pairing** saves a second result using the same original without uploading it again. **Start over** clears the page; it does not delete archived files.
 
 The public page stays minimal and black, with no exposure sliders or collection-management panel. Source photographs are stored separately from finished exposures. A private Google Sheet records consent, source IDs, and each result. Exact duplicates share a source-pool entry; no image pairs with identical bytes. Pending and failed submissions can be retried without changing the selected base or duplicating the archived result.
 
-The seven-file public page is published at [Double exposure](https://aaronlinguini.github.io/double-exposure-online-project/) from [its separate public repository](https://github.com/aaronlinguini/double-exposure-online-project). The working repository and its history are not uploaded there. The page is not yet connected to a live Google deployment: `project-config.js` deliberately contains an empty endpoint until authorization, deployment, and the archive check are complete. It disables uploads when unconfigured and does not present local processing as a successful archive save. See [the setup status](GOOGLE-SETUP.md) before continuing.
+The public page is published at [Double exposure](https://aaronlinguini.github.io/double-exposure-online-project/) from [its separate public repository](https://github.com/aaronlinguini/double-exposure-online-project). The working repository and its history are not uploaded there. The limited-access Google revision is prepared locally and still requires manual installation, authorization, deployment, and a real archive check. The existing cloud project may contain the older broad-access code. `project-config.js` deliberately contains an empty endpoint until setup is complete; uploads remain disabled. See [GOOGLE-SETUP.md](GOOGLE-SETUP.md) before continuing.
+
+The new Google backend requests per-file `drive.file` access, email identity for owner checks, and external-request permission for downloads from Google's fixed Drive API endpoint. It does not request account-wide Drive or Sheets scopes. It uses Advanced Drive v3 and Sheets v4 to operate only on app-authorized, app-marked project files. Initial setup creates a new private **Double_exposure_web_project (app)** folder with **My_photos**, **participant_uploads**, **Completed_double_exposures**, and its index. Old manually configured folder IDs must be recorded and removed before the first limited setup; old files are not deleted or moved. Keep the new IDs afterward. Import artist files through the owner page rather than relying on folder-wide permission inheritance.
 
 For a local HTTP layout preview, run this in the project folder and open the printed address. A live archive additionally requires a deployed Google script, published bridge asset, and allowed preview origin as described in the setup guide:
 
@@ -44,7 +46,8 @@ python3 -m http.server 8000 --bind 127.0.0.1
 - `archive-workflow.js`: original → develop → result archive workflow, consent, another pairing, and retries.
 - `drive-storage.js`: website-side Google connection.
 - `drive-bridge.js`: external script running inside Google's hidden bridge frame.
-- `google-apps-script/`: private Drive/Sheets backend, bridge HTML, and manifest.
+- `artist-import.js` and `artist-import.css`: external assets for the owner-only import page; they contain no Google access credentials.
+- `google-apps-script/`: private Code.gs workflow, Storage.gs API adapters, Bridge.html, owner-only Artist.html, and the limited-scope manifest.
 - `tests/`: numerical, archive workflow, backend persistence, and transport checks.
 
 There are no inline styles, executable script bodies, or inline event handlers in the HTML. All authored scripts and styles are separate files. No third-party frontend packages, remote fonts, or tracking are used. The deployed archive uses Google's HTML-service runtime.
@@ -105,7 +108,7 @@ node --check scripts.js
 node --test tests/*.test.cjs
 ```
 
-The checks cover exposure maths, exact original bytes, consent, another pairing, duplicate and self-pairing rules, result eligibility timing, interrupted archive writes, stable retries, iframe-message validation, and the separation of HTML, CSS, and JavaScript. Google services are simulated in those tests; live account authorization and deployment require the setup guide's smoke test.
+The checks cover exposure maths, exact original bytes, consent, another pairing, duplicate and self-pairing rules, result eligibility timing, interrupted archive writes, stable retries, limited-access API boundaries, owner imports, iframe-message validation, and the separation of HTML, CSS, and JavaScript. Google services are simulated in those tests; live account authorization and deployment require the setup guide's smoke test.
 
 ## Version history
 
@@ -139,10 +142,12 @@ To undo a later committed change, ask to revert that change; Git can create an u
 
 ## Next stages
 
-Run `node scripts/prepare-public-site.cjs` to build `.public-site/` with exactly the seven approved public files. Publish this generated copy rather than this whole working repository or its history. Rebuild it after editing any public source file; it is intentionally ignored by local Git. The packager rejects missing or symlinked sources, invalid JavaScript, inline HTML scripts/styles, unpublished HTML references, and unexpected files in an existing output directory before replacement.
+Run `node scripts/prepare-public-site.cjs` to build `.public-site/` with the nine approved public files: the original seven plus `artist-import.js` and `artist-import.css`. Publish this generated copy rather than this whole working repository or its history. Rebuild it after editing a public source file; it is ignored by local Git. The private Google HTML and backend source stay outside publication. The packager rejects missing or symlinked sources, invalid JavaScript, inline HTML scripts/styles, unpublished HTML references, and unexpected files in an existing output directory before replacement.
 
 The Google backend includes global request, daily submission, and daily new-file-byte limits plus an owner pause switch. These run inside Apps Script on Google; no rented server is needed. The daily byte allowance is an adjustable intake limit, not total Drive storage capacity. See [GOOGLE-SETUP.md](GOOGLE-SETUP.md) for settings and the live archive check, which is still required after deploying.
 
 The exact project before launch preparation is saved as **`before-launch-setup`** at **`9144f22`**. Image defaults, publication packaging, and archive limits are saved separately so each change can be undone.
+
+The full project before the limited-access rewrite is saved as **`before-limited-drive-access`** at **`f458bb2`**. The image-processing code is unchanged by this rewrite. A local revert does not itself replace deployed Google code or revoke an earlier OAuth grant.
 
 A public gallery, a project-wide finite sequence, and participant-created or edited prompts are not implemented; the current scope is the shared source pool and private archive.

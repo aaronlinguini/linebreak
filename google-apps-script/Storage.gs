@@ -1,0 +1,246 @@
+/*
+ * Small adapters for the archive's Drive and Sheets operations. All Google
+ * access uses drive.file; every file must also carry this app's private marker.
+ * Enable Advanced Drive v3 and Sheets v4. Binary downloads use only the fixed
+ * Drive API media endpoint and need script.external_request as well.
+ */
+var ArchiveDrive = (function () {
+  var folderType = "application/vnd.google-apps.folder";
+  var sheetType = "application/vnd.google-apps.spreadsheet";
+  var marker = "drive-file-v1";
+  var fields = "id,name,mimeType,size,parents,trashed,isAppAuthorized,appProperties,createdTime,modifiedTime,capabilities(canDownload)";
+  var metadata = Object.create(null);
+
+  function failure(code, message) {
+    var error = new Error(message);
+    error.exposureCode_ = code;
+    return error;
+  }
+  function accessFailure() {
+    return failure("ACCESS_NOT_GRANTED", "This file or folder was not created by the limited-access project. Use the project's import page; existing manually created folder IDs must be cleared before initial setup.");
+  }
+  function validId(id) {
+    if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(id)) throw accessFailure();
+    return id;
+  }
+  function managed(file) {
+    return file && file.isAppAuthorized === true && file.appProperties &&
+      file.appProperties.exposureArchive === marker && file.trashed !== true;
+  }
+  function remember(file) {
+    if (!managed(file)) throw accessFailure();
+    metadata[validId(file.id)] = file;
+    return file;
+  }
+  function get(id) {
+    validId(id);
+    if (!metadata[id]) {
+      try { remember(Drive.Files.get(id, { fields: fields })); }
+      catch (error) {
+        if (error.exposureCode_ || /\b(?:401|403|404)\b|not found|insufficient permission|permission denied/i.test(String(error.message))) throw accessFailure();
+        throw error;
+      }
+    }
+    return metadata[id];
+  }
+  function create(name, mimeType, parent, blob) {
+    var resource = { name: String(name), mimeType: mimeType, appProperties: { exposureArchive: marker } };
+    if (parent) {
+      if (get(parent).mimeType !== folderType) throw accessFailure();
+      resource.parents = [parent];
+    }
+    var file = blob
+      ? Drive.Files.create(resource, blob, { fields: fields })
+      : Drive.Files.create(resource, null, { fields: fields });
+    return wrap(remember(file).id);
+  }
+  function quote(value) { return "'" + String(value).replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'"; }
+  function children(id, folders, name) {
+    if (get(id).mimeType !== folderType) throw accessFailure();
+    var query = quote(id) + " in parents and trashed = false and mimeType " +
+      (folders ? "= " : "!= ") + quote(folderType) +
+      " and appProperties has { key='exposureArchive' and value='" + marker + "' }";
+    if (name !== undefined) query += " and name = " + quote(name);
+    var found = [], pageToken, seenTokens = Object.create(null);
+    do {
+      var options = { q: query, fields: "nextPageToken,incompleteSearch,files(" + fields + ")", pageSize: 1000 };
+      if (pageToken) options.pageToken = pageToken;
+      var page = Drive.Files.list(options);
+      if (page.incompleteSearch) throw failure("ARCHIVE_UNAVAILABLE", "The archive file listing was incomplete. Please retry.");
+      (page.files || []).forEach(function (file) {
+        // A manually dropped-in file is not implicitly authorized by its parent.
+        if (managed(file) && (file.parents || []).indexOf(id) >= 0 &&
+            (file.mimeType === folderType) === folders && (name === undefined || file.name === name)) {
+          found.push(wrap(remember(file).id));
+        }
+      });
+      pageToken = page.nextPageToken;
+      if (pageToken && seenTokens[pageToken]) throw failure("ARCHIVE_UNAVAILABLE", "The archive file listing could not be completed. Please retry.");
+      if (pageToken) seenTokens[pageToken] = true;
+    } while (pageToken);
+    var index = 0;
+    return { hasNext: function () { return index < found.length; }, next: function () { return found[index++]; } };
+  }
+  function blobFor(id) {
+    var file = get(id);
+    var size = Number(file.size);
+    if (!/^image\/(jpeg|png|webp|avif)$/.test(file.mimeType) || file.capabilities?.canDownload !== true ||
+        !Number.isSafeInteger(size) || size < 1 || size > 30 * 1024 * 1024) {
+      throw failure("ARCHIVE_UNAVAILABLE", "The archive photograph cannot be downloaded.");
+    }
+    // IDs come from this app's private index. Never fetch a caller-supplied URL,
+    // follow a redirect with the token, return the token, or log the response.
+    var response = UrlFetchApp.fetch("https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(id) + "?alt=media", {
+      method: "get", headers: { Authorization: "Bearer " + ScriptApp.getOAuthToken() },
+      followRedirects: false, muteHttpExceptions: true
+    });
+    if (response.getResponseCode() !== 200) throw failure("ARCHIVE_UNAVAILABLE", "The archive photograph could not be downloaded. Please retry.");
+    var blob = response.getBlob();
+    if (blob.getBytes().length !== size) throw failure("ARCHIVE_UNAVAILABLE", "The archive photograph changed while it was being read. Please retry.");
+    return blob.setName(file.name).setContentType(file.mimeType);
+  }
+  function wrap(id) {
+    return {
+      getId: function () { return id; },
+      getName: function () { return get(id).name; },
+      getMimeType: function () { return get(id).mimeType; },
+      getSize: function () { return Number(get(id).size || 0); },
+      getUrl: function () { return get(id).mimeType === folderType ? "https://drive.google.com/drive/folders/" + id : "https://drive.google.com/file/d/" + id + "/view"; },
+      getDateCreated: function () { return new Date(get(id).createdTime); },
+      getLastUpdated: function () { return new Date(get(id).modifiedTime); },
+      isTrashed: function () { return get(id).trashed === true; },
+      getBlob: function () { return blobFor(id); },
+      getFiles: function () { return children(id, false); },
+      getFilesByName: function (name) { return children(id, false, name); },
+      getFoldersByName: function (name) { return children(id, true, name); },
+      createFolder: function (name) { return create(name, folderType, id); },
+      createFile: function (blob) { return create(blob.getName(), blob.getContentType(), id, blob); },
+      moveTo: function (folder) {
+        var target = validId(folder.getId());
+        if (get(target).mimeType !== folderType) throw accessFailure();
+        var file = get(id), parents = file.parents || [];
+        if (parents.length === 1 && parents[0] === target) return this;
+        var options = { fields: fields, addParents: target };
+        if (parents.length) options.removeParents = parents.join(",");
+        remember(Drive.Files.update({}, id, null, options));
+        return this;
+      }
+    };
+  }
+  return Object.freeze({
+    reset: function () { metadata = Object.create(null); },
+    createFolder: function (name) { return create(name, folderType); },
+    getFolderById: function (id) { if (get(id).mimeType !== folderType) throw accessFailure(); return wrap(id); },
+    getFileById: function (id) { if (get(id).mimeType === folderType) throw accessFailure(); return wrap(id); },
+    markCreatedSpreadsheet: function (id) {
+      validId(id);
+      // Called only immediately after Sheets.Spreadsheets.create returned this ID.
+      var file = remember(Drive.Files.update({ appProperties: { exposureArchive: marker } }, id, null, { fields: fields }));
+      if (file.mimeType !== sheetType) throw accessFailure();
+    }
+  });
+})();
+
+var ArchiveSheets = (function () {
+  var books = Object.create(null), rows = Object.create(null);
+  var sheetType = "application/vnd.google-apps.spreadsheet";
+  function open(id) {
+    if (ArchiveDrive.getFileById(id).getMimeType() !== sheetType) throw new Error("The archive index is not a spreadsheet.");
+    return book(id);
+  }
+  function details(id) {
+    if (!books[id]) books[id] = Sheets.Spreadsheets.get(id, { fields: "spreadsheetId,sheets(properties(sheetId,title,gridProperties))" });
+    return books[id];
+  }
+  function quote(name) { return "'" + name.replace(/'/g, "''") + "'"; }
+  function columnName(column) {
+    var name = "";
+    while (column > 0) { column--; name = String.fromCharCode(65 + column % 26) + name; column = Math.floor(column / 26); }
+    return name;
+  }
+  function values(id, title) {
+    var key = id + ":" + title;
+    if (!rows[key]) rows[key] = Sheets.Spreadsheets.Values.get(id, quote(title), { valueRenderOption: "UNFORMATTED_VALUE" }).values || [];
+    return rows[key];
+  }
+  function properties(id, title) {
+    var item = (details(id).sheets || []).filter(function (sheet) { return sheet.properties.title === title; })[0];
+    if (!item) throw new Error("The archive index sheet is missing.");
+    return item.properties;
+  }
+  function grow(id, title, lastRow, lastColumn) {
+    var current = properties(id, title), grid = current.gridProperties;
+    if (lastRow <= grid.rowCount && lastColumn <= grid.columnCount) return;
+    var expanded = { rowCount: Math.max(lastRow, grid.rowCount), columnCount: Math.max(lastColumn, grid.columnCount) };
+    Sheets.Spreadsheets.batchUpdate({ requests: [{ updateSheetProperties: {
+      properties: { sheetId: current.sheetId, gridProperties: expanded }, fields: "gridProperties(rowCount,columnCount)"
+    } }] }, id);
+    current.gridProperties = expanded;
+  }
+  function range(id, title, row, column, height, width) {
+    if (![row, column, height, width].every(function (value) { return Number.isSafeInteger(value) && value > 0; })) throw new Error("The archive cell range is invalid.");
+    var self = {
+      getValues: function () {
+        var source = values(id, title);
+        return Array.from({ length: height }, function (_, y) {
+          return Array.from({ length: width }, function (_, x) { return source[row + y - 1]?.[column + x - 1] ?? ""; });
+        });
+      },
+      setValues: function (data) {
+        if (!Array.isArray(data) || data.length !== height || data.some(function (line) {
+          return !Array.isArray(line) || line.length !== width || line.some(function (value) {
+            return !["string", "number", "boolean"].includes(typeof value) || typeof value === "number" && !Number.isFinite(value);
+          });
+        })) throw new Error("The archive row data is invalid.");
+        var cached = values(id, title);
+        grow(id, title, row + height - 1, column + width - 1);
+        var a1 = quote(title) + "!" + columnName(column) + row + ":" + columnName(column + width - 1) + (row + height - 1);
+        Sheets.Spreadsheets.Values.update({ values: data, majorDimension: "ROWS" }, id, a1, { valueInputOption: "RAW" });
+        // Update local state only after the synchronous Google write succeeds.
+        data.forEach(function (line, y) {
+          cached[row + y - 1] = cached[row + y - 1] || [];
+          line.forEach(function (value, x) { cached[row + y - 1][column + x - 1] = value; });
+        });
+        return self;
+      },
+      setNumberFormat: function (format) {
+        // RAW writes already keep ISO dates and names literal instead of parsing.
+        if (format !== "@") throw new Error("Only literal archive text formatting is supported.");
+        return self;
+      }
+    };
+    return self;
+  }
+  function sheet(id, title) {
+    return {
+      getName: function () { return title; },
+      getLastRow: function () { return values(id, title).length; },
+      getLastColumn: function () { return values(id, title).reduce(function (last, line) { return Math.max(last, (line || []).length); }, 0); },
+      getRange: function (row, column, height, width) { return range(id, title, row, column, height === undefined ? 1 : height, width === undefined ? 1 : width); }
+    };
+  }
+  function book(id) {
+    return {
+      getId: function () { return id; },
+      getUrl: function () { return "https://docs.google.com/spreadsheets/d/" + id + "/edit"; },
+      getSheetByName: function (title) {
+        return (details(id).sheets || []).some(function (item) { return item.properties.title === title; }) ? sheet(id, title) : null;
+      },
+      insertSheet: function (title) {
+        Sheets.Spreadsheets.batchUpdate({ requests: [{ addSheet: { properties: { title: title } } }] }, id);
+        delete books[id];
+        return sheet(id, title);
+      }
+    };
+  }
+  return Object.freeze({
+    reset: function () { books = Object.create(null); rows = Object.create(null); },
+    flush: function () { /* Advanced Sheets writes complete synchronously. */ },
+    openById: open,
+    create: function (name) {
+      var created = Sheets.Spreadsheets.create({ properties: { title: name }, sheets: [{ properties: { title: "Sheet1" } }] });
+      ArchiveDrive.markCreatedSpreadsheet(created.spreadsheetId);
+      return open(created.spreadsheetId);
+    }
+  });
+})();

@@ -136,13 +136,14 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
     },
     console: { log: (...values) => logs.push(values.join(" ")) },
     Logger: { log: (...values) => logs.push(values.join(" ")) },
-    DriveApp: {
+    ArchiveDrive: {
+      reset() {},
       createFolder: (name) => new Folder(name),
       getFoldersByName: (name) => iterator(Array.from(folders.values()).filter((folder) => folder.name === name)),
       getFolderById: (key) => { if (!folders.has(key)) throw new Error(`No folder ${key}`); return folders.get(key); },
       getFileById: (key) => { if (!files.has(key)) throw new Error(`No file ${key}`); return files.get(key); }
     },
-    SpreadsheetApp: { create: (name) => new Book(name), openById: (key) => { if (!books.has(key)) throw new Error(`No book ${key}`); return books.get(key); }, flush() {} },
+    ArchiveSheets: { reset() {}, create: (name) => new Book(name), openById: (key) => { if (!books.has(key)) throw new Error(`No book ${key}`); return books.get(key); }, flush() {} },
     LockService: { getScriptLock: () => lock },
     Session: {
       getActiveUser: () => ({ getEmail: () => activeEmail }),
@@ -176,6 +177,7 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
   const api = (action, payload = {}) => clone(sandbox.exposureApi({ action, payload }));
   const data = (action, payload) => { const response = api(action, payload); assert.equal(response.ok, true, JSON.stringify(response)); return response.data; };
   const folder = (fragment) => {
+    fragment = ({Artist: "My_photos", Participant: "participant_uploads", "Double exposure": "Completed_double_exposures"})[fragment] || fragment;
     const matches = Array.from(folders.values()).filter((entry) => entry.name.toLowerCase().includes(fragment.toLowerCase()));
     return matches.find((entry) => /^\d+ /.test(entry.name)) || matches[0];
   };
@@ -491,7 +493,7 @@ test("photo validation rejects forged formats and malformed data before storage"
 test("editor setup launchers are visible and owner-only, with private implementation helpers", () => {
   const backend = makeBackend();
   const functions = [...backend.source.matchAll(/^function\s+([A-Za-z0-9_]+)\s*\(/gm)].map((match) => match[1]);
-  assert.deepEqual(functions.filter((name) => !name.endsWith("_")).sort(), ["doGet", "exposureApi", "refreshArtistCollection", "setupProject"]);
+  assert.deepEqual(functions.filter((name) => !name.endsWith("_")).sort(), ["artistApi", "doGet", "exposureApi", "refreshArtistCollection", "setupProject"]);
   assert.equal(backend.api("setupProject_").ok, false);
   assert.equal(backend.api("setupProject").ok, false);
   assert.equal(backend.api("refreshArtistCollection").ok, false);
@@ -517,6 +519,97 @@ test("anonymous and other-account callers cannot invoke editor setup launchers",
 test("the owner identity check has its required email scope in the manifest", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(project, "google-apps-script", "appsscript.json"), "utf8"));
   assert.ok(manifest.oauthScopes.includes("https://www.googleapis.com/auth/userinfo.email"));
+});
+
+test("Google authorization is limited to project files, owner identity and media requests", () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(project, "google-apps-script", "appsscript.json"), "utf8"));
+  assert.deepEqual(manifest.oauthScopes.slice().sort(), [
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/script.external_request"
+  ].sort());
+  assert.deepEqual(manifest.dependencies.enabledAdvancedServices, [
+    { userSymbol: "Drive", serviceId: "drive", version: "v3" },
+    { userSymbol: "Sheets", serviceId: "sheets", version: "v4" }
+  ]);
+  for (const name of ["Code.gs", "Storage.gs"]) {
+    const code = fs.readFileSync(path.join(project, "google-apps-script", name), "utf8");
+    assert.doesNotMatch(code, /\b(?:DriveApp|SpreadsheetApp)\b/, "broad-scope Google services must not return");
+  }
+});
+
+test("owner imports preserve original bytes, index immediately and deduplicate renamed copies", () => {
+  const backend = makeBackend(); backend.setup();
+  backend.properties.set("UPLOADS_PAUSED", "true");
+  backend.properties.set("UPLOAD_BYTES_PER_DAY", "1");
+  const rpc = (action, payload) => clone(backend.sandbox.artistApi({ action, payload }));
+  assert.equal(rpc("status").data.artistCount, 0);
+  const first = rpc("import", { image: original(7, "first.jpg") });
+  assert.equal(first.ok, true);
+  assert.deepEqual(first.data, { imported: true, duplicate: false, artistCount: 1, name: "first.jpg" });
+  const copy = rpc("import", { image: original(7, "renamed-copy.jpg") });
+  assert.deepEqual(copy.data, { imported: false, duplicate: true, artistCount: 1, name: "renamed-copy.jpg" });
+  assert.equal(backend.folder("Artist").files.length, 1);
+  assert.deepEqual(backend.folder("Artist").files[0].getBlob().bytes, jpeg(7));
+  assert.equal(backend.usage().length, 0, "owner imports are not visitor intake");
+  const status = rpc("status").data;
+  assert.equal(status.maxOriginalBytes, 30 * 1024 * 1024);
+  assert.deepEqual(Object.keys(status.folders).sort(), ["artist", "originals", "results", "root"]);
+  assert.equal(rpc("refresh").data.artistCount, 1);
+  backend.properties.set("UPLOADS_PAUSED", "false");
+  assert.equal(backend.data("bootstrap").artistCount, 1);
+});
+
+test("an interrupted artist index write recovers its app-created image without another copy", () => {
+  const backend = makeBackend(); backend.setup();
+  backend.failures.sheetWrite = (sheet, rows) => sheet.name === "Sources" && rows.some(row => row.includes("artist"));
+  const request = { action: "import", payload: { image: original(7) } };
+  assert.equal(backend.sandbox.artistApi(request).ok, false);
+  assert.equal(backend.folder("Artist").files.length, 1);
+  const resumed = clone(backend.sandbox.artistApi(request));
+  assert.equal(resumed.ok, true);
+  assert.equal(resumed.data.duplicate, true);
+  assert.equal(resumed.data.artistCount, 1);
+  assert.equal(backend.folder("Artist").files.length, 1);
+  assert.equal(backend.data("bootstrap").totalEligible, 1);
+});
+
+test("owner imports reject forged photos and arbitrary existing file IDs", () => {
+  const backend = makeBackend(); backend.setup();
+  for (const payload of [
+    { fileId: "unrelated-personal-photo" },
+    { image: { ...original(7), mimeType: "image/png" } },
+    { image: { ...original(7), base64: "not base64" } },
+    { image: { ...original(7), mimeType: "image/svg+xml" } }
+  ]) assert.equal(backend.sandbox.artistApi({ action: "import", payload }).ok, false);
+  assert.equal(backend.folder("Artist").files.length, 0);
+  for (const action of ["import", "status", "artistApi", "refresh"]) assert.equal(backend.api(action).ok, false);
+});
+
+test("anonymous and other accounts cannot open the owner page or call any owner RPC", () => {
+  for (const identity of [{ activeEmail: "" }, { activeEmail: "visitor@example.test" }, { effectiveEmail: "" }]) {
+    const backend = makeBackend(identity);
+    for (const action of ["status", "import", "refresh"]) {
+      const response = clone(backend.sandbox.artistApi({ action, email: "owner@example.test", payload: { image: original(7) } }));
+      assert.equal(response.error.code, "OWNER_REQUIRED");
+    }
+    const html = backend.sandbox.doGet({ parameter: { view: "artist", email: "owner@example.test" } }).getContent();
+    assert.doesNotMatch(html, /artist-import\.(?:js|css)/);
+    assert.match(html, /signed into the account/);
+    assert.equal(backend.lock.count, 0);
+    assert.equal(backend.folders.size, 0);
+  }
+});
+
+test("the owner's import page uses external assets and keeps default framing protection", () => {
+  const backend = makeBackend();
+  const page = backend.sandbox.doGet({ parameter: { view: "artist" } });
+  const html = page.getContent();
+  assert.match(html, /https:\/\/artist\.example\/exposures\/artist-import\.js\?v=drive-file-v1/);
+  assert.match(html, /https:\/\/artist\.example\/exposures\/artist-import\.css\?v=drive-file-v1/);
+  assert.doesNotMatch(html, /__[A-Z_]+__|getOAuthToken|access_token|refresh_token|<style\b|\sstyle=|\sonclick=/i);
+  assert.doesNotMatch(html, /<script\b[^>]*>\s*\S[\s\S]*?<\/script>/i);
+  assert.equal(page.frameMode, undefined, "the private page must not opt into framing by arbitrary websites");
 });
 
 test("the bridge is served only to permitted origins and escapes its metadata", () => {

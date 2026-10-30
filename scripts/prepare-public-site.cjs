@@ -4,10 +4,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-const PUBLIC_FILES = Object.freeze([
+const ORIGINAL_PUBLIC_FILES = Object.freeze([
   "index.html", "styles.css", "scripts.js", "project-config.js",
   "archive-workflow.js", "drive-storage.js", "drive-bridge.js"
 ]);
+const PUBLIC_FILES = Object.freeze([...ORIGINAL_PUBLIC_FILES, "artist-import.js", "artist-import.css"]);
 const OUTPUT_DIRECTORY = ".public-site";
 
 function validateHtml(source) {
@@ -37,8 +38,11 @@ function validatePreviousOutput(destination) {
     throw new Error(`${OUTPUT_DIRECTORY} must be a generated directory, not a file or symlink.`);
   }
   const entries = fs.readdirSync(destination).sort();
-  const expected = [...PUBLIC_FILES].sort();
-  if (entries.length !== expected.length || entries.some((name, index) => name !== expected[index])) {
+  const knownVersion = [PUBLIC_FILES, ORIGINAL_PUBLIC_FILES].some((files) => {
+    const expected = [...files].sort();
+    return entries.length === expected.length && entries.every((name, index) => name === expected[index]);
+  });
+  if (!knownVersion) {
     throw new Error(`${OUTPUT_DIRECTORY} contains unexpected files; nothing was replaced.`);
   }
   for (const name of entries) {

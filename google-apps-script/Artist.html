@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#050505">
+    <title>Double exposure · artist photographs</title>
+    <link rel="stylesheet" href="__ARTIST_STYLE_URL__">
+    <script src="__ARTIST_SCRIPT_URL__" defer></script>
+  </head>
+  <body>
+    <main id="artist-workspace" aria-busy="false">
+      <h1>artist photographs</h1>
+      <p>Import photographs from your device to use as bases for double exposures.</p>
+      <p id="artist-summary" hidden><output id="artist-count">0</output> photographs in the collection.</p>
+
+      <form id="artist-import-form">
+        <label for="artist-photo-input">Choose photographs</label>
+        <input id="artist-photo-input" type="file" multiple accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="artist-file-help" disabled>
+        <p id="artist-file-help" class="help">JPEG, PNG, WebP or AVIF, up to 30 MB each. Original files are preserved. Identical files are not imported twice.</p>
+        <div class="actions">
+          <button id="artist-import-button" type="submit" disabled>Import photographs</button>
+          <button id="artist-refresh-button" type="button">Check collection</button>
+        </div>
+      </form>
+
+      <p id="artist-status" role="status" aria-live="polite">Connecting to the collection…</p>
+      <p id="artist-error" role="alert" hidden></p>
+      <ol id="artist-results" aria-label="Import results" hidden></ol>
+
+      <nav id="artist-folders" aria-label="Project folders" hidden>
+        <a id="artist-folder-root" href="#" target="_blank" rel="noopener noreferrer" hidden>Project folder</a>
+        <a id="artist-folder-artist" href="#" target="_blank" rel="noopener noreferrer" hidden>My photographs</a>
+        <a id="artist-folder-originals" href="#" target="_blank" rel="noopener noreferrer" hidden>Participant originals</a>
+        <a id="artist-folder-results" href="#" target="_blank" rel="noopener noreferrer" hidden>Finished double exposures</a>
+      </nav>
+    </main>
+  </body>
+</html>

@@ -21,9 +21,9 @@ function snapshot(root) {
   return Object.fromEntries(fs.readdirSync(directory).map((name) => [name, fs.readFileSync(path.join(directory, name), "utf8")]));
 }
 
-test("the publication contains exactly the seven approved runtime files, byte for byte", (t) => {
+test("the publication contains exactly the nine approved public files, byte for byte", (t) => {
   const root = fixture(t);
-  for (const name of ["private-photo.jpg", "local-test.html", ".env", "Code.gs"]) fs.writeFileSync(path.join(root, name), "private");
+  for (const name of ["private-photo.jpg", "local-test.html", ".env", "Code.gs", "Storage.gs", "Artist.html"]) fs.writeFileSync(path.join(root, name), "private");
   fs.mkdirSync(path.join(root, "google-apps-script"));
   fs.writeFileSync(path.join(root, "google-apps-script", "Code.gs"), "private backend");
   fs.mkdirSync(path.join(root, ".git"));
@@ -33,6 +33,14 @@ test("the publication contains exactly the seven approved runtime files, byte fo
   assert.deepEqual(fs.readdirSync(destination).sort(), [...PUBLIC_FILES].sort());
   for (const name of PUBLIC_FILES) assert.deepEqual(fs.readFileSync(path.join(destination, name)), fs.readFileSync(path.join(root, name)));
   assert.deepEqual(fs.readdirSync(root).filter((name) => name.startsWith(".public-site-stage-")), []);
+});
+
+test("the preceding seven-file release upgrades to include only the two owner-page assets", (t) => {
+  const root = fixture(t);
+  const destination = preparePublicSite(root);
+  for (const name of ["artist-import.js", "artist-import.css"]) fs.unlinkSync(path.join(destination, name));
+  preparePublicSite(root);
+  assert.deepEqual(fs.readdirSync(destination).sort(), [...PUBLIC_FILES].sort());
 });
 
 test("rebuilding replaces the generated version without retaining stale file contents", (t) => {

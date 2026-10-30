@@ -1,7 +1,8 @@
 /*
  * Private Drive archive + Sheets index for the double-exposure project.
- * Run setupProject in the editor, then refreshArtistCollection after adding
- * artist photographs. Neither operation changes any Drive sharing settings.
+ * Uses Advanced Drive / Sheets with per-file authorization through Storage.gs.
+ * Run setupProject in the editor, then import local artist photographs at the
+ * deployed /exec?view=artist page. No operation changes Drive sharing settings.
  *
  * Script properties:
  * SITE_URL: full HTTPS site base, including its GitHub repository path.
@@ -34,7 +35,7 @@
  */
 
 var EXPOSURE_CONFIG_ = Object.freeze({
-  rootName: "Double exposure project",
+  rootName: "Double_exposure_web_project (app)",
   sheetName: "Double exposure index",
   maxOriginalBytes: 30 * 1024 * 1024,
   maxResultBytes: 12 * 1024 * 1024,
@@ -47,6 +48,14 @@ function doGet(e) {
   try {
     var config = siteConfig_();
     var parameters = e && e.parameter ? e.parameter : {};
+    if (parameters.view === "artist") {
+      requireOwner_();
+      var artistHtml = HtmlService.createHtmlOutputFromFile("Artist").getContent();
+      artistHtml = artistHtml.split("__ARTIST_SCRIPT_URL__").join(escapeHtml_(config.siteUrl + "artist-import.js?v=drive-file-v1"));
+      artistHtml = artistHtml.split("__ARTIST_STYLE_URL__").join(escapeHtml_(config.siteUrl + "artist-import.css?v=drive-file-v1"));
+      // Retain Google's default framing protection for the owner page.
+      return HtmlService.createHtmlOutput(artistHtml).setTitle("Artist photograph import");
+    }
     var origin = String(parameters.origin || "");
     var channel = String(parameters.channel || "");
     if (config.origins.indexOf(origin) < 0 || !/^[a-zA-Z0-9_-]{16,100}$/.test(channel)) {
@@ -65,7 +74,9 @@ function doGet(e) {
       .setTitle("Exposure archive connection")
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   } catch (error) {
-    return HtmlService.createHtmlOutput("The exposure archive connection is unavailable.");
+    return HtmlService.createHtmlOutput(error && error.exposureCode_ === "OWNER_REQUIRED"
+      ? "Open the artist import page while signed into the account that deployed this project."
+      : "The exposure archive connection is unavailable.");
   }
 }
 
@@ -95,6 +106,73 @@ function exposureApi(request) {
   }
 }
 
+// This RPC is separate from the anonymous visitor API. Every call verifies
+// Google's active caller identity; a client-supplied email is never trusted.
+function artistApi(request) {
+  try {
+    requireOwner_();
+    if (!isObject_(request) || ["status", "import", "refresh"].indexOf(request.action) < 0) {
+      throw apiError_("INVALID_REQUEST", "Choose a valid collection operation.");
+    }
+    var payload = request.payload === undefined ? {} : request.payload;
+    if (!isObject_(payload)) throw apiError_("INVALID_REQUEST", "The collection request is invalid.");
+    var data = request.action === "refresh" ? refreshArtistCollection_() : withLock_(function () {
+      var project = project_();
+      if (request.action === "status") return artistStatus_(project);
+      return importArtist_(project, imageInput_(payload.image, EXPOSURE_CONFIG_.maxOriginalBytes, false));
+    });
+    return { ok: true, data: data };
+  } catch (error) {
+    return { ok: false, error: {
+      code: error && error.exposureCode_ ? error.exposureCode_ : "ARCHIVE_UNAVAILABLE",
+      message: error && error.exposureCode_ ? error.message : "The collection request could not be confirmed. Please retry."
+    } };
+  }
+}
+
+function artistStatus_(project) {
+  return {
+    artistCount: readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders).filter(function (source) {
+      return source.kind === "artist" && isEligible_(source);
+    }).length,
+    maxOriginalBytes: EXPOSURE_CONFIG_.maxOriginalBytes,
+    folders: {
+      root: ArchiveDrive.getFolderById(PropertiesService.getScriptProperties().getProperty("EXPOSURE_ROOT_FOLDER_ID")).getUrl(),
+      artist: project.artist.getUrl(), originals: project.originals.getUrl(), results: project.results.getUrl()
+    }
+  };
+}
+
+function importArtist_(project, image) {
+  var sources = readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders);
+  var existing = sources.filter(function (source) { return source.kind === "artist" && source.sha256 === image.hash; })[0];
+  if (existing && isEligible_(existing)) {
+    readSource_(existing);
+    return { imported: false, duplicate: true, artistCount: artistStatus_(project).artistCount, name: image.name };
+  }
+  // Artist uploads are deliberate owner operations, separate from the visitor
+  // intake budget. A deterministic name recovers an interrupted index write.
+  var filename = "artist-" + image.hash + "." + extension_(image.mimeType);
+  var files = project.artist.getFilesByName(filename);
+  var duplicate = files.hasNext();
+  var file;
+  if (duplicate) {
+    file = files.next();
+    var bytes = file.getBlob().getBytes();
+    if (bytes.length !== image.bytes.length || sha256_(bytes) !== image.hash || detectMime_(bytes) !== image.mimeType) {
+      throw apiError_("STORAGE_CONFLICT", "An artist photograph could not be verified. Check the collection before retrying.");
+    }
+  } else {
+    file = project.artist.createFile(Utilities.newBlob(image.bytes, image.mimeType, filename));
+  }
+  var record = Object.assign({}, existing || { createdAt: now_() }, {
+    sourceId: file.getId(), sha256: image.hash, nameJson: JSON.stringify(image.name), mimeType: image.mimeType,
+    byteLength: image.bytes.length, kind: "artist", eligible: true
+  });
+  writeRecord_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders, record);
+  return { imported: !duplicate, duplicate: duplicate, artistCount: artistStatus_(project).artistCount, name: image.name };
+}
+
 // Visible in the editor's Run menu. A public web visitor cannot pass this check.
 function setupProject() {
   requireOwner_();
@@ -110,7 +188,7 @@ function requireOwner_() {
   var active = String(Session.getActiveUser().getEmail() || "").trim().toLowerCase();
   var effective = String(Session.getEffectiveUser().getEmail() || "").trim().toLowerCase();
   if (!active || !effective || active !== effective) {
-    throw new Error("Run this operation from the Apps Script editor while signed into the archive owner's account.");
+    throw apiError_("OWNER_REQUIRED", "Open this page while signed into the archive owner's account, or run it in that account's Apps Script editor.");
   }
 }
 
@@ -119,32 +197,32 @@ function setupProject_() {
     var properties = PropertiesService.getScriptProperties();
     var rootId = properties.getProperty("EXPOSURE_ROOT_FOLDER_ID");
     var root;
-    if (rootId) root = DriveApp.getFolderById(rootId);
+    if (rootId) root = ArchiveDrive.getFolderById(rootId);
     else {
       // A globally same-named folder might already be shared. Start with a new
       // default-private root; all subsequent runs reuse this saved identity.
-      root = DriveApp.createFolder(EXPOSURE_CONFIG_.rootName);
+      root = ArchiveDrive.createFolder(EXPOSURE_CONFIG_.rootName);
       properties.setProperty("EXPOSURE_ROOT_FOLDER_ID", root.getId());
     }
-    var artist = setupFolder_(root, properties, "EXPOSURE_ARTIST_FOLDER_ID", "01 Artist photographs");
-    var originals = setupFolder_(root, properties, "EXPOSURE_ORIGINALS_FOLDER_ID", "02 Participant originals");
-    var results = setupFolder_(root, properties, "EXPOSURE_RESULTS_FOLDER_ID", "03 Double exposures");
+    var artist = setupFolder_(root, properties, "EXPOSURE_ARTIST_FOLDER_ID", "My_photos");
+    var originals = setupFolder_(root, properties, "EXPOSURE_ORIGINALS_FOLDER_ID", "participant_uploads");
+    var results = setupFolder_(root, properties, "EXPOSURE_RESULTS_FOLDER_ID", "Completed_double_exposures");
     var sheetId = properties.getProperty("EXPOSURE_SPREADSHEET_ID");
     var spreadsheet;
-    if (sheetId) spreadsheet = SpreadsheetApp.openById(sheetId);
+    if (sheetId) spreadsheet = ArchiveSheets.openById(sheetId);
     else {
       var existing = root.getFilesByName(EXPOSURE_CONFIG_.sheetName);
       while (existing.hasNext() && !spreadsheet) {
         var candidate = existing.next();
         if (candidate.getMimeType() === "application/vnd.google-apps.spreadsheet") {
-          spreadsheet = SpreadsheetApp.openById(candidate.getId());
+          spreadsheet = ArchiveSheets.openById(candidate.getId());
         }
       }
-      if (!spreadsheet) spreadsheet = SpreadsheetApp.create(EXPOSURE_CONFIG_.sheetName);
+      if (!spreadsheet) spreadsheet = ArchiveSheets.create(EXPOSURE_CONFIG_.sheetName);
       // Save the ID before moving it: a retry still finds a partially set-up Sheet.
       properties.setProperty("EXPOSURE_SPREADSHEET_ID", spreadsheet.getId());
     }
-    DriveApp.getFileById(spreadsheet.getId()).moveTo(root);
+    ArchiveDrive.getFileById(spreadsheet.getId()).moveTo(root);
     setupSheet_(spreadsheet, "Sources", EXPOSURE_CONFIG_.sourcesHeaders);
     setupSheet_(spreadsheet, "Submissions", EXPOSURE_CONFIG_.submissionsHeaders);
     setupSheet_(spreadsheet, "Usage", EXPOSURE_CONFIG_.usageHeaders);
@@ -409,7 +487,7 @@ function recoverOrCreate_(project, folder, filename, image) {
 
 function readSource_(source) {
   try {
-    var file = DriveApp.getFileById(source.sourceId);
+    var file = ArchiveDrive.getFileById(source.sourceId);
     if (file.getSize() > EXPOSURE_CONFIG_.maxOriginalBytes) throw new Error("Too large");
     var bytes = file.getBlob().getBytes();
     if (bytes.length > EXPOSURE_CONFIG_.maxOriginalBytes || sha256_(bytes) !== source.sha256 || detectMime_(bytes) !== source.mimeType) throw new Error("Changed source");
@@ -496,7 +574,7 @@ function project_() {
   var properties = PropertiesService.getScriptProperties();
   var ids = ["EXPOSURE_ARTIST_FOLDER_ID", "EXPOSURE_ORIGINALS_FOLDER_ID", "EXPOSURE_RESULTS_FOLDER_ID", "EXPOSURE_SPREADSHEET_ID"].map(function (key) { return properties.getProperty(key); });
   if (ids.some(function (id) { return !id; })) throw apiError_("NOT_CONFIGURED", "The artist has not connected the archive yet.");
-  var spreadsheet = SpreadsheetApp.openById(ids[3]);
+  var spreadsheet = ArchiveSheets.openById(ids[3]);
   var sources = spreadsheet.getSheetByName("Sources");
   var submissions = spreadsheet.getSheetByName("Submissions");
   if (!sources || !submissions) throw apiError_("NOT_CONFIGURED", "The archive index has not been set up yet.");
@@ -504,7 +582,7 @@ function project_() {
   ensureSubmissionHeaders_(submissions);
   // Add the ledger when an older deployment first opens its existing index.
   var usage = setupSheet_(spreadsheet, "Usage", EXPOSURE_CONFIG_.usageHeaders);
-  return { artist: DriveApp.getFolderById(ids[0]), originals: DriveApp.getFolderById(ids[1]), results: DriveApp.getFolderById(ids[2]), sources: sources, submissions: submissions, usage: usage };
+  return { artist: ArchiveDrive.getFolderById(ids[0]), originals: ArchiveDrive.getFolderById(ids[1]), results: ArchiveDrive.getFolderById(ids[2]), sources: sources, submissions: submissions, usage: usage };
 }
 
 function archiveLimits_() {
@@ -590,12 +668,12 @@ function reserveUsage_(project, key, kind, bytes) {
   project.usage.getRange(reservation._row || project.usage.getLastRow() + 1, 2).setNumberFormat("@");
   writeRecord_(project.usage, EXPOSURE_CONFIG_.usageHeaders, reservation);
   // Persist this reservation before a Drive write or a later index operation.
-  SpreadsheetApp.flush();
+  ArchiveSheets.flush();
 }
 
 function setupFolder_(root, properties, key, name) {
   var id = properties.getProperty(key);
-  if (id) return DriveApp.getFolderById(id);
+  if (id) return ArchiveDrive.getFolderById(id);
   var folders = root.getFoldersByName(name);
   var folder = folders.hasNext() ? folders.next() : root.createFolder(name);
   properties.setProperty(key, folder.getId());
@@ -650,10 +728,14 @@ function findRecord_(records, key, value) {
 function withLock_(callback) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) throw apiError_("BUSY", "The archive is busy. Please retry in a moment.");
-  try { return callback(); }
+  try {
+    ArchiveDrive.reset();
+    ArchiveSheets.reset();
+    return callback();
+  }
   finally {
     // Commit buffered Sheet writes before another request acquires the lock.
-    try { SpreadsheetApp.flush(); }
+    try { ArchiveSheets.flush(); }
     finally { lock.releaseLock(); }
   }
 }
