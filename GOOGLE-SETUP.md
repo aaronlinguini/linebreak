@@ -4,7 +4,9 @@ To test only the exposure effect now, open `local-test.html` with VS Code's Live
 
 If you copied an earlier version of `Code.gs`, replace it with the current file and save it so `setupProject` and `refreshArtistCollection` appear in the Run dropdown. If you manually installed an older manifest, replace it with the updated manifest too.
 
-The implementation has not been deployed into your Google account. Google services have been simulated in automated tests; that is not an independent security audit or a completed public-launch security review.
+The seven-file website is published at [Double exposure](https://aaronlinguini.github.io/double-exposure-online-project/) from [its public repository](https://github.com/aaronlinguini/double-exposure-online-project). The full working repository and its history remain local. The current Google backend, Bridge.html, and manifest have been saved in the existing Apps Script project. The published site URL, the four existing Drive folder IDs, and Live Server origins are configured there. `UPLOADS_PAUSED` is currently `true`.
+
+Setup is waiting at Google's unverified-app authorization screen; no permission was approved by the coding agent. The index, artist import, web-app deployment, frontend `/exec` URL, and real archive check are still outstanding. `My_photos` was empty when checked. Google services have been simulated in automated tests; that is not a completed live upload test or an independent security audit.
 
 ## Before authorizing
 
@@ -26,13 +28,13 @@ Keep these files together at the same site base address:
 - `drive-storage.js`
 - `drive-bridge.js`
 
-For example, the site might be `https://YOUR-USERNAME.github.io/YOUR-REPOSITORY/`. Keep the repository path in this address. `drive-bridge.js` must be publicly available at that address followed by `drive-bridge.js`.
+The site address is `https://aaronlinguini.github.io/double-exposure-online-project/`. Keep the repository path in this address. `drive-bridge.js` must be publicly available at that address followed by `drive-bridge.js`.
 
 The empty Google URL in `project-config.js` is intentional at this stage. The page disables uploads until its archive is connected; it never silently falls back to making unsaved results.
 
 ## 2. Create your Apps Script project
 
-Open [Google Apps Script](https://script.google.com/) under the Google account that will own the archive and create a new project.
+Open [Google Apps Script](https://script.google.com/) under the Google account that will own the archive. Reuse the existing project when continuing this setup; do not create a duplicate. For a fresh installation, the required files are:
 
 1. Replace the contents of `Code.gs` with [google-apps-script/Code.gs](google-apps-script/Code.gs).
 2. Add an **HTML** file named `Bridge`. Copy [google-apps-script/Bridge.html](google-apps-script/Bridge.html) into it.
@@ -120,6 +122,8 @@ const EXPOSURE_CONFIG = Object.freeze({
 Publish the updated file through GitHub Pages. The deployment URL is public configuration, not an account password or access token. Google account tokens and the private index remain on Google's side.
 
 ## 7. Run the live check
+
+Once owner authorization and deployment are complete and base photographs have been indexed, set `UPLOADS_PAUSED` to `false` in Script Properties for the following live check. Keep it `true` while preparation is incomplete.
 
 Open the published site in a private browser window, without signing that visitor into Google:
 

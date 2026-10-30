@@ -24,7 +24,7 @@ Before public use, check both library selection and native camera capture on an 
 
 The public page stays minimal and black, with no exposure sliders or collection-management panel. Source photographs are stored separately from finished exposures. A private Google Sheet records consent, source IDs, and each result. Exact duplicates share a source-pool entry; no image pairs with identical bytes. Pending and failed submissions can be retried without changing the selected base or duplicating the archived result.
 
-The code is not yet connected to a live Google deployment: `project-config.js` deliberately contains an empty endpoint until setup is complete. It disables uploads when unconfigured and does not present local processing as a successful archive save.
+The seven-file public page is published at [Double exposure](https://aaronlinguini.github.io/double-exposure-online-project/) from [its separate public repository](https://github.com/aaronlinguini/double-exposure-online-project). The working repository and its history are not uploaded there. The page is not yet connected to a live Google deployment: `project-config.js` deliberately contains an empty endpoint until authorization, deployment, and the archive check are complete. It disables uploads when unconfigured and does not present local processing as a successful archive save. See [the setup status](GOOGLE-SETUP.md) before continuing.
 
 For a local HTTP layout preview, run this in the project folder and open the printed address. A live archive additionally requires a deployed Google script, published bridge asset, and allowed preview origin as described in the setup guide:
 
