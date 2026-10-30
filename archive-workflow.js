@@ -1,7 +1,6 @@
 "use strict";
 
-// Keeps a submission's identity, selected base, and exact result through retries.
-// An exposure is complete only after the archive acknowledges that same result.
+// Keep the same photo, base and result when retrying a save.
 class ExposureArchiveWorkflow {
   constructor({ storage, render, settings, onProgress = () => {}, makeId = () => crypto.randomUUID() }) {
     this.storage = storage;
@@ -19,8 +18,7 @@ class ExposureArchiveWorkflow {
     if (this.busy || this.pending) throw new Error("Finish saving this photograph before adding another.");
     if (typeof allowReuse !== "boolean") throw new Error("The photograph sharing choice is invalid.");
     if (typeof monochrome !== "boolean") throw new Error("The black-and-white choice is invalid.");
-    // Keep the visitor's choice with this exposure, including retries after the
-    // controls change. Other treatment settings remain the artist's defaults.
+    // Save these settings with this exposure so retries cannot change them.
     const settings = Object.freeze({ ...this.settings, monochrome });
     this.operation = { submissionId: this.makeId(), file, allowReuse, settings,
       reuse: null, begin: null, result: null, receipt: null };
@@ -39,8 +37,7 @@ class ExposureArchiveWorkflow {
     try {
       return await this.run();
     } catch (error) {
-      // No new base was assigned, so there is no new exposure to finish.
-      // Keep the previous saved result available for download and another try.
+      // If no new base was found, keep the previous saved result.
       if (["NO_ALTERNATIVE_BASE", "BASE_UNAVAILABLE"].includes(error.code) &&
           !this.operation.begin && !this.operation.result) {
         this.operation = previous;

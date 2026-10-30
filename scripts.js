@@ -1,8 +1,6 @@
 "use strict";
 
-// Bounded light-addition approximation: decode sRGB, add each channel's light,
-// then clip each channel independently. This does not model an exact film stock
-// or recover a JPEG's original RAW data.
+// Add the light from both photos, then limit it to the display range.
 const ExposureMath = (() => {
   const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
   const srgbToLinear = (value) => value <= 0.04045
@@ -12,7 +10,7 @@ const ExposureMath = (() => {
     ? value * 12.92
     : 1.055 * value ** (1 / 2.4) - 0.055;
 
-  // A symmetric display-space contrast curve keeps both black and white fixed.
+  // Increase contrast without moving pure black or white.
   function contrastCurve(value, amount) {
     if (amount === 0 || value <= 0 || value >= 1) return value;
     const power = 2 ** (amount / 50);
@@ -58,8 +56,7 @@ const ExposureMath = (() => {
         let green = linearTable[base[index + 1]] * baseGain + linearTable[participant[index + 1]] * participantGain;
         let blue = linearTable[base[index + 2]] * baseGain + linearTable[participant[index + 2]] * participantGain;
         if (settings.monochrome) red = green = blue = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-        // A saturated channel must not darken the other channels. In particular,
-        // an already-white base stays white when a coloured exposure is added.
+        // Clip each colour separately so white stays white.
         output[index] = encode[Math.round(clamp(red) * 65535)];
         output[index + 1] = encode[Math.round(clamp(green) * 65535)];
         output[index + 2] = encode[Math.round(clamp(blue) * 65535)];
@@ -68,7 +65,6 @@ const ExposureMath = (() => {
     };
   }
 
-  // Artist trial for finished photographs; these constants are not a calibrated film response.
   const balancedParameters = Object.freeze({ maximumPower: 4 });
   function createBalancedMixer({ baseExposure = 0, participantExposure = 0, contrast = 12, monochrome = false, balanceStrength = 100 } = {}) {
     if (![baseExposure, participantExposure].every((value) => Number.isFinite(value) && value >= -3 && value <= 2)) {
@@ -78,7 +74,7 @@ const ExposureMath = (() => {
     if (!Number.isFinite(balanceStrength) || balanceStrength < 0 || balanceStrength > 100) throw new RangeError("Balance must be between 0 and 100.");
     if (typeof monochrome !== "boolean") throw new TypeError("Monochrome must be true or false.");
     const settings = { baseExposure, participantExposure, contrast, monochrome };
-    // Zero restores the saved additive operation exactly, including rounding.
+    // At zero, use the unchanged Current mixer.
     const additive = balanceStrength === 0 ? createMixer(settings) : null;
     const strength = balanceStrength / 100;
     const power = 1 + (balancedParameters.maximumPower - 1) * strength;
@@ -90,8 +86,7 @@ const ExposureMath = (() => {
       const brighter = Math.max(a, b);
       const darker = Math.min(a, b);
       if (brighter === 0) return 0;
-      // A power sum approaches the brighter value as suppression increases.
-      // Black contributes nothing; two dim inputs receive no extra shadow boost.
+      // Higher values favour the brighter input and reduce overlap.
       return brighter * (1 + (darker / brighter) ** power) ** (1 / power);
     }
     return function mix(base, participant, output, start = 0, end = base.length) {
@@ -109,8 +104,7 @@ const ExposureMath = (() => {
         const green = combineLight(ag, bg);
         const blue = combineLight(ab, bb);
         if (monochrome) {
-          // Combine channels before removing colour, so one source's luminance
-          // cannot suppress details that survive in the colour combination.
+          // Mix the colours before converting to grayscale to keep their detail.
           const grey = encodeLight(0.2126 * red + 0.7152 * green + 0.0722 * blue);
           output[index] = output[index + 1] = output[index + 2] = grey;
         } else {
@@ -126,14 +120,12 @@ const ExposureMath = (() => {
   return Object.freeze({ clamp, srgbToLinear, linearToSrgb, contrastCurve, coverCrop, outputSize, selectIndex, createMixer, createBalancedMixer, balancedVersion: "overlap-suppression-v2", balancedParameters });
 })();
 
-// The artist sets the default colour choice; visitors choose it before creating
-// an exposure. The Saved Current mixer and exposure settings stay fixed.
+// Starting settings for new exposures.
 const PROJECT_SETTINGS = Object.freeze({
   baseExposure: 0, participantExposure: 0, contrast: 12,
   monochrome: typeof EXPOSURE_CONFIG !== "undefined" && EXPOSURE_CONFIG.forceBlackAndWhite === true
 });
 
-// Shared by the archive page and the separate browser-only test page.
 function createExposureProcessor({ mixerFactory = ExposureMath.createMixer } = {}) {
   const MAX_BYTES = 30 * 1024 * 1024;
   const SOURCE_EDGE = 2400;
@@ -158,8 +150,7 @@ function createExposureProcessor({ mixerFactory = ExposureMath.createMixer } = {
       if (!image.naturalWidth || image.naturalWidth * image.naturalHeight > 80000000) {
         throw new Error("This photograph is too large to process safely. Export a smaller version and try again.");
       }
-      // naturalWidth/Height reflect the browser's decoded EXIF orientation.
-      // Turn portraits sideways before fitting either photograph to the frame.
+      // The browser has applied the photo's orientation. Rotate portraits.
       const portrait = image.naturalHeight > image.naturalWidth;
       const dimensions = ExposureMath.outputSize(
         portrait ? image.naturalHeight : image.naturalWidth,
@@ -170,7 +161,7 @@ function createExposureProcessor({ mixerFactory = ExposureMath.createMixer } = {
       source.width = dimensions.width;
       source.height = dimensions.height;
       const sourceContext = context(source);
-      // Transparent PNG areas contribute no light, rather than becoming white.
+      // Treat transparent areas as black (no exposure).
       sourceContext.fillStyle = "#000";
       sourceContext.fillRect(0, 0, source.width, source.height);
       if (portrait) {
@@ -185,8 +176,7 @@ function createExposureProcessor({ mixerFactory = ExposureMath.createMixer } = {
       thumbnail.width = thumbnailSize.width;
       thumbnail.height = thumbnailSize.height;
       context(thumbnail).drawImage(source, 0, 0, thumbnail.width, thumbnail.height);
-      // This resized working copy is for processing. The untouched original file
-      // is uploaded separately by the archive workflow.
+      // Process a smaller copy; keep the uploaded original unchanged.
       const blob = await new Promise((resolve) => source.toBlob(resolve, "image/jpeg", 0.97));
       if (!blob) throw new Error("The browser could not prepare this photograph.");
       const thumbnailUrl = thumbnail.toDataURL("image/jpeg", 0.85);
@@ -219,8 +209,7 @@ function createExposureProcessor({ mixerFactory = ExposureMath.createMixer } = {
   async function alignPhotos(basePhoto, participantPhoto, maxEdge) {
     const base = { ...basePhoto };
     const participant = { ...participantPhoto };
-    // Preserve both full frames. If aspect ratios differ, black padding adds no
-    // exposure. Reduce the output when needed instead of enlarging either photo.
+    // Fit both full photos. Black padding adds no light.
     const baseSize = ExposureMath.outputSize(base.width, base.height, maxEdge);
     const participantFitScale = Math.min(baseSize.width / participant.width, baseSize.height / participant.height);
     const scale = Math.min(1, 1 / participantFitScale);
@@ -257,7 +246,7 @@ function createExposureProcessor({ mixerFactory = ExposureMath.createMixer } = {
   async function processPixels(pair, settings) {
     const result = new ImageData(pair.width, pair.height);
     const mix = mixerFactory(settings);
-    // Yield between chunks so mobile browsers can paint and respond to controls.
+    // Let the browser respond between pixel batches.
     const chunk = 65536 * 4;
     for (let start = 0; start < result.data.length; start += chunk) {
       mix(pair.base, pair.participant, result.data, start, Math.min(result.data.length, start + chunk));
@@ -279,8 +268,7 @@ function createExposureProcessor({ mixerFactory = ExposureMath.createMixer } = {
   return Object.freeze({ loadPhoto, releasePhoto, develop });
 }
 
-// Rotate finished pixels only. Export before changing the displayed canvas so
-// an encoding failure leaves the current result and its download intact.
+// Finish the export before replacing the visible image.
 async function rotateExposureCanvas(canvas, quarterTurns = 1) {
   if (!Number.isInteger(quarterTurns) || quarterTurns < 0 || quarterTurns > 3) {
     throw new RangeError("Rotation must use zero to three clockwise quarter turns.");
@@ -418,8 +406,7 @@ function initializeExposureStudio() {
   async function renderSubmission({ base, settings }) {
     const basePhoto = await loadPhoto(fileFromBase(base));
     try {
-      // Keep the previous finished exposure visible until the new archive write
-      // succeeds. A failed retry must not display an unarchived result.
+      // Show the new image only after it has been saved.
       const preparedCanvas = document.createElement("canvas");
       return { ...await develop(basePhoto, state.participant, preparedCanvas, settings), preparedCanvas };
     } finally { releasePhoto(basePhoto); }

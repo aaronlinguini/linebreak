@@ -1,4 +1,3 @@
-/* Runs inside the Apps Script HTML-service iframe, not on the public page. */
 (() => {
   "use strict";
 
@@ -13,7 +12,7 @@
   if (!parsedOrigin || !["https:", "http:"].includes(parsedOrigin.protocol) ||
       parsedOrigin.origin !== parentOrigin || !/^[a-f0-9]{32}$/i.test(channel || "")) return;
 
-  // Apps Script inserts an additional iframe. The public website is window.top.
+  // Send messages to the website, outside Google's extra frames.
   const host = window.top;
   if (!host || host === window) return;
   const allowedActions = new Set(["bootstrap", "begin", "complete"]);

@@ -1,4 +1,3 @@
-/* Owner-only import page served by Google Apps Script. Authorization is enforced there. */
 (() => {
   "use strict";
   if (typeof document === "undefined" || !document.getElementById("artist-workspace")) return;

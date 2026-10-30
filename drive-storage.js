@@ -1,4 +1,3 @@
-/* Google Apps Script transport. Photo processing remains in scripts.js. */
 (() => {
   "use strict";
 
@@ -157,7 +156,7 @@
         }
         const origin = window.location.origin;
         let parentUrl;
-        try { parentUrl = new URL(origin); } catch { /* file: pages have no usable origin. */ }
+        try { parentUrl = new URL(origin); } catch { /* Files opened directly cannot connect to Google. */ }
         if (!parentUrl || !["https:", "http:"].includes(parentUrl.protocol) || parentUrl.origin !== origin) {
           reject(storageError("INVALID_ORIGIN", "Open this website over HTTP or HTTPS to connect to the archive."));
           return;
@@ -182,7 +181,7 @@
           }, this.config.connectionTimeoutMs),
         };
         this._listener = (event) => this._receive(event);
-        // Register before loading the iframe: its first ready message may arrive immediately.
+        // Listen before opening the frame so we don't miss its first message.
         window.addEventListener("message", this._listener);
         const iframe = document.createElement("iframe");
         iframe.className = "storage-bridge";
@@ -251,10 +250,9 @@
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           this._pending.delete(id);
-          // Never replay uploads automatically: the server may have saved them already.
+          // Do not resend automatically; Google may already have saved the photo.
           const error = storageError("REQUEST_TIMEOUT", "The archive did not respond in time. The request may have completed; retry the same submission.", { ambiguous: true, action });
-          // A reloaded iframe can retain its old WindowProxy while losing the bridge.
-          // Drop it so a deliberate retry establishes a fresh authenticated handshake.
+          // The frame may have reloaded. Reconnect before the user retries.
           this._disconnect(error);
           reject(error);
         }, this.config.requestTimeoutMs);
