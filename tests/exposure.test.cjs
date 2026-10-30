@@ -238,7 +238,7 @@ test("the saved Current + contrast checkpoint retains its exact pixels", () => {
 });
 
 test("balance zero reproduces Current + contrast exactly across colours, EV and monochrome", () => {
-  assert.equal(math.balancedVersion, "overlap-suppression-v1");
+  assert.equal(math.balancedVersion, "overlap-suppression-v2");
   assert.ok(Object.isFrozen(math.balancedParameters));
   assert.deepEqual({ ...math.balancedParameters }, { maximumPower: 4 });
   const ramp = Array.from({ length: 256 }, (_, value) => [value, 255-value, value*73%256, 255]).flat();
@@ -247,6 +247,38 @@ test("balance zero reproduces Current + contrast exactly across colours, EV and 
     for (const [baseExposure, participantExposure, contrast] of [[0,0,12],[-3,2,0],[1,-0.5,30]]) {
       const settings = { baseExposure, participantExposure, contrast, monochrome };
       assert.deepEqual(mixBalanced(ramp, other, { ...settings, balanceStrength: 0 }), mix(ramp, other, settings));
+    }
+  }
+});
+
+test("the monochrome correction preserves the approved colour output exactly", () => {
+  // Colour fixtures captured from a7f543e before changing monochrome order.
+  for (const fixture of [
+    { settings: { baseExposure: 0, participantExposure: 0, contrast: 12, balanceStrength: 100 }, output: [209,84,255,255,128,188,229,255,255,255,255,255,108,246,209,255] },
+    { settings: { baseExposure: -0.5, participantExposure: 1, contrast: 24, balanceStrength: 40 }, output: [255,124,236,255,192,164,255,255,255,255,236,255,118,255,186,255] },
+    { settings: { baseExposure: 1, participantExposure: -1, contrast: 0, balanceStrength: 75 }, output: [146,64,255,255,101,245,165,255,255,255,255,255,152,176,255,255] }
+  ]) assert.deepEqual(mixBalanced(first, second, { ...fixture.settings, monochrome: false }), fixture.output);
+});
+
+test("monochrome retains sign detail from the combined colour channels", () => {
+  const blueBackground = [80,120,220,255];
+  const redSign = [200,0,0,255];
+  const darkLettering = [20,20,20,255];
+  const sign = mixBalanced(blueBackground, redSign, { monochrome: true });
+  const lettering = mixBalanced(blueBackground, darkLettering, { monochrome: true });
+  assert.deepEqual(sign, [155,155,155,255]);
+  assert.deepEqual(lettering, [124,124,124,255]);
+  // a7f543e converted each source to gray first, leaving only 126 - 124 = 2.
+  assert.ok(sign[0] - lettering[0] >= 30, "colour channel detail must survive the monochrome conversion");
+});
+
+test("already-grayscale photographs keep identical colour and monochrome tones", () => {
+  const ramp = Array.from({ length: 256 }, (_, value) => [value,value,value,255]).flat();
+  const other = Array.from({ length: 256 }, (_, value) => [255-value,255-value,255-value,255]).flat();
+  for (const balanceStrength of [0,40,100]) {
+    for (const [baseExposure, participantExposure, contrast] of [[0,0,0],[0,0,12],[-3,2,30],[1,-0.5,12]]) {
+      const settings = { balanceStrength, baseExposure, participantExposure, contrast };
+      assert.deepEqual(mixBalanced(ramp, other, { ...settings, monochrome: true }), mixBalanced(ramp, other, { ...settings, monochrome: false }));
     }
   }
 });

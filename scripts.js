@@ -85,14 +85,14 @@ const ExposureMath = (() => {
     const gainA = 2 ** baseExposure;
     const gainB = 2 ** participantExposure;
     const encode = additive ? null : makeEncoder(contrast);
-    function combine(a, b) {
+    const encodeLight = (value) => encode[Math.round(clamp(value) * 65535)];
+    function combineLight(a, b) {
       const brighter = Math.max(a, b);
       const darker = Math.min(a, b);
       if (brighter === 0) return 0;
       // A power sum approaches the brighter value as suppression increases.
       // Black contributes nothing; two dim inputs receive no extra shadow boost.
-      const combined = brighter * (1 + (darker / brighter) ** power) ** (1 / power);
-      return encode[Math.round(clamp(combined) * 65535)];
+      return brighter * (1 + (darker / brighter) ** power) ** (1 / power);
     }
     return function mix(base, participant, output, start = 0, end = base.length) {
       if (base.length !== participant.length || base.length !== output.length || base.length % 4 !== 0) {
@@ -105,22 +105,25 @@ const ExposureMath = (() => {
       for (let index = start; index < end; index += 4) {
         const ar = linearTable[base[index]] * gainA, ag = linearTable[base[index + 1]] * gainA, ab = linearTable[base[index + 2]] * gainA;
         const br = linearTable[participant[index]] * gainB, bg = linearTable[participant[index + 1]] * gainB, bb = linearTable[participant[index + 2]] * gainB;
+        const red = combineLight(ar, br);
+        const green = combineLight(ag, bg);
+        const blue = combineLight(ab, bb);
         if (monochrome) {
-          const a = 0.2126 * ar + 0.7152 * ag + 0.0722 * ab;
-          const b = 0.2126 * br + 0.7152 * bg + 0.0722 * bb;
-          const grey = combine(a, b);
+          // Combine channels before removing colour, so one source's luminance
+          // cannot suppress details that survive in the colour combination.
+          const grey = encodeLight(0.2126 * red + 0.7152 * green + 0.0722 * blue);
           output[index] = output[index + 1] = output[index + 2] = grey;
         } else {
-          output[index] = combine(ar, br);
-          output[index + 1] = combine(ag, bg);
-          output[index + 2] = combine(ab, bb);
+          output[index] = encodeLight(red);
+          output[index + 1] = encodeLight(green);
+          output[index + 2] = encodeLight(blue);
         }
         output[index + 3] = 255;
       }
     };
   }
 
-  return Object.freeze({ clamp, srgbToLinear, linearToSrgb, contrastCurve, coverCrop, outputSize, selectIndex, createMixer, createBalancedMixer, balancedVersion: "overlap-suppression-v1", balancedParameters });
+  return Object.freeze({ clamp, srgbToLinear, linearToSrgb, contrastCurve, coverCrop, outputSize, selectIndex, createMixer, createBalancedMixer, balancedVersion: "overlap-suppression-v2", balancedParameters });
 })();
 
 // Exposure treatment is the artist's decision. Pairing is selected by Google.

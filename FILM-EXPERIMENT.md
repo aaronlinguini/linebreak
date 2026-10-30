@@ -51,13 +51,13 @@ Contrast can make existing differences more visible, but it also compresses subt
 
 ## Reduced overlap trial
 
-The trial decodes sRGB and applies separate EV multipliers as Current does. For each matching linear RGB channel, let `M` be the brighter adjusted value and `m` the darker. In black and white, it first measures the two source luminances. Haze reduction selects `p = 1 + 3 × balanceStrength / 100`; the combination is `M × (1 + (m / M)^p)^(1 / p)`, or zero when both inputs are black. This is a stable form of `(A^p + B^p)^(1 / p)`. The existing contrast curve follows the combination.
+The trial decodes sRGB and applies separate EV multipliers as Current does. For each matching linear RGB channel, let `M` be the brighter adjusted value and `m` the darker. Haze reduction selects `p = 1 + 3 × balanceStrength / 100`; the combination is `M × (1 + (m / M)^p)^(1 / p)`, or zero when both inputs are black. This is a stable form of `(A^p + B^p)^(1 / p)`. Colour encodes the three combined channels through the existing contrast curve. Black and white first combines all three RGB channels by that same rule, then calculates `Y = 0.2126R + 0.7152G + 0.0722B` from the combined linear values before contrast and encoding. This retains colour-channel distinctions during overlap instead of collapsing each source to gray first. It uses the unclipped combination, so it is not necessarily identical to converting an already clipped colour JPEG to gray.
 
 At 0%, the code dispatches the original Current mixer directly, preserving exact pixels and rounding. At higher values, extra overlapping light decreases continuously in **every tonal region**, including midtones. At 100%, `p = 4`, giving stronger local brightness dominance. The effect does not favor the first or second photograph. A source against black keeps Current's EV and contrast treatment. Increasing the control cannot brighten a pixel relative to a lower setting with the same inputs, EV, contrast, and colour choice.
 
 This removes the preceding trial's arbitrary dark-overlap boost. Dark plus dark can remain dark while a bright subject registers clearly in a dark area of the other photograph. It does not follow that two exposures should darken the positive image below the brighter source: adding light cannot do that under a monotonic response. The new result is darker **than addition**, with the separate contrast adjustment applied afterward.
 
-The settings download retains the internal `balanceStrength` field, renderer version `overlap-suppression-v1`, and model constant `maximumPower: 4`. Current + contrast and all three earlier experimental treatments remain unchanged and selectable.
+The settings download retains the internal `balanceStrength` field, renderer version `overlap-suppression-v2`, and model constant `maximumPower: 4`. Current + contrast and all three earlier experimental treatments remain unchanged and selectable.
 
 This is a visual approximation for finished photographs, not a measured emulsion response or a physical exposure sum. It can suppress similarly bright midtone detail as well as unwanted haze, so compare 0%, 50%, and 100% before choosing a strength. Colour is processed per channel; a bright area can still retain a colour tint. A JPEG cannot reveal the original scene exposure or film/development/scan response. Judge the light-table, skull, and colour pairs visually before replacing the public treatment.
 
@@ -109,6 +109,8 @@ The constants describe a visual trial for finished photographs. They are not mea
 Stock-specific calibration would require measured response data and controlled reference images. Exposure-duration and reciprocity effects cannot be reconstructed from the brightness of an arbitrary finished upload. They are not simulated by these generic curves. A gallery or a different hosting system would not by itself improve the exposure calculation.
 
 ## Return to the saved version
+
+The Reduced overlap version before the black-and-white conversion fix is named **`colour-overlap-checkpoint`**, pointing to **`a7f543e`**. Its colour pixels remain unchanged by the fix. That checkpoint also preserves the old source-luminance-first monochrome result, and the fix is recorded separately.
 
 The earlier Dark/light balance trial is named **`balance-v1-checkpoint`**, pointing to **`f9abbd7`**. It preserves its exact shadow-boost formula and control. Reduced overlap is a separate revision that can be undone directly after preserving later edits.
 

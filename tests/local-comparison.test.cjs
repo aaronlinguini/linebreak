@@ -60,7 +60,7 @@ function harness() {
       createMixer() { return "film"; }
     },
     ExposureMath: {
-      balancedVersion: "overlap-suppression-v1",
+      balancedVersion: "overlap-suppression-v2",
       balancedParameters: { maximumPower: 4 },
       createMixer() { return "linear"; },
       createBalancedMixer() { return "balanced"; }
@@ -122,7 +122,7 @@ test("trial settings affect only the trial, and downloads identify the completed
   assert.equal(recipe.schemaVersion, 1);
   assert.equal(recipe.reference.settings.baseExposure, 0);
   assert.equal(recipe.trial.settings.baseExposure, -0.5);
-  assert.equal(recipe.trial.rendererVersion, "overlap-suppression-v1");
+  assert.equal(recipe.trial.rendererVersion, "overlap-suppression-v2");
   assert.equal(recipe.reference.rendererVersion, "linear-addition-c6a65ba");
   assert.equal(recipe.reference.settings.contrast, 12);
   assert.equal(recipe.trial.settings.contrast, 12);
