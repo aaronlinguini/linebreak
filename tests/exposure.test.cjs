@@ -238,9 +238,9 @@ test("the saved Current + contrast checkpoint retains its exact pixels", () => {
 });
 
 test("balance zero reproduces Current + contrast exactly across colours, EV and monochrome", () => {
-  assert.equal(math.balancedVersion, "adaptive-addition-v1");
+  assert.equal(math.balancedVersion, "overlap-suppression-v1");
   assert.ok(Object.isFrozen(math.balancedParameters));
-  assert.equal(math.balancedParameters.shadowBoost, 0.65);
+  assert.deepEqual({ ...math.balancedParameters }, { maximumPower: 4 });
   const ramp = Array.from({ length: 256 }, (_, value) => [value, 255-value, value*73%256, 255]).flat();
   const other = Array.from({ length: 256 }, (_, value) => [255-value, value*31%256, value, 0]).flat();
   for (const monochrome of [false, true]) {
@@ -251,13 +251,18 @@ test("balance zero reproduces Current + contrast exactly across colours, EV and 
   }
 });
 
-test("balanced processing opens dark overlaps and limits bright overlaps at the same contrast", () => {
+test("overlap suppression removes the shadow boost and reduces overlap throughout the tonal range", () => {
   const pair = (a, b, balanced) => (balanced ? mixBalanced : mix)([a,a,a,255], [b,b,b,255], { baseExposure: 0, participantExposure: 0, contrast: 12, monochrome: true })[0];
-  for (const byte of [40,80]) assert.ok(pair(byte,byte,true) > pair(byte,byte,false), "dark overlap must become more visible");
-  assert.ok(Math.abs(pair(128,128,true) - pair(128,128,false)) <= 3, "the accepted middle-tone mixture should remain close");
-  for (const [a,b] of [[185,128],[185,185],[200,200],[220,200]]) {
-    assert.ok(pair(a,b,true) < pair(a,b,false), "bright overlap must add less than the saved treatment");
+  for (const [a,b] of [[40,40],[80,80],[128,128],[185,128],[185,185],[200,200],[220,200]]) {
+    assert.ok(pair(a,b,true) < pair(a,b,false), "suppression must be darker than saved addition, including dark overlaps");
+    const brighterSource = Math.max(pair(a,0,false), pair(0,b,false));
+    assert.ok(pair(a,b,true) >= brighterSource, "additional exposure must not darken the brighter single source at matching contrast");
   }
+  assert.equal(pair(0,0,true),0);
+  assert.ok(pair(40,40,true)<=40, "two dim inputs should stay dark without an arbitrary shadow boost");
+  assert.ok(Math.abs(pair(40,128,true)-pair(0,128,false))<=1, "a dim strip should leave the portrait's tone nearly unchanged");
+  const brightSource=pair(235,0,false);
+  assert.ok(Math.abs(pair(235,128,true)-brightSource)<Math.abs(pair(235,128,false)-brightSource), "a bright background should retain less midtone contamination");
 });
 
 test("balanced output is symmetric when source photos and EV settings are exchanged", () => {
@@ -283,7 +288,7 @@ test("a balanced photograph against black retains the saved single-source exposu
   }
 });
 
-test("every balanced grayscale pair is monotone with gradual neighbouring tones", () => {
+test("every grayscale pair is monotone in input and suppression strength without darkening below a source", () => {
   const base = [], partner = [];
   for (let secondByte=0; secondByte<256; secondByte++) {
     for (let firstByte=0; firstByte<256; firstByte++) {
@@ -291,9 +296,18 @@ test("every balanced grayscale pair is monotone with gradual neighbouring tones"
       partner.push(secondByte,secondByte,secondByte,255);
     }
   }
-  for (const balanceStrength of [50,100]) {
+  const black=new Uint8ClampedArray(base.length);
+  const floorA=mixBalanced(base,black,{monochrome:true,balanceStrength:0});
+  const floorB=mixBalanced(black,partner,{monochrome:true,balanceStrength:0});
+  let previous=null;
+  for (const balanceStrength of [0,25,50,75,100]) {
     const output = mixBalanced(base, partner, { monochrome: true, balanceStrength }, Float64Array);
     assert.ok(output.every((value) => Number.isFinite(value) && value>=0 && value<=255));
+    for(let index=0;index<output.length;index+=4) {
+      assert.ok(output[index]>=Math.max(floorA[index],floorB[index]), "suppression must respect the matching single-source floor");
+      if(previous) assert.ok(output[index]<=previous[index], "increasing suppression must never brighten an overlap");
+      assert.equal(output[index+3],255);
+    }
     for (let secondByte=0; secondByte<256; secondByte++) {
       for (let firstByte=1; firstByte<256; firstByte++) {
         const index = (secondByte*256+firstByte)*4;
@@ -302,6 +316,7 @@ test("every balanced grayscale pair is monotone with gradual neighbouring tones"
         assert.equal(output[index+3],255);
       }
     }
+    previous=output;
   }
 });
 

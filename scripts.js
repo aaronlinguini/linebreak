@@ -69,7 +69,7 @@ const ExposureMath = (() => {
   }
 
   // Artist trial for finished photographs; these constants are not a calibrated film response.
-  const balancedParameters = Object.freeze({ shadowBoost: 0.65, shadowRange: 0.09, highlightPivot: 0.45, retentionPower: 3.5 });
+  const balancedParameters = Object.freeze({ maximumPower: 4 });
   function createBalancedMixer({ baseExposure = 0, participantExposure = 0, contrast = 12, monochrome = false, balanceStrength = 100 } = {}) {
     if (![baseExposure, participantExposure].every((value) => Number.isFinite(value) && value >= -3 && value <= 2)) {
       throw new RangeError("Each exposure must be between -3 and +2 EV.");
@@ -81,17 +81,18 @@ const ExposureMath = (() => {
     // Zero restores the saved additive operation exactly, including rounding.
     const additive = balanceStrength === 0 ? createMixer(settings) : null;
     const strength = balanceStrength / 100;
+    const power = 1 + (balancedParameters.maximumPower - 1) * strength;
     const gainA = 2 ** baseExposure;
     const gainB = 2 ** participantExposure;
     const encode = additive ? null : makeEncoder(contrast);
     function combine(a, b) {
       const brighter = Math.max(a, b);
       const darker = Math.min(a, b);
-      const p = balancedParameters;
-      const highlightRoom = 1 / (1 + (brighter / p.highlightPivot) ** p.retentionPower);
-      const shadowReveal = p.shadowBoost * Math.exp(-brighter / p.shadowRange);
-      const retained = 1 + strength * (highlightRoom - 1 + shadowReveal);
-      return encode[Math.round(clamp(brighter + darker * retained) * 65535)];
+      if (brighter === 0) return 0;
+      // A power sum approaches the brighter value as suppression increases.
+      // Black contributes nothing; two dim inputs receive no extra shadow boost.
+      const combined = brighter * (1 + (darker / brighter) ** power) ** (1 / power);
+      return encode[Math.round(clamp(combined) * 65535)];
     }
     return function mix(base, participant, output, start = 0, end = base.length) {
       if (base.length !== participant.length || base.length !== output.length || base.length % 4 !== 0) {
@@ -119,7 +120,7 @@ const ExposureMath = (() => {
     };
   }
 
-  return Object.freeze({ clamp, srgbToLinear, linearToSrgb, contrastCurve, coverCrop, outputSize, selectIndex, createMixer, createBalancedMixer, balancedVersion: "adaptive-addition-v1", balancedParameters });
+  return Object.freeze({ clamp, srgbToLinear, linearToSrgb, contrastCurve, coverCrop, outputSize, selectIndex, createMixer, createBalancedMixer, balancedVersion: "overlap-suppression-v1", balancedParameters });
 })();
 
 // Exposure treatment is the artist's decision. Pairing is selected by Google.

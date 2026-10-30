@@ -1,6 +1,6 @@
 # Trying the film response
 
-This page compares a new Dark/light balance trial with the saved Current addition, Revised smooth, the saved smooth-exposure treatment, and the supplied film-inspired proposal. It does not replace the public renderer or change the Google archive connection.
+This page compares a new Reduced overlap trial with the saved Current addition, Revised smooth, the saved smooth-exposure treatment, and the supplied film-inspired proposal. It does not replace the public renderer or change the Google archive connection.
 
 The exact supplied [proposal](references/supplied-proposal.md) and [original film.js code](references/supplied-film.cjs) are preserved as reference material. The proposal's installation instructions describe the other prototype; use the local comparison instructions below for this website.
 
@@ -9,12 +9,12 @@ The exact supplied [proposal](references/supplied-proposal.md) and [original fil
 Open `local-test.html` with VS Code's Live Server and choose two photographs. Both outputs use the same photographs, portrait rotation, full-frame fitting, dimensions, and JPEG export.
 
 - The left reference is the saved Current addition at **0 EV for both photographs** and **contrast 12**, matching the version saved before this trial.
-- The adjustable result starts with **Dark/light balance (trial)**, at **0 EV for each photograph**, **contrast 12**, and **balance 100%**.
-- Balance appears only for Dark/light balance. Its range is 0–100% in steps of 5. Higher values admit more overlap in shadows and less in highlights. At 0%, matching exposure, contrast, and colour settings reproduce the saved Current treatment.
-- Choose Dark/light balance, Current + contrast, Revised smooth, Saved smooth exposure, or the earlier Film curve, then move the base and participant exposure sliders separately. The range is −3 to +2 EV in half-stop steps. −1 EV halves that photograph's estimated exposure; +1 EV doubles it.
+- The adjustable result starts with **Reduced overlap (trial)**, at **0 EV for each photograph**, **contrast 12**, and **Haze reduction 100%**.
+- Haze reduction appears only for Reduced overlap. Its range is 0–100% in steps of 5. Higher values reduce overlapping light in shadows, midtones, and highlights; black still reveals the other photograph. At 0%, matching exposure, contrast, and colour settings reproduce the saved Current treatment.
+- Choose Reduced overlap, Current + contrast, Revised smooth, Saved smooth exposure, or the earlier Film curve, then move the base and participant exposure sliders separately. The range is −3 to +2 EV in half-stop steps. −1 EV halves that photograph's estimated exposure; +1 EV doubles it.
 - The black-and-white control starts from the artist's configuration and can be changed temporarily for the comparison. It affects both outputs.
-- The Contrast slider appears for Current + contrast and Dark/light balance, and ranges from 0 to 30. It changes only the right preview. The left stays at contrast 12; contrast zero on the right removes that tonal adjustment.
-- Reset restores Dark/light balance, balance 100%, contrast 12, and 0/0 EV. It preserves your colour choice. Download either result and the settings record before changing photographs if you want to keep the comparison.
+- The Contrast slider appears for Current + contrast and Reduced overlap, and ranges from 0 to 30. It changes only the right preview. The left stays at contrast 12; contrast zero on the right removes that tonal adjustment.
+- Reset restores Reduced overlap, Haze reduction 100%, contrast 12, and 0/0 EV. It preserves your colour choice. Download either result and the settings record before changing photographs if you want to keep the comparison.
 
 Nothing on this page is uploaded or automatically archived. Original files are unchanged.
 
@@ -24,9 +24,9 @@ Keep the same photo pair and colour choice while trying these combinations:
 
 | Adjustable renderer | Base EV | Participant EV | What it helps assess |
 | --- | ---: | ---: | --- |
-| Dark/light balance, balance 100%, contrast 12 | 0 | 0 | More shadow overlap and less highlight overlap than the saved left result |
-| Dark/light balance, balance 50%, contrast 12 | 0 | 0 | A smaller change in those directions |
-| Dark/light balance, balance 0%, contrast 12 | 0 | 0 | Exact agreement with the saved left result |
+| Reduced overlap, Haze reduction 100%, contrast 12 | 0 | 0 | Strongest overlap suppression; darker shared shadows and less mixing over bright areas |
+| Reduced overlap, Haze reduction 50%, contrast 12 | 0 | 0 | A gentler reduction of overlapping light |
+| Reduced overlap, Haze reduction 0%, contrast 12 | 0 | 0 | Exact agreement with the saved left result |
 | Current + contrast, contrast 12 | 0 | 0 | The saved method and fixed reference |
 | Current + contrast, contrast 0 | 0 | 0 | Original addition without the saved contrast adjustment |
 | Current + contrast, contrast 0 | −1 | −1 | Exposure reduction alone |
@@ -49,15 +49,17 @@ At contrast 12 and matching exposure/colour settings, it reproduces the left sav
 
 Contrast can make existing differences more visible, but it also compresses subtle shadow/highlight tones and cannot reconstruct highlights already clipped by additive processing. This is a visual contrast adjustment, not a calibrated analogue-film model. It retains source-order symmetry. The public page has no new slider.
 
-## Dark/light balance trial
+## Reduced overlap trial
 
-The new trial starts from Current's sRGB decoding and separate EV multipliers. For each matching linear RGB channel, let `M` be the brighter adjusted value and `m` the darker. In black and white, it uses the two source luminances instead. At full balance, it combines `M + m × h`, where `h = 1 / (1 + (M / 0.45)^3.5) + 0.65 × exp(−M / 0.09)`. The existing contrast curve follows the combination.
+The trial decodes sRGB and applies separate EV multipliers as Current does. For each matching linear RGB channel, let `M` be the brighter adjusted value and `m` the darker. In black and white, it first measures the two source luminances. Haze reduction selects `p = 1 + 3 × balanceStrength / 100`; the combination is `M × (1 + (m / M)^p)^(1 / p)`, or zero when both inputs are black. This is a stable form of `(A^p + B^p)^(1 / p)`. The existing contrast curve follows the combination.
 
-The multiplier is greater than one in dark overlaps, close to one through the lower middle tones, and smaller in bright overlaps. This admits more of both photographs where the pair is dark, while reducing the additional contribution beside a bright value. It changes smoothly, without a hard tone cutoff. The brighter/darker labels apply locally and do not give either photograph priority. A source against black keeps the same Current EV and contrast treatment.
+At 0%, the code dispatches the original Current mixer directly, preserving exact pixels and rounding. At higher values, extra overlapping light decreases continuously in **every tonal region**, including midtones. At 100%, `p = 4`, giving stronger local brightness dominance. The effect does not favor the first or second photograph. A source against black keeps Current's EV and contrast treatment. Increasing the control cannot brighten a pixel relative to a lower setting with the same inputs, EV, contrast, and colour choice.
 
-The Balance slider interpolates the multiplier between one at 0% and the full rule at 100%. Zero dispatches the original Current mixer directly so its pixels, including rounding, are preserved. The settings download records `balanceStrength`, renderer version `adaptive-addition-v1`, and the four model constants. Current + contrast and all three earlier experimental treatments remain unchanged and selectable.
+This removes the preceding trial's arbitrary dark-overlap boost. Dark plus dark can remain dark while a bright subject registers clearly in a dark area of the other photograph. It does not follow that two exposures should darken the positive image below the brighter source: adding light cannot do that under a monotonic response. The new result is darker **than addition**, with the separate contrast adjustment applied afterward.
 
-This is a controlled visual adjustment informed by the requested shadow/highlight behaviour, not a measured film response or a physical sum of exposure estimates. A source channel already at white can still clip, and a bright neutral area may retain some colour tint from the other photograph. It cannot reconstruct scene exposure from a finished JPEG. Compare those limits with the light-table photograph and the artist's analogue references before judging the result.
+The settings download retains the internal `balanceStrength` field, renderer version `overlap-suppression-v1`, and model constant `maximumPower: 4`. Current + contrast and all three earlier experimental treatments remain unchanged and selectable.
+
+This is a visual approximation for finished photographs, not a measured emulsion response or a physical exposure sum. It can suppress similarly bright midtone detail as well as unwanted haze, so compare 0%, 50%, and 100% before choosing a strength. Colour is processed per channel; a bright area can still retain a colour tint. A JPEG cannot reveal the original scene exposure or film/development/scan response. Judge the light-table, skull, and colour pairs visually before replacing the public treatment.
 
 ## The revised smooth trial
 
@@ -93,11 +95,11 @@ The constants describe a visual trial for finished photographs. They are not mea
 
 | Proposal idea | How it is handled here |
 | --- | --- |
-| Light accumulates at matching positions | All five treatments operate at matching pixels and treat source order symmetrically; Dark/light balance and Revised smooth use visual overlap rules. |
-| Dark areas leave room; bright areas can overwhelm detail | Dark/light balance increases shadow overlap and reduces highlight overlap relative to the saved Current treatment. Revised smooth offers another continuous overlap rule. Highlights do not physically shield the film from the next exposure. |
+| Light accumulates at matching positions | All five treatments operate at matching pixels and treat source order symmetrically; Reduced overlap and Revised smooth use visual overlap rules. |
+| Dark areas leave room; bright areas can overwhelm detail | Reduced overlap suppresses extra overlapping light throughout the tonal range while preserving a photograph against black. Revised smooth offers another continuous overlap rule. Highlights do not physically shield the film from the next exposure. |
 | Estimate exposure and apply a toe/midtone/shoulder response | Film curve preserves the supplied assumed model. Saved smooth retains its exposure response; Revised smooth adjusts overlap strength separately. |
 | Separate photographic-stop controls | Each photograph has its own EV slider on the local page. |
-| Keep the engine separate from the interface | Dark/light balance extends the additive maths in `scripts.js`; the other experimental maths live in `film-renderer.js`. Controls and layout remain in separate JavaScript and CSS files. |
+| Keep the engine separate from the interface | Reduced overlap extends the additive maths in `scripts.js`; the other experimental maths live in `film-renderer.js`. Controls and layout remain in separate JavaScript and CSS files. |
 | Fast processing | Reusable lookup tables and the shared chunked browser processing path support repeated previews. |
 | Black and white and colour | All five treatments can be compared with scans or digital photographs; the experimental colour responses remain approximate. |
 | Pairing, collection, and automatic archiving | The existing main-site Google workflow remains in place. Its live connection still requires the setup guide. There is no need to adopt the prototype's Node server or local `data/archive` storage. |
@@ -108,7 +110,9 @@ Stock-specific calibration would require measured response data and controlled r
 
 ## Return to the saved version
 
-The exact approved Current + contrast version immediately before Dark/light balance is named **`current-contrast-checkpoint`**, pointing to **`c1cd211`**. The left preview retains that treatment at contrast 12. To compare within the new page, choose Dark/light balance at 0% or Current + contrast at contrast 12 with 0/0 EV and the same colour choice. To restore the complete old code and interface, revert the Dark/light balance commit after preserving later edits; do not reconstruct it from memory.
+The earlier Dark/light balance trial is named **`balance-v1-checkpoint`**, pointing to **`f9abbd7`**. It preserves its exact shadow-boost formula and control. Reduced overlap is a separate revision that can be undone directly after preserving later edits.
+
+The exact approved Current + contrast version immediately before Dark/light balance is named **`current-contrast-checkpoint`**, pointing to **`c1cd211`**. The left preview retains that treatment at contrast 12. To compare within the new page, choose Reduced overlap at Haze reduction 0% or Current + contrast at contrast 12 with 0/0 EV and the same colour choice. To restore that complete code and interface, preserve later edits and restore or revert recorded changes; do not reconstruct it from memory.
 
 The exact version before Current + contrast is named **`before-current-contrast-trial`**, pointing to **`67ec935`**. It preserves the revised-smooth/current comparison. This contrast-control change is a separate commit, so it can be undone directly after preserving any later uncommitted edits.
 

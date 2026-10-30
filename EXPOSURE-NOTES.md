@@ -27,7 +27,7 @@ The website therefore reads the light values from both photographs at each match
 | White | Any tone | White, at the current project settings |
 | Any tone | White | White, at the current project settings |
 
-The public mixer calculates continuous light contributions per colour channel. Dark/light balance adjusts that local overlap using the two EV-adjusted channel values, or luminances in black and white. The saved smooth trial uses luminance for its exposure calculation and combines colour afterward; Revised smooth adjusts the local overlap after the saved single-source EV response. None needs to label whole objects or give a photograph priority. Numerical checks give the same result when the two aligned inputs and their EV settings are swapped. The base photograph defines the output frame; both full photographs fit inside it with black padding where needed. Swapping photographs with different aspect ratios can therefore change framing even though the pixel calculation is symmetric. Portraits rotate clockwise before fitting.
+The public mixer calculates continuous light contributions per colour channel. Reduced overlap uses a continuous power sum of the two EV-adjusted channel values, or luminances in black and white. The saved smooth trial uses luminance for its exposure calculation and combines colour afterward; Revised smooth adjusts the local overlap after the saved single-source EV response. None needs to label whole objects or give a photograph priority. Numerical checks give the same result when the two aligned inputs and their EV settings are swapped. The base photograph defines the output frame; both full photographs fit inside it with black padding where needed. Swapping photographs with different aspect ratios can therefore change framing even though the pixel calculation is symmetric. Portraits rotate clockwise before fitting.
 
 ## The current restored baseline
 
@@ -64,30 +64,32 @@ This model accepts both digital photographs and film scans. Neither source is gu
 
 The supplied film curve remains selectable beside the fixed saved Current reference. Reducing both photographs by one stop can make a bright light-table base less able to hide the other photo and can dim the other photo inside dark film strips.
 
-## Dark/light balance trial
+## Reduced overlap trial
 
-The default adjustable result now uses **Dark/light balance (trial)**. It starts at 0/0 EV, contrast 12, and balance 100%, beside the approved saved Current treatment at 0/0 EV and contrast 12. Its purpose is to increase overlap in dark areas and reduce it in bright areas while keeping more of Current's middle-tone detail.
+The default adjustable result uses **Reduced overlap (trial)**. It starts at 0/0 EV, contrast 12, and **Haze reduction 100%**, beside the approved saved Current treatment at 0/0 EV and contrast 12. It removes the earlier dark-overlap boost and reduces extra overlapping light throughout shadows, midtones, and highlights.
 
-It decodes each source channel to linear light and applies the source's ordinary `2 ** EV` multiplier. In black and white it first measures each source's linear luminance. Let `M` be the brighter adjusted value, `m` the darker, and `s = balanceStrength / 100`:
+It decodes each source channel to linear light and applies the ordinary `2 ** EV` multiplier. In black and white it first measures each source's linear luminance. Let `M` be the brighter adjusted value, `m` the darker, and `s = balanceStrength / 100`:
 
 ```text
-h = 1 + s × (1 / (1 + (M / 0.45)^3.5) − 1 + 0.65 × exp(−M / 0.09))
-combined = M + m × h
+p = 1 + 3 × s
+combined = M × (1 + (m / M)^p)^(1 / p)
 ```
 
-The existing Current encoding and display-space contrast curve then produce the finished channels. The multiplier boosts dark overlap, stays close to addition through lower middle tones, and gradually reduces additional contribution in highlights. Both photographs follow the same local rule, so exchanging the aligned sources and their EV values does not change the result. A source against black retains Current's treatment at the same EV and contrast settings. There is no hard brightness cutoff or whole-image opacity reduction.
+Both black inputs produce zero. This is a stable power sum, equivalent to `(A^p + B^p)^(1 / p)`. Current's encoding and separate display-space contrast curve then produce the finished channels. It has no hard brightness cutoff and no whole-image opacity reduction. Exchanging aligned sources and their EV values gives the same result.
 
-Balance 0% dispatches the original Current mixer directly, preserving its exact output and rounding. At 0/0 EV and contrast 12 it matches the saved left reference. Balance and contrast affect only the trial; the older three experimental treatments do not use either local adjustment. The settings record saves `balanceStrength`, renderer version `adaptive-addition-v1`, and constants `shadowBoost: 0.65`, `shadowRange: 0.09`, `highlightPivot: 0.45`, and `retentionPower: 3.5`.
+Haze reduction 0% dispatches the original Current mixer directly, preserving exact output and rounding. Increasing it continuously reduces the added light where both sources contribute. At 100%, the power is four and the local brighter value dominates more strongly. A source against black retains Current's treatment at the same EV and contrast settings. This darkens shared shadows relative to addition, but it also suppresses similarly bright midtone details; the control is not restricted to highlights.
 
-This rule is a visual approximation informed by the requested behaviour, not a calibrated emulsion model or a literal accumulation of latent exposures. At nonzero balance, two half-exposure copies need not reproduce one original photograph. The colour calculation is per channel: a source channel already at white still clips, and highlight colour tint need not disappear. More shadow contribution can also brighten low-tone overlap. Finished scans and digital JPEGs do not supply enough information to guarantee a film match.
+The relevant film distinction is dark plus dark versus dark plus a bright subject. The first generally stays dark; in the second the subject can register strongly. Adding exposure does not darken the finished positive below its brighter source under a monotonic response. Before the separate contrast adjustment, this rule likewise stays at or above that source value, while reducing the excessive brightening of addition. [ILFORD's silhouette explanation](https://www.ilfordphoto.com/taking-a-double-exposure/) motivates the intended visible relationship, not the particular power-sum formula.
 
-The approved version before this trial is preserved as **`current-contrast-checkpoint`** at **`c1cd211`**. Its code can be restored directly, and its contrast-12 treatment remains available in the comparison page.
+The settings record retains the internal `balanceStrength` name, renderer version `overlap-suppression-v1`, and `maximumPower: 4`. This is an artistic approximation for finished scans and digital photographs, not a calibrated emulsion or physical sum of latent exposure. At nonzero reduction, two half-exposure copies need not reproduce one original. Per-channel colour can retain highlight tint, and finished JPEG values cannot reconstruct the scene exposure or film/development/scan response.
+
+The earlier Dark/light balance implementation, including its arbitrary shadow boost, is preserved as **`balance-v1-checkpoint`** at **`f9abbd7`**. The approved Current + contrast version is preserved as **`current-contrast-checkpoint`** at **`c1cd211`**. The left preview still uses its contrast-12 treatment.
 
 ## Current addition with adjustable contrast
 
 The saved **Current + contrast** treatment remains selectable beside the fixed saved Current reference. Both use the existing additive pixel calculation in `scripts.js`. The right Contrast slider ranges from 0 to 30; the left stays at contrast 12. At contrast 12 and matching EV/colour settings, they produce the same pixels. Contrast zero on the right recovers the original unadjusted addition. The renderer version remains `linear-addition-c6a65ba`, and the recipe records the selected value in `settings.contrast`.
 
-The existing display-space contrast curve fixes black, white, and middle gray. Positive contrast makes darker tones darker and lighter tones lighter after addition; it does not use the smooth treatments' stronger local source suppression. This preserves Current's overlap operation while allowing its contrast to be judged separately. The adjustment can still compress subtle tones and cannot recover a channel already clipped by addition. It is an artistic tonal adjustment rather than a calibrated film response. Dark/light balance uses the same contrast control after its own combination; the three earlier film/smooth treatments use neutral contrast and keep their existing algorithms. The public page remains unchanged.
+The existing display-space contrast curve fixes black, white, and middle gray. Positive contrast makes darker tones darker and lighter tones lighter after addition; it does not use the smooth treatments' stronger local source suppression. This preserves Current's overlap operation while allowing its contrast to be judged separately. The adjustment can still compress subtle tones and cannot recover a channel already clipped by addition. It is an artistic tonal adjustment rather than a calibrated film response. Reduced overlap uses the same contrast control after its own combination; the three earlier film/smooth treatments use neutral contrast and keep their existing algorithms. The public page remains unchanged.
 
 The exact version before this change is saved as **`before-current-contrast-trial`** at **`67ec935`**. The contrast trial is a separate change that can be undone directly.
 

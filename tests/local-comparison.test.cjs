@@ -60,8 +60,8 @@ function harness() {
       createMixer() { return "film"; }
     },
     ExposureMath: {
-      balancedVersion: "adaptive-addition-v1",
-      balancedParameters: { shadowBoost: 0.65, shadowRange: 0.09, highlightPivot: 0.45, retentionPower: 3.5 },
+      balancedVersion: "overlap-suppression-v1",
+      balancedParameters: { maximumPower: 4 },
       createMixer() { return "linear"; },
       createBalancedMixer() { return "balanced"; }
     },
@@ -122,12 +122,12 @@ test("trial settings affect only the trial, and downloads identify the completed
   assert.equal(recipe.schemaVersion, 1);
   assert.equal(recipe.reference.settings.baseExposure, 0);
   assert.equal(recipe.trial.settings.baseExposure, -0.5);
-  assert.equal(recipe.trial.rendererVersion, "adaptive-addition-v1");
+  assert.equal(recipe.trial.rendererVersion, "overlap-suppression-v1");
   assert.equal(recipe.reference.rendererVersion, "linear-addition-c6a65ba");
   assert.equal(recipe.reference.settings.contrast, 12);
   assert.equal(recipe.trial.settings.contrast, 12);
   assert.equal(recipe.trial.settings.balanceStrength, 100);
-  assert.deepEqual(recipe.trial.modelParameters, { shadowBoost: 0.65, shadowRange: 0.09, highlightPivot: 0.45, retentionPower: 3.5 });
+  assert.deepEqual(recipe.trial.modelParameters, { maximumPower: 4 });
   assert.equal(recipe.sources.base.name, "base.jpg");
   assert.equal(recipe.sources.base.originalWidth, 400);
   assert.equal(recipe.sources.base.workingWidth, 600);

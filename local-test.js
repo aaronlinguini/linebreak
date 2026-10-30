@@ -53,7 +53,7 @@ function initializeLocalExposureTest() {
     ui.balance.disabled = state.working || ui.balanceControl.hidden;
   }
   function updateTrialTitle(settings = { renderer: ui.renderer.value, baseExposure: Number(ui.baseExposure.value), participantExposure: Number(ui.participantExposure.value), contrast: Number(ui.contrast.value), balanceStrength: Number(ui.balance.value) }) {
-    const names = { balanced: "dark/light balance", revised: "revised smooth", smooth: "saved smooth exposure", film: "earlier film curve", linear: "current addition" };
+    const names = { balanced: "reduced overlap", revised: "revised smooth", smooth: "saved smooth exposure", film: "earlier film curve", linear: "current addition" };
     const contrast = ["linear", "balanced"].includes(settings.renderer) ? ` · contrast ${settings.contrast}` : "";
     const balance = settings.renderer === "balanced" ? ` · ${settings.balanceStrength}%` : "";
     ui.trialTitle.textContent = `Trial · ${names[settings.renderer]}${balance}${contrast} · ${evLabel(settings.baseExposure)} / ${evLabel(settings.participantExposure)}`;

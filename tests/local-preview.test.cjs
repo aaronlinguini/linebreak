@@ -176,11 +176,19 @@ test("the local test page keeps CSS and JavaScript external and loads no archive
     assert.ok(fs.existsSync(path.join(root, reference[1].split("?")[0])));
     return reference[1];
   });
-  assert.deepEqual(references, ["project-config.js", "scripts.js?v=adaptive-addition-v1", "film-renderer.js?v=smooth-revised-v1", "local-test.js?v=adaptive-addition-v1"]);
+  assert.deepEqual(references, ["project-config.js", "scripts.js?v=overlap-suppression-v1", "film-renderer.js?v=smooth-revised-v1", "local-test.js?v=overlap-suppression-v1"]);
   assert.match(html, /<link\b[^>]*href="local-test\.css"/);
   const publicHtml = fs.readFileSync(path.join(root, "index.html"), "utf8");
   assert.doesNotMatch(publicHtml, /film-renderer\.js|local-test\.js|test-base-exposure/);
   assert.match(html, /Nothing is uploaded or automatically saved/);
+});
+
+test("the overlap control names its effect and explains both endpoints accessibly", () => {
+  const html = fs.readFileSync(path.join(root, "local-test.html"), "utf8");
+  assert.match(html, /<option\b[^>]*value="balanced"[^>]*selected>Reduced overlap \(trial\)<\/option>/);
+  assert.match(html, /<label\b[^>]*for="test-balance">Haze reduction /);
+  assert.match(html, /<input\b[^>]*id="test-balance"[^>]*aria-describedby="test-balance-help"/);
+  assert.match(html, /<p\b[^>]*id="test-balance-help"[^>]*>0%: saved addition\. Higher: less overlapping light in shadows, midtones and highlights; black still reveals the other photo\.<\/p>/);
 });
 
 test("a failed local selection clears the previous result, reports the error, and allows another try", async () => {
@@ -208,7 +216,7 @@ test("a failed local selection clears the previous result, reports the error, an
     window: { addEventListener() {} },
     URL: { createObjectURL() { return "blob:local-result"; }, revokeObjectURL(url) { revoked.push(url); } },
     PROJECT_SETTINGS: { baseExposure: 0, participantExposure: 0, contrast: 0, monochrome: false },
-    ExposureMath: { balancedVersion: "adaptive-addition-v1", balancedParameters: {} },
+    ExposureMath: { balancedVersion: "overlap-suppression-v1", balancedParameters: {} },
     FilmExposureMath: { version: "assumed-film-v1" },
     createExposureProcessor() {
       return {
