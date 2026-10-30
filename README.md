@@ -155,7 +155,7 @@ To undo a later committed change, ask to revert that change; Git can create an u
 Open `index.html` with Live Server to work on the home page and follow its links to the experiment pages. To fill an experiment page:
 
 1. Edit its `<title>` and `<h1>` to change the browser-tab title and visible heading. Change its link text in `index.html` and the experiment-page navigation separately; keep each `href` unchanged unless the file itself is renamed.
-2. Put a chosen photograph in a local folder such as `images/experiment-1/`. These folders and photos have not been added for you.
+2. Put photographs in `images/experiment-1/`, `images/experiment-2/`, or `images/experiment-3/` to match the corresponding page. These folders are ready locally.
 3. In `experiment-1.html`, remove the `<!--` and `-->` around the example `<section class="experiment-entry">` to display it. Set the image's `src` to the real filename and replace its `alt` description. Use the corresponding paths in the other two pages.
 4. Put your reflection in the empty `<p></p>`. Repeat the complete `experiment-entry` section for another photo/reflection pair. Keep layout changes in `styles.css`; no inline CSS or JavaScript is needed.
 
