@@ -111,8 +111,8 @@ test("increasing a neutral input never decreases the output", () => {
   assert.ok(output[output.length - 4] > output[128 * 4]);
 });
 
-test("the project uses neutral uncompensated exposure as its reference treatment", () => {
-  assert.deepEqual({ ...projectSettings }, { baseExposure: 0, participantExposure: 0, contrast: 0, monochrome: false });
+test("the public project uses the Saved Current treatment with contrast 12", () => {
+  assert.deepEqual({ ...projectSettings }, { baseExposure: 0, participantExposure: 0, contrast: 12, monochrome: false });
   assert.equal("shoulder" in math, false, "a shared RGB shoulder would dim unaffected highlight channels");
 });
 
@@ -135,20 +135,22 @@ test("a white base stays white for RGB endpoints, full channel ramps, and varied
 });
 
 test("a black base reveals all participant byte values without altering them at neutral exposure", () => {
+  const neutral = { ...projectSettings, contrast: 0 };
   const participant = Array.from({ length: 256 }, (_, value) => [value, 255 - value, (value * 73) % 256, 255]).flat();
   const black = new Uint8ClampedArray(participant.length);
   for (let index = 3; index < black.length; index += 4) black[index] = 255;
-  assert.deepEqual(mix(black, participant, projectSettings), participant);
-  assert.deepEqual(mix(participant, black, projectSettings), participant);
-  assert.deepEqual(mix([0, 0, 0, 255], [255, 0, 0, 255], projectSettings), [255, 0, 0, 255]);
+  assert.deepEqual(mix(black, participant, neutral), participant);
+  assert.deepEqual(mix(participant, black, neutral), participant);
+  assert.deepEqual(mix([0, 0, 0, 255], [255, 0, 0, 255], neutral), [255, 0, 0, 255]);
 });
 
 test("near-white regions retain their tone and have limited headroom for an added exposure", () => {
+  const neutral = { ...projectSettings, contrast: 0 };
   const nearWhite = [250, 250, 250, 255];
-  assert.deepEqual(mix(nearWhite, [0, 0, 0, 255], projectSettings), nearWhite);
-  assert.deepEqual(mix(nearWhite, [255, 0, 0, 255], projectSettings), [255, 250, 250, 255]);
-  assert.deepEqual(mix(nearWhite, [0, 0, 255, 255], projectSettings), [250, 250, 255, 255]);
-  assert.deepEqual(mix(nearWhite, [255, 255, 255, 255], projectSettings), [255, 255, 255, 255]);
+  assert.deepEqual(mix(nearWhite, [0, 0, 0, 255], neutral), nearWhite);
+  assert.deepEqual(mix(nearWhite, [255, 0, 0, 255], neutral), [255, 250, 250, 255]);
+  assert.deepEqual(mix(nearWhite, [0, 0, 255, 255], neutral), [250, 250, 255, 255]);
+  assert.deepEqual(mix(nearWhite, [255, 255, 255, 255], neutral), [255, 255, 255, 255]);
 });
 
 test("adding light to one channel never darkens another channel", () => {
@@ -168,7 +170,7 @@ test("neutral midtones add in linear light and clip at white", () => {
   const base = pairs.flatMap(([value]) => [value, value, value, 255]);
   const participant = pairs.flatMap(([, value]) => [value, value, value, 255]);
   assert.deepEqual(pairs.map(([a, b]) => referenceNeutral(a, b)), expected);
-  assert.deepEqual(mix(base, participant, projectSettings), expected.flatMap((value) => [value, value, value, 255]));
+  assert.deepEqual(mix(base, participant, { ...projectSettings, contrast: 0 }), expected.flatMap((value) => [value, value, value, 255]));
 });
 
 test("contrast preserves black and white and changes tones in the expected direction", () => {

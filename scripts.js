@@ -128,7 +128,7 @@ const ExposureMath = (() => {
 
 // Exposure treatment is the artist's decision. Pairing is selected by Google.
 const PROJECT_SETTINGS = Object.freeze({
-  baseExposure: 0, participantExposure: 0, contrast: 0,
+  baseExposure: 0, participantExposure: 0, contrast: 12,
   monochrome: typeof EXPOSURE_CONFIG !== "undefined" && EXPOSURE_CONFIG.forceBlackAndWhite === true
 });
 

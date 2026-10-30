@@ -106,7 +106,7 @@ test("the shared browser develop path uses the actual two-way light treatment an
   const second = { width: 6, height: 1, blob: { pixels: pixels([[255,0,0],[255,255,255],[0,0,255],[0,0,0],[128,128,128],[0,0,0]]) } };
   const output = canvas();
   const result = await processor.develop(base, second, output);
-  assert.deepEqual(Array.from(output.written.data), pixels([[255,255,255],[255,255,255],[0,0,255],[0,0,255],[176,176,176],[0,0,0]]));
+  assert.deepEqual(Array.from(output.written.data), pixels([[255,255,255],[255,255,255],[0,0,255],[0,0,255],[183,183,183],[0,0,0]]));
   assert.equal(result.width, 6);
   assert.equal(result.height, 1);
   assert.equal(result.blob.pixels, output.written.data);
@@ -130,7 +130,7 @@ test("local and archive processing preserve the full smaller photograph without 
   assert.deepEqual(scratch.draws[0].coordinates, [0,0,200,100]);
   assert.deepEqual(scratch.draws[1].coordinates, [25,0,150,100]);
   assert.deepEqual(scratch.fills, [[0,0,200,100], [0,0,200,100]]);
-  assert.deepEqual(Array.from(output.written.data.slice(0,4)), [80,100,120,255]);
+  assert.deepEqual(Array.from(output.written.data.slice(0,4)), [72,95,119,255]);
   assert.ok(decoded.every((bitmap) => bitmap.closed));
 });
 
@@ -176,7 +176,7 @@ test("the local test page keeps CSS and JavaScript external and loads no archive
     assert.ok(fs.existsSync(path.join(root, reference[1].split("?")[0])));
     return reference[1];
   });
-  assert.deepEqual(references, ["project-config.js", "scripts.js?v=result-rotation-v1", "film-renderer.js?v=smooth-revised-v1", "tone-adjustments.js?v=tone-curve-v2", "local-test.js?v=live-tones-v1"]);
+  assert.deepEqual(references, ["project-config.js", "scripts.js?v=saved-current-v1", "film-renderer.js?v=smooth-revised-v1", "tone-adjustments.js?v=tone-curve-v2", "local-test.js?v=live-tones-v1"]);
   assert.match(html, /<link\b[^>]*href="local-test\.css(?:\?[^"]*)?"/);
   const publicHtml = fs.readFileSync(path.join(root, "index.html"), "utf8");
   assert.doesNotMatch(publicHtml, /film-renderer\.js|local-test\.js|test-base-exposure/);
