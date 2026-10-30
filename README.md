@@ -75,7 +75,7 @@ JPEG, PNG, WebP, and AVIF are accepted, up to 30 MB per file. HEIC and RAW need 
 
 ## Optional local tone adjustments
 
-The approved starting preset is Reduced overlap at Haze reduction 20%, contrast 12, 0/0 EV, and black and white enabled. The **Tone adjustments** sliders are always visible below the mixing controls, with all five at zero. Zero bypasses the finishing stage completely; the exposure engine and its original pixel calculation are unchanged.
+The approved starting preset is Reduced overlap at Haze reduction 20%, contrast 12, 0/0 EV, and black and white enabled. The **Tone adjustments** sliders sit beside the trial image, above the other editing controls, with all five at zero. Previews stay in view while scrolling the controls. On phones, the trial preview stays above the controls and the saved reference appears below the editor. Zero bypasses the finishing stage completely; the exposure engine and its original pixel calculation are unchanged.
 
 Each slider ranges from −100 to +100. Positive brightens its tonal region; negative darkens it. Blacks and Whites affect near-black and near-white values, Shadows and Highlights affect broader dark and bright values, and Mids affects the middle range. Their smooth curve affects nearby tones too. These are simple finishing controls, not replicas of Lightroom's processing. Pure black and white remain fixed, and clipped detail cannot be recovered.
 
@@ -122,6 +122,8 @@ The approved Current + contrast version immediately before Dark/light balance is
 The earlier Dark/light balance version, including its shadow boost and original control, is preserved as **`balance-v1-checkpoint`** at **`f9abbd7`**. The Reduced overlap revision is recorded separately so the exact prior code can be restored.
 
 The Reduced overlap version before the black-and-white conversion fix is saved as **`colour-overlap-checkpoint`** at **`a7f543e`**. Its colour output is preserved by the fix; the old monochrome calculation can be restored from that checkpoint.
+
+The layout before the editing sidebar is saved as **`before-editor-sidebar`** at **`a6c0ebe`**. The change moves controls without changing the image processing.
 
 The version before visible tone controls and finished-image rotation is saved as **`before-result-rotation`** at **`747fcaf`**. The new revision can be undone directly after preserving later edits.
 

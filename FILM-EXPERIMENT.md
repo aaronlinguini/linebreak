@@ -65,7 +65,7 @@ This is a visual approximation for finished photographs, not a measured emulsion
 
 ## Optional finishing controls
 
-The always-visible **Tone adjustments** section adds five −100 to +100 sliders: Blacks, Shadows, Mids, Highlights, and Whites. They adjust the finished trial after the selected exposure mixer and its contrast curve, without changing that mixer's calculation. All five at zero return the original mixer directly, so there is no added pixel pass or rounding difference. The left reference remains untouched.
+The **Tone adjustments** sidebar beside the trial adds five −100 to +100 sliders: Blacks, Shadows, Mids, Highlights, and Whites. They adjust the finished trial after the selected exposure mixer and its contrast curve, without changing that mixer's calculation. All five at zero return the original mixer directly, so there is no added pixel pass or rounding difference. The left reference remains untouched.
 
 Positive values brighten a range and negative values darken it. A smooth, monotonic curve shifts near-black, shadow, middle, highlight, and near-white brightness anchors at 0.05, 0.22, 0.5, 0.78, and 0.95. The curve joins these anchors and fixes pure black and pure white. These are broad, related tonal controls; they do not reproduce Lightroom's algorithms or recover clipped information.
 
