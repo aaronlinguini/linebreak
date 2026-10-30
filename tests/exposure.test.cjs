@@ -451,25 +451,27 @@ test("empty and single-image collections have defined pairing behavior", () => {
 });
 
 test("HTML keeps styling and executable code in their separate files", () => {
-  for (const file of ["index.html", "google-apps-script/Bridge.html"]) {
+  for (const file of ["index.html", "double-exposure.html", "google-apps-script/Bridge.html"]) {
     const filename = path.join(root, file);
-    if (!fs.existsSync(filename)) continue;
+    assert.ok(fs.existsSync(filename), `${file} must exist`);
     const html = fs.readFileSync(filename, "utf8");
     assert.doesNotMatch(html, /<style\b/i, file);
     assert.doesNotMatch(html, /\sstyle\s*=/i, file);
     assert.doesNotMatch(html, /\son[a-z]+\s*=/i, file);
     assert.doesNotMatch(html, /javascript\s*:/i, file);
-    if (file === "index.html") {
+    if (!file.startsWith("google-apps-script/")) {
       assert.match(html, /<link\b[^>]*href=["']styles\.css(?:\?[^"']*)?["'][^>]*>/i);
+    }
+    if (file === "double-exposure.html") {
       assert.match(html, /<script\b[^>]*src=["']scripts\.js(?:\?[^"']*)?["']/i);
     }
     const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)];
-    assert.ok(scripts.length >= 1, file);
+    if (file !== "index.html") assert.ok(scripts.length >= 1, file);
     for (const [, attributes, body] of scripts) {
       const reference = attributes.match(/\bsrc=["']([^"']+)["']/i);
       assert.ok(reference, `${file} must use an external script`);
       assert.equal(body.trim(), "", `${file} must not contain JavaScript bodies`);
-      if (file === "index.html") {
+      if (!file.startsWith("google-apps-script/")) {
         assert.match(reference[1], /^[A-Za-z0-9._/-]+\.js(?:\?[A-Za-z0-9._=&-]+)?$/);
         const scriptPath = reference[1].split("?")[0];
         assert.ok(fs.existsSync(path.join(root, scriptPath)), `missing external script ${reference[1]}`);

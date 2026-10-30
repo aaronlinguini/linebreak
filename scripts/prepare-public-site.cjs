@@ -8,17 +8,18 @@ const ORIGINAL_PUBLIC_FILES = Object.freeze([
   "index.html", "styles.css", "scripts.js", "project-config.js",
   "archive-workflow.js", "drive-storage.js", "drive-bridge.js"
 ]);
-const PUBLIC_FILES = Object.freeze([...ORIGINAL_PUBLIC_FILES, "artist-import.js", "artist-import.css"]);
+const PREVIOUS_PUBLIC_FILES = Object.freeze([...ORIGINAL_PUBLIC_FILES, "artist-import.js", "artist-import.css"]);
+const PUBLIC_FILES = Object.freeze([...PREVIOUS_PUBLIC_FILES, "double-exposure.html"]);
 const OUTPUT_DIRECTORY = ".public-site";
 
-function validateHtml(source) {
+function validateHtml(source, page) {
   const html = source.replace(/<!--[\s\S]*?-->/g, "");
   if (/<style\b|\sstyle\s*=|\son[a-z]+\s*=|javascript\s*:/i.test(html)) {
-    throw new Error("index.html must keep styles and executable code in external files.");
+    throw new Error(`${page} must keep styles and executable code in external files.`);
   }
   for (const [, attributes, body] of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
     if (body.trim() || !/\bsrc\s*=\s*(?:"[^"]+"|'[^']+'|[^\s>]+)/i.test(attributes)) {
-      throw new Error("index.html must load JavaScript from external files only.");
+      throw new Error(`${page} must load JavaScript from external files only.`);
     }
   }
   for (const match of html.matchAll(/\b(?:src|href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
@@ -26,7 +27,7 @@ function validateHtml(source) {
     if (reference.startsWith("#")) continue;
     const filename = reference.split(/[?#]/)[0].replace(/^\.\//, "");
     if (!PUBLIC_FILES.includes(filename)) {
-      throw new Error(`index.html references an unpublished file: ${reference}`);
+      throw new Error(`${page} references an unpublished file: ${reference}`);
     }
   }
 }
@@ -38,7 +39,7 @@ function validatePreviousOutput(destination) {
     throw new Error(`${OUTPUT_DIRECTORY} must be a generated directory, not a file or symlink.`);
   }
   const entries = fs.readdirSync(destination).sort();
-  const knownVersion = [PUBLIC_FILES, ORIGINAL_PUBLIC_FILES].some((files) => {
+  const knownVersion = [PUBLIC_FILES, PREVIOUS_PUBLIC_FILES, ORIGINAL_PUBLIC_FILES].some((files) => {
     const expected = [...files].sort();
     return entries.length === expected.length && entries.every((name, index) => name === expected[index]);
   });
@@ -66,7 +67,9 @@ function preparePublicSite(root = path.resolve(__dirname, "..")) {
     if (name.endsWith(".js")) new vm.Script(bytes.toString("utf8"), { filename: name });
     return [name, bytes];
   }));
-  validateHtml(contents.get("index.html").toString("utf8"));
+  for (const [name, bytes] of contents) {
+    if (name.endsWith(".html")) validateHtml(bytes.toString("utf8"), name);
+  }
   validatePreviousOutput(destination);
 
   const staging = fs.mkdtempSync(path.join(root, ".public-site-stage-"));

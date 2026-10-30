@@ -4,74 +4,20 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#050505">
-    <title>Double Exposure</title>
-    <link rel="stylesheet" href="styles.css?v=visitor-monochrome-v1">
-    <script src="project-config.js" defer></script>
-    <script src="drive-storage.js" defer></script>
-    <script src="archive-workflow.js?v=visitor-monochrome-v1" defer></script>
-    <script src="scripts.js?v=visitor-monochrome-v1" defer></script>
+    <title>Home</title>
+    <link rel="stylesheet" href="styles.css?v=site-pages-v1">
   </head>
   <body>
-    <a class="skip-link" href="#workspace">Skip to photograph</a>
-
     <header class="site-header">
-      <h1>Double Exposure</h1>
+      <h1>Home</h1>
     </header>
 
-    <main id="workspace" class="workspace" aria-busy="false">
-      <div class="image-stage">
-        <p id="result-empty" class="empty-state">Use the bottons below to select a photo from your library or take a photo with your camera.</p>
-        <img id="participant-preview" hidden alt="Your selected photograph">
-        <canvas id="canvas" width="1" height="1" hidden aria-label="Your double exposure"></canvas>
-        <p id="busy-indicator" class="busy-indicator" hidden>Developing…</p>
-      </div>
-
-      <div id="output-options" class="output-options">
-        <label for="visitor-monochrome">
-          <input id="visitor-monochrome" type="checkbox" disabled>
-          Black and white
-        </label>
-      </div>
-
-      <div id="source-actions" class="actions source-actions">
-        <div class="file-picker">
-          <input id="participant-input" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="archive-note" disabled>
-          <label id="upload-label" class="upload-label" for="participant-input">Upload a photo</label>
-        </div>
-        <span class="choice-separator">or</span>
-        <div class="file-picker">
-          <input id="participant-camera-input" class="file-input" type="file" accept="image/jpeg" capture="environment" aria-describedby="archive-note" disabled>
-          <label id="camera-label" class="upload-label" for="participant-camera-input">Take a photo</label>
-        </div>
-      </div>
-
-      <div id="sharing-choice" class="sharing-choice" hidden>
-        <label for="allow-reuse">
-          <input id="allow-reuse" type="checkbox">
-          You may add my submitted photo to the base-photo library for future double exposures.
-        </label>
-        <div class="actions">
-          <button id="develop-button" class="save-button" type="button">Create double exposure</button>
-          <button id="cancel-selection" class="save-button" type="button">Back</button>
-        </div>
-      </div>
-
-      <div id="result-actions" class="actions" hidden>
-        <button id="download-button" class="save-button" type="button" disabled>Download image</button>
-        <button id="rotate-button" class="save-button" type="button" aria-label="Rotate the finished image clockwise by 90 degrees" disabled>Rotate 90°</button>
-        <button id="new-pairing-button" class="save-button" type="button">Try another pairing</button>
-        <button id="reset-button" class="save-button" type="button">Start over</button>
-      </div>
-
-      <div class="feedback">
-        <p id="status" class="status" role="status" aria-live="polite"></p>
-        <p id="error" class="error" role="alert" hidden></p>
-        <button id="retry-button" class="save-button" type="button" hidden>Retry</button>
-      </div>
+    <main class="workspace home-links">
+      <nav aria-label="Projects">
+        <ul>
+          <li><a href="double-exposure.html">Double exposure</a></li>
+        </ul>
+      </nav>
     </main>
-
-    <footer class="site-footer">
-      <p id="archive-note" class="privacy-note">The project saves submitted photos and finished double exposures. Adding your photo to the base-photo library is optional.</p>
-    </footer>
   </body>
 </html>

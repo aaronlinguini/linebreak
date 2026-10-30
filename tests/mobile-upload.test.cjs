@@ -111,7 +111,7 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
 }
 
 test("public photo choices are distinct and HTML has no inline code", () => {
-  const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  const html = fs.readFileSync(path.join(root, "double-exposure.html"), "utf8");
   assert.match(html, /id="participant-input"[^>]*>/);
   assert.match(html, /id="participant-camera-input"[^>]*capture="environment"/);
   assert.match(html, /class="choice-separator">or<\/span>/);
@@ -124,6 +124,15 @@ test("public photo choices are distinct and HTML has no inline code", () => {
     assert.match(attrs, /\bsrc="/);
     assert.equal(body.trim(), "");
   }
+});
+
+test("the separate home and exposure pages link both ways without starting the photo archive on Home", () => {
+  const home = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  const tool = fs.readFileSync(path.join(root, "double-exposure.html"), "utf8");
+  assert.match(home, /<a\b[^>]*href="double-exposure\.html"[^>]*>/i);
+  assert.match(tool, /<a\b[^>]*href="index\.html"[^>]*>\s*Home\s*<\/a>/i);
+  assert.doesNotMatch(home, /<script\b[^>]*src="(?:project-config|drive-storage|drive-bridge|archive-workflow|scripts)\.js(?:\?[^"]*)?"/i);
+  assert.doesNotMatch(home, /id="participant-input"|id="visitor-monochrome"/);
 });
 
 test("the visitor checkbox starts from the artist default and sends either colour mode at creation", async () => {

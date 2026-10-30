@@ -178,7 +178,7 @@ test("the local test page keeps CSS and JavaScript external and loads no archive
   });
   assert.deepEqual(references, ["project-config.js", "scripts.js?v=saved-current-v1", "film-renderer.js?v=smooth-revised-v1", "tone-adjustments.js?v=tone-curve-v2", "local-test.js?v=live-tones-v1"]);
   assert.match(html, /<link\b[^>]*href="local-test\.css(?:\?[^"]*)?"/);
-  const publicHtml = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  const publicHtml = fs.readFileSync(path.join(root, "double-exposure.html"), "utf8");
   assert.doesNotMatch(publicHtml, /film-renderer\.js|local-test\.js|test-base-exposure/);
   assert.match(html, /Nothing is uploaded or automatically saved/);
   assert.match(html, /<button\b[^>]*id="test-rotate"[^>]*>Rotate 90°<\/button>/);
@@ -206,7 +206,7 @@ test("tone sliders remain visible, labelled, neutral and excluded from the publi
     assert.match(html, new RegExp(`<label\\b[^>]*for="test-${name}"`));
   }
   assert.match(html, /<button\b[^>]*id="test-tones-reset"[^>]*>Reset tones<\/button>/);
-  const publicHtml = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  const publicHtml = fs.readFileSync(path.join(root, "double-exposure.html"), "utf8");
   assert.doesNotMatch(publicHtml, /tone-adjustments|test-tone-panel|test-shadows/);
 });
 

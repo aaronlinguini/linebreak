@@ -21,7 +21,11 @@ function snapshot(root) {
   return Object.fromEntries(fs.readdirSync(directory).map((name) => [name, fs.readFileSync(path.join(directory, name), "utf8")]));
 }
 
-test("the publication contains exactly the nine approved public files, byte for byte", (t) => {
+test("the publication contains exactly the ten approved public files, byte for byte", (t) => {
+  assert.deepEqual([...PUBLIC_FILES].sort(), [
+    "index.html", "double-exposure.html", "styles.css", "scripts.js", "project-config.js",
+    "archive-workflow.js", "drive-storage.js", "drive-bridge.js", "artist-import.js", "artist-import.css"
+  ].sort());
   const root = fixture(t);
   for (const name of ["private-photo.jpg", "local-test.html", ".env", "Code.gs", "Storage.gs", "Artist.html"]) fs.writeFileSync(path.join(root, name), "private");
   fs.mkdirSync(path.join(root, "google-apps-script"));
@@ -35,13 +39,17 @@ test("the publication contains exactly the nine approved public files, byte for 
   assert.deepEqual(fs.readdirSync(root).filter((name) => name.startsWith(".public-site-stage-")), []);
 });
 
-test("the preceding seven-file release upgrades to include only the two owner-page assets", (t) => {
-  const root = fixture(t);
-  const destination = preparePublicSite(root);
-  for (const name of ["artist-import.js", "artist-import.css"]) fs.unlinkSync(path.join(destination, name));
-  preparePublicSite(root);
-  assert.deepEqual(fs.readdirSync(destination).sort(), [...PUBLIC_FILES].sort());
-});
+for (const previousCount of [7, 9]) {
+  test(`the preceding ${previousCount}-file release upgrades to the ten-file publication`, (t) => {
+    const root = fixture(t);
+    const destination = preparePublicSite(root);
+    const removed = previousCount === 7 ? ["artist-import.js", "artist-import.css", "double-exposure.html"] : ["double-exposure.html"];
+    for (const name of removed) fs.unlinkSync(path.join(destination, name));
+    assert.equal(fs.readdirSync(destination).length, previousCount);
+    preparePublicSite(root);
+    assert.deepEqual(fs.readdirSync(destination).sort(), [...PUBLIC_FILES].sort());
+  });
+}
 
 test("rebuilding replaces the generated version without retaining stale file contents", (t) => {
   const root = fixture(t);
@@ -107,13 +115,15 @@ test("inline code, unpublished references and invalid JavaScript fail before rep
   const root = fixture(t);
   preparePublicSite(root);
   const previous = snapshot(root);
-  const index = fs.readFileSync(path.join(root, "index.html"), "utf8");
-  for (const addition of ["<script>alert(1)</script>", "<style>body{}</style>", '<p style="color:red">text</p>', '<button onclick="run()">run</button>', '<script src="local-test.js"></script>']) {
-    fs.writeFileSync(path.join(root, "index.html"), index + addition);
-    assert.throws(() => preparePublicSite(root), /external files|unpublished file/);
-    assert.deepEqual(snapshot(root), previous);
+  for (const page of ["index.html", "double-exposure.html"]) {
+    const original = fs.readFileSync(path.join(root, page), "utf8");
+    for (const addition of ["<script>alert(1)</script>", "<style>body{}</style>", '<p style="color:red">text</p>', '<button onclick="run()">run</button>', '<script src="local-test.js"></script>', '<a href="GOOGLE-SETUP.md">private notes</a>']) {
+      fs.writeFileSync(path.join(root, page), original + addition);
+      assert.throws(() => preparePublicSite(root), error => error.message.includes(page) && /external files|unpublished file/.test(error.message));
+      assert.deepEqual(snapshot(root), previous);
+    }
+    fs.writeFileSync(path.join(root, page), original);
   }
-  fs.writeFileSync(path.join(root, "index.html"), index);
   fs.writeFileSync(path.join(root, "scripts.js"), "const = ;");
   assert.throws(() => preparePublicSite(root), SyntaxError);
   assert.deepEqual(snapshot(root), previous);

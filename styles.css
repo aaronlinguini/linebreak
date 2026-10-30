@@ -48,6 +48,10 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 
 .site-header { padding-block: 44px 37px; }
 h1 { margin: 0; font-size: 13px; font-weight: 400; letter-spacing: .025em; }
+.page-nav { margin-top: 12px; color: var(--muted); font-size: 12px; }
+.page-nav a, .home-links a { color: inherit; text-underline-offset: 5px; }
+.home-links ul { margin: 0; padding: 0; list-style: none; }
+.home-links li + li { margin-top: 16px; }
 
 .image-stage {
   position: relative;
