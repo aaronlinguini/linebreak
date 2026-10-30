@@ -8,13 +8,15 @@ The implementation has not been deployed into your Google account. Google servic
 
 ## Before authorizing
 
-The current manifest requests account-wide Drive and Sheets permissions, plus email identity for the owner check. The code uses project folder IDs, but those IDs are not a Google-enforced folder-only permission boundary. Creating folders manually does not reduce the authorization scope. A project-only Google account avoids granting this script access to personal documents in your usual account. The public upload endpoint also needs abuse controls and a live load test before unrestricted launch. Do not treat these instructions as a reason to bypass a Google warning without reviewing the access requested.
+The current manifest requests account-wide Drive and Sheets permissions, plus email identity for the owner check. The code uses project folder IDs, but those IDs are not a Google-enforced folder-only permission boundary. Creating folders manually does not reduce the authorization scope. A project-only Google account avoids granting this script access to personal documents in your usual account. Global intake limits are implemented, but a live upload and load check is still needed before unrestricted launch. Do not treat these instructions as a reason to bypass a Google warning without reviewing the access requested.
 
 You can create and fill the folders before publishing. Connecting the website requires a public HTTPS site address.
 
 ## 1. Publish the website files
 
-Publish this project to GitHub Pages. Keep these files together at the same site base address:
+Run `node scripts/prepare-public-site.cjs` from this working project to prepare `.public-site/`. Publish only that generated directory's seven files. Do not push the full working repository or its history into the public website repository. Rebuild this directory after future website edits; the local comparison, backend source, tests, and documents stay outside it.
+
+Keep these files together at the same site base address:
 
 - `index.html`
 - `styles.css`
@@ -46,22 +48,22 @@ Do not replace the `__PARENT_ORIGIN__`, `__CHANNEL__`, or `__BRIDGE_SCRIPT_URL__
 In Google Drive, create a private parent folder and three private subfolders, for example:
 
 ```text
-Double exposure
-├── My photographs
-├── Participant originals
-└── Finished double exposures
+Double_exposure_web_project
+├── My_photos
+├── participant_uploads
+└── Completed_double_exposures
 ```
 
-Upload your base photographs into **My photographs**. Leave the other two subfolders empty. Keep sharing restricted; copying an address from the browser's address bar does not require making a folder public.
+Upload your base photographs into **My_photos**. Leave the other two subfolders empty. Keep sharing restricted; copying an address from the browser's address bar does not require making a folder public.
 
 Open each folder and copy its URL. The folder ID is the part after `/folders/`, excluding any `?` query string. In Apps Script's **Project Settings → Script Properties**, enter these exact keys with the corresponding IDs:
 
 | Property | Folder |
 | --- | --- |
-| `EXPOSURE_ROOT_FOLDER_ID` | The parent Double exposure folder |
-| `EXPOSURE_ARTIST_FOLDER_ID` | My photographs |
-| `EXPOSURE_ORIGINALS_FOLDER_ID` | Participant originals |
-| `EXPOSURE_RESULTS_FOLDER_ID` | Finished double exposures |
+| `EXPOSURE_ROOT_FOLDER_ID` | Double_exposure_web_project |
+| `EXPOSURE_ARTIST_FOLDER_ID` | My_photos |
+| `EXPOSURE_ORIGINALS_FOLDER_ID` | participant_uploads |
+| `EXPOSURE_RESULTS_FOLDER_ID` | Completed_double_exposures |
 
 With all four IDs supplied, `setupProject` uses your folders instead of creating new ones. It creates the private index spreadsheet and its column headers. The folder names can differ from these examples because the code uses their IDs. Only run it after deciding which account and authorization you are comfortable using.
 
@@ -109,6 +111,7 @@ Put that `/exec` URL into `project-config.js`:
 ```js
 const EXPOSURE_CONFIG = Object.freeze({
   googleScriptUrl: "https://script.google.com/macros/s/YOUR-DEPLOYMENT-ID/exec",
+  forceBlackAndWhite: true,
   connectionTimeoutMs: 30000,
   requestTimeoutMs: 120000
 });
@@ -150,6 +153,19 @@ For a local HTTP preview, add an exact additional origin such as `http://127.0.0
 For advanced artist exposure changes, edit `PROJECT_SETTINGS` in `scripts.js`. Visitors have no adjustment controls.
 
 ## Practical limits
+
+The backend runs on Google's infrastructure; you do not rent or run a server. Its global intake controls use these optional Script Properties:
+
+| Property | Default | Effect |
+| --- | --- | --- |
+| `REQUESTS_PER_MINUTE` | `120` | Total visitor API requests per fixed UTC minute, including retries and connection checks |
+| `SUBMISSIONS_PER_DAY` | `200` | New submissions per UTC day, including another pairing; retries reuse their submission |
+| `UPLOAD_BYTES_PER_DAY` | `1073741824` | New original and result file bytes admitted per UTC day; duplicate originals and recovered files are not charged again |
+| `UPLOADS_PAUSED` | `false` | Set to `true` to temporarily close visitor requests; owner setup and artist-photo import still work |
+
+The daily byte limit is **an adjustable intake allowance, not a 1 GB total archive limit**. Set it higher if needed; it does not change your Google storage plan. Day counters reset at midnight UTC. A reached byte allowance can pause completion after an original was saved; the existing retry can finish after the allowance resets or is raised. These limits contain total usage, but do not provide per-person fairness or prevent every form of abuse.
+
+A private **Usage** sheet records reservations before new submissions and files are written. It is added automatically to older indexes. Retrying reuses the same reservation; abandoned attempts may still consume allowance conservatively. An unused reservation from a previous day must fit today's allowance before a new file is created. Existing stored files are not charged retroactively. Do not manually edit Usage or the internal `EXPOSURE_REQUEST_WINDOW` property. Missing optional settings use defaults; malformed settings or accounting close uploads until corrected.
 
 This uses the storage allowance and Apps Script quotas of the owning Google account. It does not create unlimited storage or guarantee unlimited simultaneous uploads. Originals are preserved in their uploaded resolution; working copies and results use up to 2,400 pixels on the longest edge. Finished JPEG uploads are limited to 12 MB. Sources are selected from the private index; very large archives and sustained high visitor traffic need a separate load test.
 

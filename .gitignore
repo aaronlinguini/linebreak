@@ -20,3 +20,7 @@ secrets/
 # Private working photographs and incoming uploads
 private-photos/
 uploads/
+
+# Generated public-only release copies; source stays in this repository.
+.public-site/
+.public-site-stage-*/

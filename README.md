@@ -51,7 +51,7 @@ There are no inline styles, executable script bodies, or inline event handlers i
 
 ## Exposure treatment
 
-The main website's blend remains the restored linear-addition treatment. It works pixel by pixel on the aligned photographs: decode sRGB, scale each channel by `2 ** exposureEV`, add the two photographs, and clip each channel independently at white. At neutral settings, white stays white and black reveals the other photograph. This treatment is symmetric. The local page compares it with Revised smooth, the saved smooth-exposure treatment, and the supplied film-inspired model without replacing the public renderer.
+The main website uses the saved Current treatment: restored linear addition followed by contrast 12, at 0/0 EV. It now matches the local left-hand Saved Current preview. It works pixel by pixel on the aligned photographs: decode sRGB, scale each channel by `2 ** exposureEV`, add the two photographs, and clip each channel independently at white before the contrast curve. White stays white and black reveals the other photograph with the selected contrast applied. This treatment is symmetric. The experimental treatments and finishing sliders remain local only.
 
 The default Reduced overlap trial combines matching linear-light values through a continuous power sum. Haze reduction 0% uses the exact saved Current addition; increasing it reduces the extra light added where both photographs contribute, without dimming a photograph against black. At 100%, dark overlaps are darker than addition and a bright value admits less detail from the other photograph. The control also affects midtones and can remove some similarly bright details. It treats both photographs symmetrically and does not lower either photograph's overall opacity. The black-and-white option combines the RGB channels first using the same rule as colour, then measures their combined linear luminance before contrast and encoding. It no longer removes source colour differences before the overlap calculation; colour output itself is unchanged.
 
@@ -65,7 +65,7 @@ The saved smooth treatment estimates an exposure from each pixel's linear lumina
 
 The later inverse-Reinhard response was removed after review of the artist's analogue examples and website outputs. Numerical boundary checks did not establish a convincing analogue match. This rollback restores the earlier behaviour; it does not claim to finish the film simulation.
 
-`PROJECT_SETTINGS` in `scripts.js` defines the artist's treatment. Google selects a random eligible source; a second pairing avoids the immediately previous base. The participant interface has no exposure sliders, contrast controls, or colour options. The main treatment uses neutral contrast and zero exposure adjustment per photograph; the colour option comes from `project-config.js`.
+`PROJECT_SETTINGS` in `scripts.js` defines the artist's treatment. Google selects a random eligible source; a second pairing avoids the immediately previous base. The participant interface has no exposure sliders, contrast controls, or colour options. The main treatment uses contrast 12 and zero exposure adjustment per photograph; the colour option comes from `project-config.js`.
 
 A rendered JPEG does not retain its original scene exposure or a measured film/development/scan response. See [EXPOSURE-NOTES.md](EXPOSURE-NOTES.md) for the current model and limitations.
 
@@ -139,4 +139,10 @@ To undo a later committed change, ask to revert that change; Git can create an u
 
 ## Next stages
 
-Publish the static files, authorize and deploy the Google script, and complete a real upload/archive check. Judge the exposure treatment with the artist's photographs. A public gallery, a project-wide finite sequence, and participant-created or edited prompts are not implemented; the current scope is the shared source pool and private archive.
+Run `node scripts/prepare-public-site.cjs` to build `.public-site/` with exactly the seven approved public files. Publish this generated copy rather than this whole working repository or its history. Rebuild it after editing any public source file; it is intentionally ignored by local Git. The packager rejects missing or symlinked sources, invalid JavaScript, inline HTML scripts/styles, unpublished HTML references, and unexpected files in an existing output directory before replacement.
+
+The Google backend includes global request, daily submission, and daily new-file-byte limits plus an owner pause switch. These run inside Apps Script on Google; no rented server is needed. The daily byte allowance is an adjustable intake limit, not total Drive storage capacity. See [GOOGLE-SETUP.md](GOOGLE-SETUP.md) for settings and the live archive check, which is still required after deploying.
+
+The exact project before launch preparation is saved as **`before-launch-setup`** at **`9144f22`**. Image defaults, publication packaging, and archive limits are saved separately so each change can be undone.
+
+A public gallery, a project-wide finite sequence, and participant-created or edited prompts are not implemented; the current scope is the shared source pool and private archive.
