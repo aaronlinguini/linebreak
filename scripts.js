@@ -324,7 +324,7 @@ function initializeExposureStudio() {
     download: byId("download-button"), rotate: byId("rotate-button"), retry: byId("retry-button"),
     status: byId("status"), error: byId("error"), busy: byId("busy-indicator")
   };
-  const state = { working: false, ready: false, hasResult: false, participant: null,
+  const state = { working: false, connecting: false, ready: false, hasResult: false, participant: null,
     selectedFile: null, downloadUrl: null, rePairUnavailable: false };
   ui.monochrome.checked = PROJECT_SETTINGS.monochrome;
   ui.allowReuse.checked = false;
@@ -340,6 +340,11 @@ function initializeExposureStudio() {
     }
   });
   function announce(message) { ui.status.textContent = message; }
+  function restoreConnectionStatus() {
+    announce(state.connecting ? "Connecting…"
+      : state.ready || !storage.configured ? "" : "Photo submissions are temporarily unavailable.");
+    ui.retry.hidden = state.connecting || state.ready || !storage.configured;
+  }
   function clearError() { ui.error.hidden = true; ui.error.textContent = ""; ui.retry.hidden = true; }
   function showError(error) {
     ui.error.textContent = error instanceof Error ? error.message : "The save could not be confirmed.";
@@ -352,7 +357,7 @@ function initializeExposureStudio() {
     const pending = workflow.pending;
     const completed = state.hasResult && !pending;
     for (const input of [ui.participantInput, ui.cameraInput]) {
-      input.disabled = state.working || !state.ready || selected || pending;
+      input.disabled = state.working || selected || pending;
     }
     ui.sourceActions.hidden = selected || state.hasResult;
     ui.uploadInstructions.hidden = selected;
@@ -369,7 +374,7 @@ function initializeExposureStudio() {
     ui.newPairing.hidden = !completed || state.rePairUnavailable || workflow.operation?.receipt?.canRePair !== true;
     ui.newPairing.disabled = state.working || pending;
     ui.reset.disabled = state.working || pending;
-    ui.retry.disabled = state.working;
+    ui.retry.disabled = state.working || state.connecting;
     ui.busy.hidden = !state.working;
     ui.workspace.setAttribute("aria-busy", String(state.working));
     ui.workspace.classList.toggle("has-result", state.hasResult);
@@ -398,7 +403,7 @@ function initializeExposureStudio() {
     ui.participantPreview.hidden = true;
     ui.participantPreview.removeAttribute("src");
     clearResult();
-    announce("");
+    restoreConnectionStatus();
   }
 
   function fileFromBase(base) {
@@ -416,25 +421,27 @@ function initializeExposureStudio() {
     } finally { releasePhoto(basePhoto); }
   }
   async function connectArchive() {
+    if (state.connecting) return;
     clearError();
     if (!storage.configured) {
       state.ready = false;
-      announce("");
+      restoreConnectionStatus();
       refreshActions();
       return;
     }
-    setWorking(true, "Connecting…");
+    state.connecting = true;
+    restoreConnectionStatus();
+    refreshActions();
     try {
       const collection = await storage.connect();
       state.ready = collection.totalEligible > 0;
-      announce(state.ready ? "" : "Photo submissions are temporarily unavailable.");
-      ui.retry.hidden = state.ready;
     } catch (error) {
       state.ready = false;
-      ui.retry.hidden = false;
-      ui.error.hidden = true;
-      announce("Photo submissions are temporarily unavailable.");
-    } finally { setWorking(false); }
+    } finally {
+      state.connecting = false;
+      if (!state.working && !workflow.pending && !state.hasResult) restoreConnectionStatus();
+      refreshActions();
+    }
   }
   async function finishSubmission(action) {
     setWorking(true);
@@ -470,12 +477,12 @@ function initializeExposureStudio() {
 
   async function chooseParticipantPhoto(input) {
     const file = input.files?.[0];
-    if (!file || state.working || workflow.pending || !state.ready) return;
+    if (!file || state.working || workflow.pending) return;
     clearError();
     setWorking(true, "Preparing photograph…");
     let photo;
     try { photo = await loadPhoto(file); }
-    catch (error) { showError(error); ui.retry.hidden = true; announce(""); }
+    catch (error) { showError(error); restoreConnectionStatus(); }
     finally { input.value = ""; setWorking(false); }
     if (!photo) return;
     releasePhoto(state.participant);
@@ -485,7 +492,7 @@ function initializeExposureStudio() {
     ui.participantPreview.src = photo.thumbnail;
     ui.participantPreview.hidden = false;
     ui.resultEmpty.hidden = true;
-    announce("");
+    restoreConnectionStatus();
     refreshActions();
   }
   for (const input of [ui.participantInput, ui.cameraInput]) {
@@ -514,7 +521,7 @@ function initializeExposureStudio() {
     clearSelection();
   });
   ui.retry.addEventListener("click", async () => {
-    if (state.working) return;
+    if (state.working || state.connecting) return;
     clearError();
     if (workflow.pending) await finishSubmission(() => workflow.retry());
     else await connectArchive();

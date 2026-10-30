@@ -12,7 +12,8 @@ const source = fs.readFileSync(path.join(root, "scripts.js"), "utf8");
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 const makeFile = () => new File([Uint8Array.from([1, 2, 3])], "phone.jpg", { type: "image/jpeg" });
 
-function harness({ configured = true, canRePair = true, forceBlackAndWhite = false } = {}) {
+function harness({ configured = true, canRePair = true, forceBlackAndWhite = false,
+  connect = async () => ({ totalEligible: 2 }) } = {}) {
   const ids = ["workspace", "canvas", "result-empty", "participant-preview", "source-actions",
     "sharing-choice", "result-actions", "allow-reuse", "develop-button", "cancel-selection",
     "new-pairing-button", "reset-button", "participant-input", "participant-camera-input",
@@ -21,16 +22,19 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
   const handlers = new Map();
   const elements = new Map(ids.map((id) => [id, {
     hidden: true, disabled: false, checked: false, files: [], value: "", textContent: "",
-    classList: { toggle() {} }, setAttribute() {}, removeAttribute() {},
+    attributes: {}, classList: { toggle() {} },
+    setAttribute(name, value) { this.attributes[name] = value; }, removeAttribute(name) { delete this.attributes[name]; },
     getContext() { return { drawImage() {} }; },
     addEventListener(type, fn) { handlers.set(id + ":" + type, fn); }
   }]));
-  const calls = { start: [], rePair: 0, load: [], rotate: 0, downloads: [], revoked: [] };
+  const calls = { start: [], connect: 0, rePair: 0, load: [], rotate: 0, downloads: [], revoked: [] };
   const urls = new Map();
   let rotationGate;
   let rotationError;
   let startGate;
   let startError;
+  let photoGate;
+  let connectImpl = connect;
   let mounted = false;
   let workflow;
   const sandbox = vm.createContext({
@@ -50,7 +54,7 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
     EXPOSURE_CONFIG: { forceBlackAndWhite },
     GoogleDriveStorage: class {
       configured = configured;
-      async connect() { return { totalEligible: 2 }; }
+      async connect() { calls.connect++; return connectImpl(); }
       dispose() {}
     },
     ExposureArchiveWorkflow: class {
@@ -79,6 +83,7 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
   sandbox.createExposureProcessor = () => ({
     async loadPhoto(file) {
       calls.load.push(file);
+      if (photoGate) await photoGate;
       if (file.type !== "image/jpeg") throw new Error("Unsupported photograph.");
       return { name: file.name, width: 600, height: 400, thumbnail: "data:image/jpeg;base64,AA==" };
     },
@@ -100,6 +105,8 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
     failRotation(error) { rotationError = error; },
     blockStart(gate) { startGate = gate; },
     failStart(error) { startError = error; },
+    blockPhoto(gate) { photoGate = gate; },
+    setConnection(connect) { connectImpl = connect; },
     select(id, file) {
       const input = elements.get(id);
       input.files = file ? [file] : [];
@@ -300,7 +307,7 @@ test("explicit future-use choice and a second pairing do not reupload through th
   assert.equal(h.calls.start.length, 1);
 });
 
-test("back cancels the local selection before upload; unconfigured site shows no internal status", async () => {
+test("back cancels the local selection before upload; an unconfigured site still allows a local preview", async () => {
   const h = harness();
   await flush();
   h.elements.get("allow-reuse").checked = true;
@@ -314,12 +321,108 @@ test("back cancels the local selection before upload; unconfigured site shows no
   assert.equal(h.elements.get("upload-instructions").hidden, false);
   const offline = harness({ configured: false });
   await flush();
-  assert.equal(offline.elements.get("participant-input").disabled, true);
-  assert.equal(offline.elements.get("participant-camera-input").disabled, true);
+  assert.equal(offline.elements.get("participant-input").disabled, false);
+  assert.equal(offline.elements.get("participant-camera-input").disabled, false);
   assert.equal(offline.elements.get("status").textContent, "");
   await offline.select("participant-camera-input", makeFile());
-  assert.equal(offline.calls.load.length, 0);
+  assert.equal(offline.calls.load.length, 1);
+  assert.equal(offline.elements.get("participant-preview").hidden, false);
+  assert.equal(offline.elements.get("develop-button").disabled, true);
+  await offline.click("develop-button");
+  assert.equal(offline.calls.start.length, 0);
 });
+
+test("connecting leaves local photo choices and checkboxes usable without a duplicate image busy indicator", async () => {
+  let connected;
+  const connection = new Promise(resolve => { connected = resolve; });
+  const h = harness({ connect: () => connection });
+  assert.equal(h.elements.get("participant-input").disabled, false);
+  assert.equal(h.elements.get("participant-camera-input").disabled, false);
+  assert.equal(h.elements.get("allow-reuse").disabled, false);
+  assert.equal(h.elements.get("visitor-monochrome").disabled, false);
+  assert.equal(h.elements.get("status").textContent, "Connecting…");
+  assert.equal(h.elements.get("busy-indicator").hidden, true);
+  assert.notEqual(h.elements.get("busy-indicator").textContent, "Connecting…");
+  assert.equal(h.elements.get("workspace").attributes["aria-busy"], "false");
+  assert.equal(h.elements.get("retry-button").disabled, true);
+  h.elements.get("allow-reuse").checked = true;
+  h.elements.get("visitor-monochrome").checked = true;
+  await h.select("participant-camera-input", makeFile());
+  assert.equal(h.elements.get("participant-preview").hidden, false);
+  assert.equal(h.elements.get("allow-reuse").checked, true);
+  assert.equal(h.elements.get("visitor-monochrome").checked, true);
+  assert.equal(h.elements.get("develop-button").disabled, true);
+  await h.click("develop-button");
+  await h.click("retry-button");
+  assert.equal(h.calls.start.length, 0, "a local preview must not pretend to save an exposure");
+  assert.equal(h.calls.connect, 1, "Retry cannot start a second connection while one is pending");
+  connected({ totalEligible: 2 });
+  await flush();
+  assert.equal(h.elements.get("develop-button").disabled, false);
+  assert.equal(h.elements.get("status").textContent, "");
+  await h.click("develop-button");
+  assert.equal(h.calls.start.length, 1);
+  assert.equal(h.calls.start[0].choice.allowReuse, true);
+  assert.equal(h.calls.start[0].choice.monochrome, true);
+});
+
+for (const unavailable of ["failure", "empty collection"]) {
+  test(`an archive ${unavailable} retains an unavailable status through local selection and Back`, async () => {
+    const h = harness({ connect: async () => {
+      if (unavailable === "failure") throw new Error("Connection failed.");
+      return { totalEligible: 0 };
+    } });
+    await flush();
+    const message = "Photo submissions are temporarily unavailable.";
+    assert.equal(h.elements.get("status").textContent, message);
+    assert.equal(h.elements.get("participant-input").disabled, false);
+    assert.equal(h.elements.get("participant-camera-input").disabled, false);
+    assert.equal(h.elements.get("allow-reuse").disabled, false);
+    assert.equal(h.elements.get("visitor-monochrome").disabled, false);
+    assert.equal(h.elements.get("busy-indicator").hidden, true);
+    await h.select("participant-input", makeFile());
+    assert.equal(h.elements.get("participant-preview").hidden, false);
+    assert.equal(h.elements.get("status").textContent, message);
+    assert.equal(h.elements.get("develop-button").disabled, true);
+    assert.equal(h.elements.get("retry-button").hidden, false);
+    await h.click("develop-button");
+    assert.equal(h.calls.start.length, 0);
+    h.click("cancel-selection");
+    assert.equal(h.elements.get("status").textContent, message);
+    assert.equal(h.elements.get("retry-button").hidden, false);
+    assert.equal(h.elements.get("participant-input").disabled, false);
+    h.setConnection(async () => ({ totalEligible: 2 }));
+    await h.click("retry-button");
+    assert.equal(h.calls.connect, 2);
+    await h.select("participant-input", makeFile());
+    assert.equal(h.elements.get("develop-button").disabled, false);
+  });
+}
+
+for (const failConnection of [false, true]) {
+  test(`a connection ${failConnection ? "failure" : "success"} cannot overwrite active photo preparation`, async () => {
+    let resolveConnection, rejectConnection, finishPhoto;
+    const connection = new Promise((resolve, reject) => { resolveConnection = resolve; rejectConnection = reject; });
+    const h = harness({ connect: () => connection });
+    h.blockPhoto(new Promise(resolve => { finishPhoto = resolve; }));
+    const preparing = h.select("participant-input", makeFile());
+    assert.equal(h.elements.get("status").textContent, "Preparing photograph…");
+    assert.equal(h.elements.get("busy-indicator").hidden, false);
+    assert.equal(h.elements.get("participant-input").disabled, true);
+    if (failConnection) rejectConnection(new Error("Connection failed."));
+    else resolveConnection({ totalEligible: 2 });
+    await flush();
+    assert.equal(h.elements.get("status").textContent, "Preparing photograph…");
+    assert.equal(h.elements.get("busy-indicator").hidden, false);
+    assert.equal(h.elements.get("allow-reuse").disabled, true);
+    finishPhoto();
+    await preparing;
+    assert.equal(h.elements.get("participant-preview").hidden, false);
+    assert.equal(h.elements.get("busy-indicator").hidden, true);
+    assert.equal(h.elements.get("status").textContent, failConnection ? "Photo submissions are temporarily unavailable." : "");
+    assert.equal(h.elements.get("develop-button").disabled, failConnection);
+  });
+}
 
 test("rotation updates the finished preview and download without creating another archive submission", async () => {
   const h = harness();
