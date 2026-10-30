@@ -24,7 +24,7 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
   const folders = new Map();
   const books = new Map();
   const properties = new Map([["SITE_URL", "https://artist.example/exposures/"], ["PROJECT_OWNER_EMAIL", projectOwnerEmail]]);
-  const io = { driveCalls: 0, blobReads: 0, listings: 0, propertyReads: 0, sheetWrites: Object.create(null) };
+  const io = { driveCalls: 0, blobReads: 0, fingerprintReads: 0, listings: 0, propertyReads: 0, sheetWrites: Object.create(null) };
   const logs = [];
   const failures = { sheetWrite: null, fileCreate: false, participantMark: false, fileMove: false };
   const iterator = (values) => { let index = 0; return { hasNext: () => index < values.length, next: () => values[index++] }; };
@@ -65,6 +65,13 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
     getUrl() { return `https://drive.google.com/file/d/${this.id}/view`; }
     getDateCreated() { return this.date; }
     getLastUpdated() { return this.date; }
+    getSha256Checksum() { return this.driveChecksum === true ? crypto.createHash("sha256").update(this.blob.bytes).digest("hex") : this.driveChecksum || ""; }
+    getScanFingerprint() {
+      io.fingerprintReads++;
+      if (this.onFingerprint) this.onFingerprint();
+      return { sha256: this.getSha256Checksum(), header: signed(this.blob.bytes.subarray(0, 64)),
+        fullRead: this.rangeIgnored === true, transferredBytes: this.rangeIgnored ? this.getSize() : Math.min(64, this.getSize()) };
+    }
     isTrashed() { return this.trashed; }
     setTrashed(value) { this.trashed = value; return this; }
     getParents() { return iterator(this.folder ? [this.folder] : []); }
@@ -1060,6 +1067,112 @@ test("large new-folder batches make bounded progress without delaying every phot
   assert.equal(backend.data("bootstrap").artistCount, 11);
   assert.equal(backend.io.blobReads, 11, "the next request reuses ten cached files and reads only the deferred file");
   assert.ok(backend.properties.get("EXPOSURE_ARTIST_REFRESHED_AT"));
+});
+
+test("checksum-backed artist scans can index 113 photos using small probes instead of ten full reads", () => {
+  const backend = makeBackend(); backend.setup();
+  for (let index = 1; index <= 113; index++) backend.seed(index).driveChecksum = true;
+  const scan = clone(backend.refresh());
+  assert.equal(scan.artistCount, 113);
+  assert.equal(scan.complete, true);
+  assert.equal(backend.io.fingerprintReads, 113);
+  assert.equal(backend.io.blobReads, 0);
+  assert.ok(backend.properties.get("EXPOSURE_ARTIST_REFRESHED_AT"));
+});
+
+test("fingerprint count and elapsed-time budgets defer safely and resume from cached identities", () => {
+  for (const budget of ["count", "time"]) {
+    const backend = makeBackend(); backend.setup();
+    if (budget === "count") backend.sandbox.EXPOSURE_CONFIG_ = { ...backend.sandbox.EXPOSURE_CONFIG_, maxArtistFingerprintProbes: 2 };
+    for (let index = 1; index <= 3; index++) {
+      const file = backend.seed(index); file.driveChecksum = true;
+      if (budget === "time") file.onFingerprint = () => backend.advance(13000);
+    }
+    const first = clone(backend.refresh());
+    assert.equal(first.artistCount, 2);
+    assert.equal(first.complete, false);
+    assert.equal(first.deferred, 1);
+    assert.equal(backend.properties.has("EXPOSURE_ARTIST_REFRESHED_AT"), false);
+    const next = clone(backend.refresh());
+    assert.equal(next.artistCount, 3);
+    assert.equal(next.complete, true);
+    assert.equal(backend.io.fingerprintReads, 3, "cached files must not consume another probe");
+  }
+});
+
+test("ignored Range responses consume the full-read budget without a second download", () => {
+  const backend = makeBackend(); backend.setup();
+  for (let index = 1; index <= 11; index++) {
+    const file = backend.seed(index); file.driveChecksum = true; file.rangeIgnored = true;
+  }
+  const first = clone(backend.refresh());
+  assert.equal(first.artistCount, 10);
+  assert.equal(first.complete, false);
+  assert.equal(backend.io.fingerprintReads, 10);
+  assert.equal(backend.io.blobReads, 0, "the fingerprint already contains the verified full-response identity");
+  assert.equal(clone(backend.refresh()).artistCount, 11);
+  assert.equal(backend.io.fingerprintReads, 11);
+});
+
+test("ignored Range and failed response bodies count their actual bytes against the byte budget", () => {
+  for (const failed of [false, true]) {
+    const backend = makeBackend(); backend.setup();
+    backend.sandbox.EXPOSURE_CONFIG_ = { ...backend.sandbox.EXPOSURE_CONFIG_, maxArtistReadBytes: 20 };
+    for (let index = 1; index <= 3; index++) {
+      const file = backend.seed(index); file.driveChecksum = true; file.rangeIgnored = true;
+      if (failed) file.onFingerprint = () => {
+        throw Object.assign(new Error("Buffered error response"), { scanFullRead_: true, scanBytes_: 12 });
+      };
+    }
+    const scan = clone(backend.refresh());
+    assert.equal(scan.complete, false);
+    assert.equal(backend.io.fingerprintReads, failed ? 1 : 2);
+    assert.equal(scan.deferred, failed ? 2 : 1, "actual error bytes may exceed the listed photo's size");
+  }
+});
+
+test("failed full Range responses remain charged to the scan's full-read budget", () => {
+  const backend = makeBackend(); backend.setup();
+  for (let index = 1; index <= 11; index++) {
+    const file = backend.seed(index); file.driveChecksum = true;
+    file.onFingerprint = () => {
+      throw Object.assign(new Error("Invalid full response"), { scanFullRead_: true, scanBytes_: file.getSize() });
+    };
+  }
+  const scan = clone(backend.refresh());
+  assert.equal(scan.artistCount, 0);
+  assert.equal(scan.complete, false);
+  assert.equal(scan.deferred, 1);
+  assert.equal(backend.io.fingerprintReads, 10);
+});
+
+test("Drive SHA changes invalidate artist cache identity even when size and modified time stay the same", () => {
+  const backend = makeBackend(); backend.setup();
+  const artist = backend.seed(1); artist.driveChecksum = true;
+  const first = backend.begin(1, 22);
+  const pinned = backend.records("Submissions")[0].baseSha256;
+  artist.blob = new backend.Blob(jpeg(2), "image/jpeg", artist.getName());
+  const scan = clone(backend.refresh());
+  assert.equal(scan.complete, true);
+  const updated = backend.records("Sources").find(record => record.sourceId === artist.getId());
+  assert.equal(updated.sha256, crypto.createHash("sha256").update(jpeg(2)).digest("hex"));
+  assert.notEqual(updated.sha256, pinned);
+  const retry = backend.api("begin", { submissionId: first.submissionId, original: original(22) });
+  assert.equal(retry.error.code, "BASE_UNAVAILABLE");
+  assert.equal(backend.records("Submissions")[0].baseSha256, pinned);
+});
+
+test("failed artist probes preserve the old index and refuse new-original storage until the scan completes", () => {
+  const backend = makeBackend(); backend.setup();
+  const artist = backend.seed(1); artist.driveChecksum = true;
+  backend.refresh();
+  artist.date = new Date("2026-10-29T12:01:00Z");
+  artist.onFingerprint = () => { throw new Error("Invalid partial response"); };
+  const before = backend.files.size;
+  const request = backend.api("begin", { submissionId: submissionId(1), original: original(22) });
+  assert.equal(request.error.code, "COLLECTION_REFRESHING");
+  assert.equal(backend.files.size, before);
+  assert.equal(backend.records("Sources")[0].eligible, true);
 });
 
 test("late consent moves one unchanged original into the base folder and retains participant provenance", () => {

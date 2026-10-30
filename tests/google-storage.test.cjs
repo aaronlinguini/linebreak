@@ -11,12 +11,22 @@ const source = fs.readFileSync(path.join(__dirname, "../google-apps-script/Stora
 const folderType = "application/vnd.google-apps.folder";
 const sheetType = "application/vnd.google-apps.spreadsheet";
 const clone = value => JSON.parse(JSON.stringify(value));
+const sha256 = bytes => crypto.createHash("sha256").update(Buffer.from(bytes)).digest("hex");
+
+function fingerprintFixture(overrides = {}, bytes = [255, 216, 255, ...Array(125).fill(7)]) {
+  const h = harness();
+  const folder = h.addFile({ mimeType: folderType, isAppAuthorized: false, appProperties: {} }, []);
+  const photo = h.addFile({ parents: [folder.id], isAppAuthorized: false, appProperties: {},
+    sha256Checksum: sha256(bytes), version: "9007199254740992", ...overrides }, bytes);
+  const file = h.drive.getArtistFileById(photo.id, folder.id);
+  return { h, folder, photo, file, bytes };
+}
 
 function harness() {
   let nextId = 0;
   const files = new Map(), books = new Map();
   const calls = { get: [], create: [], list: [], update: [], fetch: [], sheets: [], valuesGet: [], valuesUpdate: [] };
-  const controls = { pages: null, httpCode: 200, body: null, failValueWrite: false, failGet: null, onFetch: null };
+  const controls = { pages: null, httpCode: 200, body: null, range: false, rangeHeaders: null, failValueWrite: false, failGet: null, onFetch: null };
   class Blob {
     constructor(bytes, mimeType, name) { this.bytes = [...bytes]; this.mimeType = mimeType; this.name = name; }
     getName() { return this.name; }
@@ -125,6 +135,10 @@ function harness() {
     }
   } };
   const sandbox = vm.createContext({ Drive, Sheets,
+    Utilities: {
+      DigestAlgorithm: { SHA_256: "SHA_256" },
+      computeDigest(algorithm, bytes) { assert.equal(algorithm, "SHA_256"); return [...crypto.createHash("sha256").update(Buffer.from(bytes)).digest()]; }
+    },
     ScriptApp: { getOAuthToken: () => "private-test-token" },
     UrlFetchApp: { fetch(url, options) {
       calls.fetch.push({ url, options: clone(options) });
@@ -132,8 +146,11 @@ function harness() {
       assert.ok(id, "downloads go only to an internal Drive file ID");
       if (controls.onFetch) controls.onFetch(id);
       const item = files.get(id);
-      return { getResponseCode: () => controls.httpCode,
-        getBlob: () => new Blob(controls.body || item.bytes, "application/octet-stream", "download") };
+      const range = controls.range && options.headers.Range;
+      const end = range ? Number(range.split("-")[1]) : item.bytes.length - 1;
+      return { getResponseCode: () => range ? 206 : controls.httpCode,
+        getAllHeaders: () => controls.rangeHeaders ?? { "Content-Range": `bytes 0-${end}/${item.bytes.length}` },
+        getBlob: () => new Blob(controls.body || (range ? item.bytes.slice(0, end + 1) : item.bytes), "application/octet-stream", "download") };
     } }
   });
   vm.runInContext(source, sandbox);
@@ -293,6 +310,109 @@ test("artist inventory fully paginates and filters unrelated files even when the
   assert.equal(h.calls.list[1].pageToken, "1");
   assert.ok(h.calls.list.every(call => call.q.includes(`'${artist.id}' in parents`)));
   assert.equal(h.calls.fetch.length, 0, "listing metadata does not download every photograph");
+  assert.ok(h.calls.list.every(call => call.fields.includes("sha256Checksum") && call.fields.includes("version")));
+});
+
+test("artist fingerprints use Drive SHA-256 and a verified 64-byte media range", () => {
+  const { h, file, photo, bytes } = fingerprintFixture();
+  h.controls.range = true;
+  h.controls.rangeHeaders = { "content-range": `bytes 0-63/${bytes.length}` };
+  const result = clone(file.getScanFingerprint());
+  assert.equal(result.sha256, sha256(bytes));
+  assert.deepEqual(result.header, bytes.slice(0, 64));
+  assert.equal(result.transferredBytes, 64);
+  assert.equal(result.fullRead, false);
+  assert.equal(h.calls.fetch.length, 1);
+  assert.equal(h.calls.fetch[0].url, `https://www.googleapis.com/drive/v3/files/${photo.id}?alt=media`);
+  assert.deepEqual(h.calls.fetch[0].options.headers, { Authorization: "Bearer private-test-token", Range: "bytes=0-63" });
+  assert.equal(h.calls.fetch[0].options.followRedirects, false);
+  assert.equal(h.calls.create.length, 0);
+  assert.equal(h.calls.update.length, 0);
+});
+
+test("short artist files request only their actual length", () => {
+  const { h, file } = fingerprintFixture({}, [255, 216, 255, 4]);
+  h.controls.range = true;
+  assert.equal(file.getScanFingerprint().header.length, 4);
+  assert.equal(h.calls.fetch[0].options.headers.Range, "bytes=0-3");
+});
+
+test("missing or invalid Drive checksums and AVIF return to the full-read path without a media probe", () => {
+  for (const overrides of [{ sha256Checksum: undefined }, { sha256Checksum: "not-sha256" }, { mimeType: "image/avif" }]) {
+    const { h, file } = fingerprintFixture(overrides);
+    assert.equal(file.getScanFingerprint(), null);
+    assert.equal(h.calls.fetch.length, 0);
+  }
+});
+
+test("partial artist responses require one exact complete Content-Range and the requested byte count", () => {
+  for (const headers of [{}, { "Content-Range": "bytes 1-64/128" }, { "Content-Range": "bytes 0-62/128" },
+    { "Content-Range": "bytes 0-63/129" }, { "Content-Range": "bytes 0-63/*" },
+    { "Content-Range": ["bytes 0-63/128"] }, { "Content-Range": "bytes 0-63/128", "content-range": "bytes 0-63/128" }]) {
+    const { h, file } = fingerprintFixture();
+    h.controls.range = true;
+    h.controls.rangeHeaders = headers;
+    assert.throws(() => file.getScanFingerprint(), error => error.exposureCode_ === "BASE_UNAVAILABLE");
+    assert.equal(h.calls.fetch.length, 1);
+  }
+  const { h, file } = fingerprintFixture();
+  h.controls.range = true;
+  h.controls.body = [255, 216, 255];
+  assert.throws(() => file.getScanFingerprint(), error => error.exposureCode_ === "BASE_UNAVAILABLE");
+});
+
+test("an ignored Range response is hashed and reused without a second download", () => {
+  const { h, file, bytes } = fingerprintFixture();
+  const result = file.getScanFingerprint();
+  assert.equal(result.fullRead, true);
+  assert.equal(result.transferredBytes, bytes.length);
+  assert.equal(result.sha256, sha256(bytes));
+  assert.equal(result.header.length, 64);
+  assert.equal(h.calls.fetch.length, 1);
+  for (const body of [[255, 216, 255], [255, 216, 255, ...Array(125).fill(8)]]) {
+    const sample = fingerprintFixture();
+    sample.h.controls.body = body;
+    assert.throws(() => sample.file.getScanFingerprint(), error => error.exposureCode_ === "BASE_UNAVAILABLE" &&
+      error.scanFullRead_ === true && error.scanBytes_ === body.length);
+    assert.equal(sample.h.calls.fetch.length, 1);
+  }
+});
+
+test("artist fingerprint probes reject redirects and media failures", () => {
+  for (const status of [302, 401, 403, 404, 429, 500]) {
+    const { h, file } = fingerprintFixture();
+    h.controls.httpCode = status;
+    assert.throws(() => file.getScanFingerprint(), error => error.exposureCode_ === "BASE_UNAVAILABLE" && !error.message.includes("private-test-token"));
+    assert.equal(h.calls.fetch[0].options.followRedirects, false);
+  }
+  const { h, file } = fingerprintFixture();
+  h.controls.httpCode = 503;
+  h.controls.body = Array(1024).fill(1);
+  assert.throws(() => file.getScanFingerprint(), error => error.scanFullRead_ === true && error.scanBytes_ === 1024);
+  assert.equal(h.calls.fetch.length, 1, "even a rejected buffered error body is charged without another fetch");
+});
+
+test("artist fingerprints reject all content or access changes around the probe", () => {
+  for (const change of [
+    file => { file.sha256Checksum = "a".repeat(64); },
+    file => { file.size = "129"; },
+    file => { file.mimeType = "image/png"; },
+    file => { file.modifiedTime = "2026-10-30T01:00:01Z"; },
+    file => { file.version = "9007199254740993"; },
+    file => { file.parents.push("another-parent"); },
+    file => { file.parents = ["another-folder"]; },
+    file => { file.trashed = true; },
+    file => { file.capabilities.canDownload = false; }
+  ]) {
+    const { h, file, photo } = fingerprintFixture();
+    h.controls.range = true;
+    h.controls.onFetch = () => change(h.files.get(photo.id).metadata);
+    assert.throws(() => file.getScanFingerprint(), error => error.exposureCode_ === "BASE_UNAVAILABLE");
+  }
+  const { h, file, photo } = fingerprintFixture();
+  h.files.get(photo.id).metadata.sha256Checksum = "b".repeat(64);
+  assert.throws(() => file.getScanFingerprint(), error => error.exposureCode_ === "BASE_UNAVAILABLE");
+  assert.equal(h.calls.fetch.length, 0, "changed listing metadata cannot be used for a probe");
 });
 
 test("artist folders and files reject invalid IDs, wrong parents, unsupported types and deleted content", () => {
@@ -546,6 +666,114 @@ test("the real backend discovers a Drive-dropped photo and pairs it without an a
   assert.deepEqual(h.files.get(photo.id).metadata, untouchedMetadata, "the user-managed photo is never renamed, marked or moved");
   assert.equal(h.calls.update.length, updatesBeforeScan);
   assert.equal([...h.files.values()].filter(file => file.metadata.parents.includes(artistFolderId)).length, 1);
+});
+
+test("real checksum-backed intake uses header probes but fully hashes the chosen photograph", () => {
+  const h = backendHarness(); h.sandbox.setupProject();
+  const folder = h.properties.get("EXPOSURE_ARTIST_FOLDER_ID");
+  h.controls.range = true;
+  const bytes = Buffer.from([255, 216, 255, ...Array(125).fill(7)]);
+  const photo = h.addFile({ parents: [folder], sha256Checksum: sha256(bytes), version: "1" }, bytes);
+  assert.equal(h.api("bootstrap").artistCount, 1);
+  assert.equal(h.calls.fetch.length, 1);
+  assert.equal(h.calls.fetch[0].options.headers.Range, "bytes=0-63");
+  assert.equal(h.records("Sources")[0].sha256, sha256(bytes));
+  const paired = h.api("begin", { submissionId: crypto.randomUUID(), original: image(99) });
+  assert.equal(paired.base.id, photo.id);
+  assert.equal(Buffer.from(paired.base.base64, "base64").equals(bytes), true);
+  assert.equal(h.calls.fetch.length, 2);
+  assert.equal(h.calls.fetch[1].options.headers.Range, undefined, "the chosen source still requires all bytes and SHA-256 verification");
+});
+
+test("a chosen base with stale Drive checksum metadata still fails full-byte SHA verification", () => {
+  const h = backendHarness(); h.sandbox.setupProject();
+  const folder = h.properties.get("EXPOSURE_ARTIST_FOLDER_ID");
+  h.controls.range = true;
+  const bytes = [255, 216, 255, ...Array(125).fill(7)];
+  const photo = h.addFile({ parents: [folder], sha256Checksum: sha256(bytes) }, bytes);
+  assert.equal(h.api("bootstrap").artistCount, 1);
+  h.files.get(photo.id).bytes[100] = 8;
+  const response = clone(h.sandbox.exposureApi({ action: "begin", payload: { submissionId: crypto.randomUUID(), original: image(99) } }));
+  assert.equal(response.error.code, "BASE_UNAVAILABLE");
+  assert.equal(h.calls.fetch.at(-1).options.headers.Range, undefined);
+  assert.equal(h.records("Submissions")[0].baseId, "");
+});
+
+test("real intake validates JPEG, PNG and WebP signatures without full-file downloads", () => {
+  const h = backendHarness(); h.sandbox.setupProject();
+  const folder = h.properties.get("EXPOSURE_ARTIST_FOLDER_ID");
+  h.controls.range = true;
+  for (const [mimeType, prefix] of [["image/jpeg", [255, 216, 255]],
+    ["image/png", [137, 80, 78, 71, 13, 10, 26, 10]], ["image/webp", [...Buffer.from("RIFF1234WEBP")]]]) {
+    const bytes = [...prefix, ...Array(128).fill(0)];
+    h.addFile({ parents: [folder], mimeType, sha256Checksum: sha256(bytes) }, bytes);
+  }
+  assert.equal(h.api("bootstrap").artistCount, 3);
+  assert.equal(h.calls.fetch.length, 3);
+  assert.ok(h.calls.fetch.every(call => call.options.headers.Range === "bytes=0-63"));
+});
+
+test("real AVIF intake with a long ftyp box and missing checksums retain full validation", () => {
+  const h = backendHarness(); h.sandbox.setupProject();
+  const folder = h.properties.get("EXPOSURE_ARTIST_FOLDER_ID");
+  h.controls.range = true;
+  const avif = Buffer.alloc(128);
+  avif.writeUInt32BE(96, 0); avif.write("ftyp", 4); avif.write("isom", 8); avif.write("avif", 80);
+  h.addFile({ parents: [folder], mimeType: "image/avif", sha256Checksum: sha256(avif) }, avif);
+  h.addFile({ parents: [folder] }, Buffer.from(image(41).base64, "base64"));
+  h.addFile({ parents: [folder], sha256Checksum: "invalid" }, Buffer.from(image(42).base64, "base64"));
+  assert.equal(h.api("bootstrap").artistCount, 3);
+  assert.equal(h.calls.fetch.length, 3);
+  assert.ok(h.calls.fetch.every(call => call.options.headers.Range === undefined));
+});
+
+test("real ignored Range intake verifies one full response and caches it without downloading twice", () => {
+  const h = backendHarness(); h.sandbox.setupProject();
+  const folder = h.properties.get("EXPOSURE_ARTIST_FOLDER_ID");
+  const bytes = Buffer.from(image(43).base64, "base64");
+  h.addFile({ parents: [folder], sha256Checksum: sha256(bytes) }, bytes);
+  assert.equal(h.api("bootstrap").artistCount, 1);
+  assert.equal(h.calls.fetch.length, 1);
+  h.sandbox.refreshArtistCollection();
+  assert.equal(h.calls.fetch.length, 1, "the same cached identity does not trigger another download");
+});
+
+test("real failed probes block new originals and mismatched image signatures never enter the pool", () => {
+  const h = backendHarness(); h.sandbox.setupProject();
+  const folder = h.properties.get("EXPOSURE_ARTIST_FOLDER_ID");
+  const bytes = Buffer.from(image(44).base64, "base64");
+  const photo = h.addFile({ parents: [folder], sha256Checksum: sha256(bytes) }, bytes);
+  h.controls.range = true; h.controls.rangeHeaders = {};
+  const creates = h.calls.create.length;
+  const response = clone(h.sandbox.exposureApi({ action: "begin", payload: { submissionId: crypto.randomUUID(), original: image(99) } }));
+  assert.equal(response.error.code, "COLLECTION_REFRESHING");
+  assert.equal(h.calls.create.length, creates);
+  assert.equal(h.records("Sources").length, 0);
+  h.controls.rangeHeaders = null;
+  h.files.get(photo.id).metadata.mimeType = "image/png";
+  const scan = clone(h.sandbox.refreshArtistCollection());
+  assert.equal(scan.artistCount, 0);
+  assert.equal(scan.complete, true);
+  assert.equal(scan.issues[0].reasonCode, "CONTENT_TYPE_MISMATCH");
+});
+
+test("real Drive checksum changes invalidate unchanged-size/time cache and preserve old pairing pins", () => {
+  const h = backendHarness(); h.sandbox.setupProject();
+  const folder = h.properties.get("EXPOSURE_ARTIST_FOLDER_ID");
+  const bytes = Buffer.from(image(45).base64, "base64");
+  const photo = h.addFile({ parents: [folder], sha256Checksum: sha256(bytes) }, bytes);
+  h.controls.range = true;
+  const submitted = { submissionId: crypto.randomUUID(), original: image(99) };
+  h.api("begin", submitted);
+  const pinned = h.records("Submissions")[0].baseSha256;
+  const replacement = [...Buffer.from(image(46).base64, "base64")];
+  h.files.get(photo.id).bytes = replacement;
+  h.files.get(photo.id).metadata.sha256Checksum = sha256(replacement);
+  h.sandbox.refreshArtistCollection();
+  assert.notEqual(h.records("Sources")[0].sha256, pinned);
+  const response = clone(h.sandbox.exposureApi({ action: "begin", payload: submitted }));
+  assert.equal(response.error.code, "BASE_UNAVAILABLE");
+  assert.equal(h.records("Submissions")[0].baseSha256, pinned);
 });
 
 test("the real owner RPC denies anonymous and other-account calls before reaching the limited adapters", () => {

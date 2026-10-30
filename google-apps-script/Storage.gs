@@ -10,7 +10,7 @@ var ArchiveDrive = (function () {
   var folderType = "application/vnd.google-apps.folder";
   var sheetType = "application/vnd.google-apps.spreadsheet";
   var marker = "drive-file-v1";
-  var fields = "id,name,mimeType,size,parents,trashed,isAppAuthorized,appProperties,createdTime,modifiedTime,capabilities(canDownload)";
+  var fields = "id,name,mimeType,size,parents,trashed,isAppAuthorized,appProperties,createdTime,modifiedTime,sha256Checksum,version,capabilities(canDownload)";
   var metadata = Object.create(null);
 
   function failure(code, message) {
@@ -141,6 +141,52 @@ var ArchiveDrive = (function () {
     if (!artistImage(file, folderId)) throw artistFailure();
     return file;
   }
+  function checksum(file) {
+    return typeof file.sha256Checksum === "string" && /^[0-9a-f]{64}$/i.test(file.sha256Checksum)
+      ? file.sha256Checksum.toLowerCase() : "";
+  }
+  function sameArtistContent(before, after) {
+    return before.modifiedTime === after.modifiedTime && before.mimeType === after.mimeType &&
+      Number(before.size) === Number(after.size) && before.sha256Checksum === after.sha256Checksum &&
+      before.version === after.version && before.capabilities?.canDownload === true && after.capabilities?.canDownload === true &&
+      JSON.stringify((before.parents || []).slice().sort()) === JSON.stringify((after.parents || []).slice().sort());
+  }
+  function fingerprintFor(id, file) {
+    var size = Number(file.size), hash = checksum(file);
+    if (!hash || !/^image\/(jpeg|png|webp)$/.test(file.mimeType)) return null;
+    if (!Number.isSafeInteger(size) || size < 1 || size > 30 * 1024 * 1024 || file.capabilities?.canDownload !== true) throw artistFailure();
+    var length = Math.min(64, size);
+    var response = UrlFetchApp.fetch("https://www.googleapis.com/drive/v3/files/" + encodeURIComponent(id) + "?alt=media", {
+      method: "get", headers: { Authorization: "Bearer " + ScriptApp.getOAuthToken(), Range: "bytes=0-" + (length - 1) },
+      followRedirects: false, muteHttpExceptions: true
+    });
+    var status = response.getResponseCode();
+    var bytes = response.getBlob().getBytes();
+    var transfer = { transferredBytes: bytes.length, fullRead: status !== 206 || bytes.length > 64 };
+    try {
+      if (status !== 206 && status !== 200) throw artistFailure();
+      if (status === 206) {
+        var headers = response.getAllHeaders();
+        var names = Object.keys(headers).filter(function (name) { return name.toLowerCase() === "content-range"; });
+        if (names.length !== 1 || typeof headers[names[0]] !== "string" ||
+            headers[names[0]] !== "bytes 0-" + (length - 1) + "/" + size || bytes.length !== length) throw artistFailure();
+      } else {
+        // A server may ignore Range. Verify that full response without fetching it again.
+        if (bytes.length !== size) throw artistFailure();
+        var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes)
+          .map(function (value) { return ("0" + ((value + 256) % 256).toString(16)).slice(-2); }).join("");
+        if (digest !== hash) throw artistFailure();
+      }
+    } catch (error) {
+      throw scanReadFailure(error, transfer);
+    }
+    return Object.assign(transfer, { sha256: hash, header: bytes.slice(0, length) });
+  }
+  function scanReadFailure(error, transfer) {
+    error.scanFullRead_ = transfer.fullRead;
+    error.scanBytes_ = transfer.transferredBytes;
+    return error;
+  }
   function artistChildren(id, name) {
     artistFolder(id);
     var query = quote(id) + " in parents and trashed = false and (" +
@@ -175,8 +221,25 @@ var ArchiveDrive = (function () {
       getUrl: function () { return isFolder ? "https://drive.google.com/drive/folders/" + id : "https://drive.google.com/file/d/" + id + "/view"; },
       getDateCreated: function () { return new Date(read().createdTime); },
       getLastUpdated: function () { return new Date(read().modifiedTime); },
+      getSha256Checksum: function () { return checksum(read()); },
       isTrashed: function () { return read().trashed === true; },
       isParticipantPhoto: function () { return read().appProperties?.exposureRole === "participant"; },
+      getScanFingerprint: function () {
+        if (isFolder) throw artistFailure();
+        artistFolder(folderId);
+        var listed = read(), before = read(true);
+        if (!sameArtistContent(listed, before)) throw artistFailure();
+        var result = fingerprintFor(id, before);
+        if (!result) return null;
+        try {
+          var after = read(true);
+          artistFolder(folderId);
+          if (!sameArtistContent(before, after)) throw artistFailure();
+        } catch (error) {
+          throw scanReadFailure(error, result);
+        }
+        return result;
+      },
       getBlob: function () {
         if (isFolder) throw artistFailure();
         artistFolder(folderId);
@@ -184,8 +247,7 @@ var ArchiveDrive = (function () {
         var blob = blobFor(id, before);
         var after = read(true);
         artistFolder(folderId);
-        if (before.modifiedTime !== after.modifiedTime || before.mimeType !== after.mimeType ||
-            Number(before.size) !== Number(after.size) || after.capabilities?.canDownload !== true) {
+        if (!sameArtistContent(before, after)) {
           throw failure("BASE_UNAVAILABLE", "The base photograph changed while it was being read. Please retry.");
         }
         return blob;

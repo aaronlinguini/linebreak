@@ -47,6 +47,8 @@ var EXPOSURE_CONFIG_ = Object.freeze({
   artistRefreshMs: 60000,
   maxArtistReads: 10,
   maxArtistReadBytes: 64 * 1024 * 1024,
+  maxArtistFingerprintProbes: 150,
+  maxArtistScanMs: 25000,
   usageHeaders: ["key", "day", "kind", "bytes"],
   sourcesHeaders: ["sourceId", "sha256", "nameJson", "mimeType", "byteLength", "kind", "eligible", "createdAt", "modifiedAt"],
   submissionsHeaders: ["submissionId", "token", "originalId", "originalSha256", "baseId", "status", "resultId", "resultSha256", "width", "height", "settingsJson", "createdAt", "completedAt", "allowReuse", "parentSubmissionId", "baseSha256"]
@@ -305,13 +307,14 @@ function pinLegacyBases_(project, sources) {
 }
 
 // The caller already holds the script lock. Listing completes before any index
-// changes, and bounded binary reads let large batches progress across requests.
+// changes, and bounded header probes avoid downloading every new base in full.
 function refreshArtistSources_(project) {
   var existing = readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders);
   var byId = {};
   existing.forEach(function (source) { byId[source.sourceId] = source; });
   var retainedIds = {}, seenHashes = {}, updates = [];
   var skipped = 0, preserved = 0, deferred = 0, reads = 0, readBytes = 0;
+  var probes = 0, deadline = Date.now() + EXPOSURE_CONFIG_.maxArtistScanMs;
   var complete = true, issues = [], omittedIssues = 0;
   // Owner diagnostics identify skipped files without recording image contents,
   // file IDs, authorization tokens, or exception details. Keep logs bounded.
@@ -381,23 +384,41 @@ function refreshArtistSources_(project) {
       if (!previous && /^(?:source-[0-9a-f]{64}\.|result-[0-9a-f-]+\.|participant_photo_\d+\.)/i.test(file.getName())) {
         complete = false; skipped++; issue(file, "ARCHIVE_RECORD_MISSING", size, mimeType); continue;
       }
+      var driveHash = typeof file.getSha256Checksum === "function" ? file.getSha256Checksum() : "";
       var unchanged = previous && previous.kind === "artist" && previous.modifiedAt === modifiedAt &&
-        Number(previous.byteLength) === size && previous.mimeType === mimeType && /^[0-9a-f]{64}$/.test(previous.sha256);
+        Number(previous.byteLength) === size && previous.mimeType === mimeType && /^[0-9a-f]{64}$/.test(previous.sha256) &&
+        (!driveHash || driveHash === previous.sha256);
       var hash;
       if (unchanged) hash = previous.sha256;
       else {
-        if (reads >= EXPOSURE_CONFIG_.maxArtistReads || readBytes + size > EXPOSURE_CONFIG_.maxArtistReadBytes) {
+        var fast = /^[0-9a-f]{64}$/.test(driveHash) && /^image\/(jpeg|png|webp)$/.test(mimeType) &&
+          typeof file.getScanFingerprint === "function";
+        // Reserve enough fallback capacity in case Drive returns a full HTTP 200.
+        if (Date.now() >= deadline || reads >= EXPOSURE_CONFIG_.maxArtistReads ||
+            readBytes + size > EXPOSURE_CONFIG_.maxArtistReadBytes || fast && probes >= EXPOSURE_CONFIG_.maxArtistFingerprintProbes) {
           complete = false; deferred++; preserve(fileId); issue(file, "SCAN_DEFERRED", size, mimeType); continue;
         }
-        reads++; readBytes += size;
-        var bytes = file.getBlob().getBytes();
-        var detectedMime = detectMime_(bytes);
-        if (bytes.length !== size || detectedMime !== mimeType) {
-          skipped++;
-          issue(file, bytes.length !== size ? "CONTENT_LENGTH_MISMATCH" : "CONTENT_TYPE_MISMATCH", size, mimeType, detectedMime);
-          continue;
+        if (fast) {
+          probes++;
+          var fingerprint = file.getScanFingerprint();
+          if (fingerprint && fingerprint.fullRead) { reads++; readBytes += fingerprint.transferredBytes; }
+          if (!fingerprint || fingerprint.sha256 !== driveHash) throw new Error("Changed source fingerprint");
+          var headerMime = detectMime_(fingerprint.header);
+          if (headerMime !== mimeType) {
+            skipped++; issue(file, "CONTENT_TYPE_MISMATCH", size, mimeType, headerMime); continue;
+          }
+          hash = fingerprint.sha256;
+        } else {
+          reads++; readBytes += size;
+          var bytes = file.getBlob().getBytes();
+          var detectedMime = detectMime_(bytes);
+          if (bytes.length !== size || detectedMime !== mimeType) {
+            skipped++;
+            issue(file, bytes.length !== size ? "CONTENT_LENGTH_MISMATCH" : "CONTENT_TYPE_MISMATCH", size, mimeType, detectedMime);
+            continue;
+          }
+          hash = sha256_(bytes);
         }
-        hash = sha256_(bytes);
       }
       retainedIds[fileId] = true;
       var record = Object.assign({}, previous || { createdAt: now_() }, {
@@ -409,6 +430,9 @@ function refreshArtistSources_(project) {
       // Retain duplicate hashes and metadata too, avoiding repeated downloads.
       if (!previous || EXPOSURE_CONFIG_.sourcesHeaders.some(function (key) { return previous[key] !== record[key]; })) updates.push(record);
     } catch (error) {
+      if (error.scanFullRead_ && Number.isSafeInteger(error.scanBytes_) && error.scanBytes_ >= 0) {
+        reads++; readBytes += error.scanBytes_;
+      }
       complete = false; skipped++; preserve(fileId); issue(file, "READ_FAILED", size, mimeType);
     }
   }
