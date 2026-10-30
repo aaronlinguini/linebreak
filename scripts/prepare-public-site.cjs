@@ -9,7 +9,10 @@ const ORIGINAL_PUBLIC_FILES = Object.freeze([
   "archive-workflow.js", "drive-storage.js", "drive-bridge.js"
 ]);
 const PREVIOUS_PUBLIC_FILES = Object.freeze([...ORIGINAL_PUBLIC_FILES, "artist-import.js", "artist-import.css"]);
-const PUBLIC_FILES = Object.freeze([...PREVIOUS_PUBLIC_FILES, "double-exposure.html"]);
+const SPLIT_PUBLIC_FILES = Object.freeze([...PREVIOUS_PUBLIC_FILES, "double-exposure.html"]);
+const PUBLIC_FILES = Object.freeze([
+  ...SPLIT_PUBLIC_FILES, "experiment-1.html", "experiment-2.html", "experiment-3.html"
+]);
 const OUTPUT_DIRECTORY = ".public-site";
 
 function validateHtml(source, page) {
@@ -39,7 +42,7 @@ function validatePreviousOutput(destination) {
     throw new Error(`${OUTPUT_DIRECTORY} must be a generated directory, not a file or symlink.`);
   }
   const entries = fs.readdirSync(destination).sort();
-  const knownVersion = [PUBLIC_FILES, PREVIOUS_PUBLIC_FILES, ORIGINAL_PUBLIC_FILES].some((files) => {
+  const knownVersion = [PUBLIC_FILES, SPLIT_PUBLIC_FILES, PREVIOUS_PUBLIC_FILES, ORIGINAL_PUBLIC_FILES].some((files) => {
     const expected = [...files].sort();
     return entries.length === expected.length && entries.every((name, index) => name === expected[index]);
   });

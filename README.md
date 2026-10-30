@@ -4,13 +4,13 @@ Participants add a photograph to create a double exposure. The Google connection
 
 This tool is one part of a larger interactive artwork. The overall website name is undecided; the artist leads the wording, photo selections, page counts, and layouts, with ordinary HTML/CSS kept easy to edit.
 
-The local site now has a minimal home page in `index.html` linking to the existing tool in `double-exposure.html`. This page split and the comment cleanup are local only and have not been published. Additional experiment pages, photos, reflections, and layouts have not been selected.
+The local home page in `index.html` has **Experiments** on the left, linking to three editable experiment pages, and **Interactive** on the right, linking to `double-exposure.html`. These columns stack in the same order on smaller screens. The experiment pages contain no selected photographs or written reflections yet. This layout and all page drafts remain local and unpublished.
 
 ## Try it
 
 To test without Google, right-click `local-test.html` in VS Code and choose **Open with Live Server**. Choose your base photo and a second photo. The left preview keeps the saved **Current** treatment at zero EV and contrast 12. The right starts with **Reduced overlap (trial)** at the same settings, with **Haze reduction 20%**, matching the approved screenshot preset. All five optional tone controls start at zero. Increasing Haze reduction reduces overlapping light across shadows, midtones, and highlights. Dark areas leave the brighter photograph clearer; two dark areas stay closer to their original darkness. Move Haze reduction to 0% to reproduce the saved Current treatment. Current + contrast, Revised smooth, Saved smooth exposure, and the earlier film curve remain available. Adjust each photograph's exposure separately and compare black and white with colour. Use the visible **Tone adjustments** sliders for optional Shadows, Highlights, Mids, Whites, and Blacks finishing controls; **Reset tones** clears only those five controls. Both results use the same full-frame preparation and JPEG export. Download the results and settings to keep a record; nothing is uploaded or automatically archived there. See [FILM-EXPERIMENT.md](FILM-EXPERIMENT.md) for comparisons and how to return to the saved version.
 
-There is no frontend installation or build. The Google archive runs as Version 3 in the dedicated project account and remains paused until valid bases and the live workflow are checked. The last published frontend was the visitor black-and-white release at `949dc1`; local checkpoint `76d40d3` preserves it before the home-page split. The existing GitHub repository is now **private**, and the former GitHub Pages address returns **404: no GitHub Pages site**. No repository files or history were deleted, and no home/tool draft was published. The current local checks pass **279/279**. Development stays local. Publishing the finished site will be a separate, manual step with step-by-step guidance; no further publication is authorized. See [GOOGLE-SETUP.md](GOOGLE-SETUP.md) for the archive status and remaining checks.
+There is no frontend installation or build. The Google archive runs as Version 3 in the dedicated project account and remains paused until valid bases and the live workflow are checked. The last published frontend was the visitor black-and-white release at `949dc1`; local checkpoint `76d40d3` preserves it before the home-page split. The existing GitHub repository is **private**, and the former GitHub Pages address returns **404: no GitHub Pages site**. No repository files or history were deleted, and no home or experiment draft was published. Development stays local. Publishing the finished site will be a separate, manual step with step-by-step guidance; no further publication is authorized. See [GOOGLE-SETUP.md](GOOGLE-SETUP.md) for the archive status and remaining checks.
 
 ## Phones and tablets
 
@@ -42,7 +42,8 @@ python3 -m http.server 8000 --bind 127.0.0.1
 
 ## Files
 
-- `index.html`: minimal home page with links to the project’s pages.
+- `index.html`: home page with separate Experiments and Interactive link lists.
+- `experiment-1.html`, `experiment-2.html`, and `experiment-3.html`: editable photo/reflection page templates with a commented-out entry example.
 - `double-exposure.html`: the double-exposure tool’s HTML; loads its external stylesheet and scripts.
 - `styles.css`: shared page styling and responsive layouts.
 - `scripts.js`: photo loading, pairing, light processing, finished-image rotation, and downloads.
@@ -104,7 +105,7 @@ In `project-config.js`, change `forceBlackAndWhite`:
 - `true`: start the visitor's **Black and white** checkbox checked.
 - `false`: start it unchecked, preserving the photographs' existing colours, including photographs that are already black and white.
 
-The saved artist setting is still `true`. Reload after changing the configuration. It supplies the initial colour choice on both pages; visitors can change the public checkbox before **Create double exposure**, and the local comparison keeps its existing temporary toggle.
+The saved artist setting is still `true`. Reload after changing the configuration. It supplies the initial colour choice on the exposure tool and local comparison; visitors can change the tool's checkbox before **Create double exposure**, and the local comparison keeps its existing temporary toggle.
 
 The public colour checkbox is disabled during work and hidden while a save is pending or a completed exposure is shown. Each exposure freezes its selected mode for rendering, archiving, retries, and further pairings, so its preview, downloaded JPEG, and archived JPEG use the same colour mode. **Start over** lets the visitor choose a mode for a new exposure. This affects the finished output only: original upload bytes, orientation, and future-use consent remain independent and unchanged.
 
@@ -151,9 +152,18 @@ To undo a later committed change, ask to revert that change; Git can create an u
 
 ## Next stages
 
-Run `node scripts/prepare-public-site.cjs` to build `.public-site/` with the ten approved public files: the two HTML pages and the eight existing styles/scripts. This only prepares a local copy; it does not publish. If publication is requested later, only the generated copy belongs on the host. README, instructions, tests, local comparisons, backend source, secrets, private photos, and Git history stay out. Rebuild after editing a public file. The packager validates every published HTML page and rejects inline code/styles, unpublished links, invalid JavaScript, symlinks, and unexpected output files before replacement.
+Open `index.html` with Live Server to work on the home page and follow its links to the experiment pages. To fill an experiment page:
 
-To add a future experiment page yourself, create an ordinary `.html` file, keep its styles/scripts in separate files, and add a link to it in the home page’s list. Add that page and only its needed public assets to `PUBLIC_FILES` in `scripts/prepare-public-site.cjs`, adjust the publication checks, and rebuild before publishing. The page’s photos, text, layout, and label are yours to choose; no gallery system or fixed number of pages is required. Keep Google’s `SITE_URL` at the repository root even though the tool has its own page. The current home/tool split needs no Apps Script change.
+1. Edit its `<title>` and `<h1>` to change the browser-tab title and visible heading. Change its link text in `index.html` and the experiment-page navigation separately; keep each `href` unchanged unless the file itself is renamed.
+2. Put a chosen photograph in a local folder such as `images/experiment-1/`. These folders and photos have not been added for you.
+3. In `experiment-1.html`, remove the `<!--` and `-->` around the example `<section class="experiment-entry">` to display it. Set the image's `src` to the real filename and replace its `alt` description. Use the corresponding paths in the other two pages.
+4. Put your reflection in the empty `<p></p>`. Repeat the complete `experiment-entry` section for another photo/reflection pair. Keep layout changes in `styles.css`; no inline CSS or JavaScript is needed.
+
+Photo files referenced by active HTML load in the local preview, but are **not automatically selected for publication**. Keep private photos out of any future public package. The current packager includes only the thirteen explicitly listed HTML/CSS/JavaScript files; selected image assets and support for their folder paths must be added deliberately before a later manual publication.
+
+Run `node scripts/prepare-public-site.cjs` to build `.public-site/` with those thirteen files: the home page, tool page, three experiment pages, and eight existing styles/scripts. This only prepares a local copy; it does not publish. If publication is requested later, only the generated copy belongs on the host. README, instructions, tests, local comparisons, backend source, secrets, private photos, and Git history stay out. Rebuild after editing a listed website file. The packager validates every included HTML page and rejects inline code/styles, unpublished links, invalid JavaScript, symlinks, and unexpected output files before replacement. An uncommented image example with no approved real asset will therefore stop packaging rather than silently publish a broken or private image.
+
+To add a further experiment page, create an ordinary `.html` file and add it to the home page's Experiments list and the relevant navigation. Add the page explicitly to `PUBLIC_FILES` in `scripts/prepare-public-site.cjs`, adjust publication checks, and rebuild when it is intended for release. The page's photos, text, layout, and label are yours to choose. Keep Google's `SITE_URL` at the repository root; these static pages need no Apps Script change.
 
 The Google backend includes global request, daily submission, and daily new-file-byte limits plus an owner pause switch. These run inside Apps Script on Google; no rented server is needed. The daily byte allowance is an adjustable intake limit, not total Drive storage capacity. See [GOOGLE-SETUP.md](GOOGLE-SETUP.md) for settings and the live archive check, which is still required after deploying.
 

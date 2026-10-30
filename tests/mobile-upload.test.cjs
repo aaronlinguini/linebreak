@@ -126,13 +126,22 @@ test("public photo choices are distinct and HTML has no inline code", () => {
   }
 });
 
-test("the separate home and exposure pages link both ways without starting the photo archive on Home", () => {
+test("Home links to the three experiment pages and exposure tool without starting the archive on static pages", () => {
   const home = fs.readFileSync(path.join(root, "index.html"), "utf8");
   const tool = fs.readFileSync(path.join(root, "double-exposure.html"), "utf8");
   assert.match(home, /<a\b[^>]*href="double-exposure\.html"[^>]*>/i);
   assert.match(tool, /<a\b[^>]*href="index\.html"[^>]*>\s*Home\s*<\/a>/i);
-  assert.doesNotMatch(home, /<script\b[^>]*src="(?:project-config|drive-storage|drive-bridge|archive-workflow|scripts)\.js(?:\?[^"]*)?"/i);
-  assert.doesNotMatch(home, /id="participant-input"|id="visitor-monochrome"/);
+  const pages = [home];
+  for (const number of [1, 2, 3]) {
+    assert.match(home, new RegExp(`<a\\b[^>]*href="experiment-${number}\\.html"[^>]*>`, "i"));
+    const experiment = fs.readFileSync(path.join(root, `experiment-${number}.html`), "utf8");
+    assert.match(experiment, /<a\b[^>]*href="index\.html"[^>]*>\s*Home\s*<\/a>/i);
+    pages.push(experiment);
+  }
+  for (const page of pages) {
+    assert.doesNotMatch(page, /<script\b[^>]*src="(?:project-config|drive-storage|drive-bridge|archive-workflow|scripts)\.js(?:\?[^"]*)?"/i);
+    assert.doesNotMatch(page, /id="participant-input"|id="visitor-monochrome"/);
+  }
 });
 
 test("the visitor checkbox starts from the artist default and sends either colour mode at creation", async () => {

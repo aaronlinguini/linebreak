@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#050505">
     <title>Home</title>
-    <link rel="stylesheet" href="styles.css?v=site-pages-v1">
+    <link rel="stylesheet" href="styles.css?v=experiments-v1">
   </head>
   <body>
     <header class="site-header">
@@ -13,11 +13,25 @@
     </header>
 
     <main class="workspace home-links">
-      <nav aria-label="Projects">
-        <ul>
-          <li><a href="double-exposure.html">Double exposure</a></li>
-        </ul>
-      </nav>
+      <section class="home-panel" aria-labelledby="experiments-heading">
+        <h2 id="experiments-heading">Experiments</h2>
+        <nav aria-label="Experiments">
+          <ul>
+            <li><a href="experiment-1.html">Experiment 1</a></li>
+            <li><a href="experiment-2.html">Experiment 2</a></li>
+            <li><a href="experiment-3.html">Experiment 3</a></li>
+          </ul>
+        </nav>
+      </section>
+
+      <section class="home-panel" aria-labelledby="interactive-heading">
+        <h2 id="interactive-heading">Interactive</h2>
+        <nav aria-label="Interactive project">
+          <ul>
+            <li><a href="double-exposure.html">Double exposure</a></li>
+          </ul>
+        </nav>
+      </section>
     </main>
   </body>
 </html>
