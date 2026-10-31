@@ -325,6 +325,7 @@ function initializeExposureStudio() {
     resultEmpty: byId("result-empty"), sourceActions: byId("source-actions"),
     exposureControls: byId("exposure-controls"), uploadInstructions: byId("upload-instructions"),
     outputOptions: byId("output-options"), monochrome: byId("visitor-monochrome"),
+    colour: byId("visitor-colour"), repeatActions: byId("repeat-actions"),
     resultActions: byId("result-actions"), allowReuse: byId("allow-reuse"),
     newPairing: byId("new-pairing-button"), reset: byId("reset-button"),
     participantInput: byId("participant-input"), cameraInput: byId("participant-camera-input"),
@@ -332,10 +333,11 @@ function initializeExposureStudio() {
     status: byId("status"), error: byId("error"), busy: byId("busy-indicator")
   };
   const developingMessage = ui.busy.textContent;
+  const newPairingLabel = ui.newPairing.textContent;
   const state = { working: false, connecting: false, ready: false, hasResult: false, participant: null,
     selectedFile: null, selectionChoices: null, queued: false, downloadUrl: null, rePairUnavailable: false,
-    displayedSubmissionId: null, previewing: false, previewBase: null };
-  ui.monochrome.checked = PROJECT_SETTINGS.monochrome;
+    displayedSubmissionId: null, previewing: false, previewBase: null, nextPairQueued: false };
+  setColourChoice(PROJECT_SETTINGS.monochrome);
   ui.allowReuse.checked = false;
   const { loadPhoto, releasePhoto, develop } = createExposureProcessor();
   const storage = new GoogleDriveStorage(EXPOSURE_CONFIG);
@@ -349,6 +351,10 @@ function initializeExposureStudio() {
       refreshActions();
     }
   });
+  function setColourChoice(monochrome) {
+    ui.monochrome.checked = monochrome;
+    ui.colour.checked = !monochrome;
+  }
   function announce(message) { ui.status.textContent = message; }
   function restoreConnectionStatus() {
     announce(state.connecting && state.selectedFile ? "" : state.connecting ? "Connecting…"
@@ -367,6 +373,7 @@ function initializeExposureStudio() {
     const pending = workflow.pending;
     const completed = state.hasResult && !pending;
     const processing = state.working || (state.queued && state.connecting);
+    const canQueuePairing = state.hasResult && pending && state.working && state.previewing;
     for (const input of [ui.participantInput, ui.cameraInput]) {
       input.disabled = state.working || selected || pending;
     }
@@ -375,14 +382,18 @@ function initializeExposureStudio() {
     ui.exposureControls.hidden = selected || state.hasResult || pending;
     ui.outputOptions.hidden = false;
     ui.monochrome.disabled = state.working || pending || (selected && !state.hasResult);
-    ui.resultActions.hidden = !state.hasResult && !(selected && !processing && !pending);
+    ui.colour.disabled = ui.monochrome.disabled;
+    ui.repeatActions.hidden = !state.hasResult && !(selected && !processing && !pending);
+    ui.resultActions.hidden = !state.hasResult;
     ui.allowReuse.disabled = state.working || selected || pending;
     ui.download.hidden = !state.hasResult;
     ui.rotate.hidden = !state.hasResult;
     ui.download.disabled = !completed || state.working;
     ui.rotate.disabled = !state.hasResult || state.working || pending;
-    ui.newPairing.hidden = !completed || state.rePairUnavailable || workflow.operation?.receipt?.canRePair !== true;
-    ui.newPairing.disabled = state.working || pending;
+    ui.newPairing.hidden = !state.nextPairQueued && !canQueuePairing &&
+      (!completed || state.rePairUnavailable || workflow.operation?.receipt?.canRePair !== true);
+    ui.newPairing.disabled = state.nextPairQueued || (!canQueuePairing && (state.working || pending));
+    ui.newPairing.textContent = state.nextPairQueued ? "Next double exposure queued…" : newPairingLabel;
     ui.reset.disabled = processing || pending;
     ui.retry.disabled = state.working || state.connecting;
     ui.busy.hidden = !processing;
@@ -417,6 +428,7 @@ function initializeExposureStudio() {
     state.selectionChoices = null;
     state.queued = false;
     state.rePairUnavailable = false;
+    state.nextPairQueued = false;
     ui.allowReuse.checked = false;
     clearResult();
     restoreConnectionStatus();
@@ -477,7 +489,7 @@ function initializeExposureStudio() {
     state.downloadUrl = URL.createObjectURL(operation.result.blob);
     state.hasResult = true;
     state.displayedSubmissionId = operation.submissionId;
-    ui.monochrome.checked = operation.settings.monochrome;
+    setColourChoice(operation.settings.monochrome);
     ui.canvas.hidden = false;
     ui.resultEmpty.hidden = true;
   }
@@ -500,9 +512,14 @@ function initializeExposureStudio() {
         : error.originalSaved ? "Your photo is saved. Please retry to finish the double exposure."
           : "The save could not be confirmed.");
     } finally {
-      if (workflow.operation?.settings) ui.monochrome.checked = workflow.operation.settings.monochrome;
+      if (workflow.operation?.settings) setColourChoice(workflow.operation.settings.monochrome);
       state.previewing = workflow.pending && state.displayedSubmissionId === workflow.operation?.submissionId;
       setWorking(false);
+    }
+    if (state.nextPairQueued && !workflow.pending) {
+      state.nextPairQueued = false;
+      if (workflow.operation?.receipt?.canRePair === true) await finishSubmission(() => workflow.rePair());
+      else refreshActions();
     }
   }
 
@@ -550,16 +567,25 @@ function initializeExposureStudio() {
   for (const input of [ui.participantInput, ui.cameraInput]) {
     input.addEventListener("change", () => chooseParticipantPhoto(input));
   }
-  ui.monochrome.addEventListener("change", async () => {
-    if (state.working || workflow.pending || state.queued) {
-      ui.monochrome.checked = workflow.operation?.settings.monochrome ?? state.selectionChoices?.monochrome ?? ui.monochrome.checked;
+  for (const [input, monochrome] of [[ui.monochrome, true], [ui.colour, false]]) {
+    input.addEventListener("change", async () => {
+      if (!input.checked) return;
+      if (state.working || workflow.pending || state.queued) {
+        setColourChoice(workflow.operation?.settings.monochrome ?? state.selectionChoices?.monochrome ?? ui.monochrome.checked);
+        return;
+      }
+      setColourChoice(monochrome);
+      if (!state.hasResult || workflow.operation.settings.monochrome === monochrome) return;
+      clearError();
+      await finishSubmission(() => workflow.changeMonochrome(monochrome));
+    });
+  }
+  ui.newPairing.addEventListener("click", async () => {
+    if (state.hasResult && workflow.pending && state.working && state.previewing) {
+      state.nextPairQueued = true;
+      refreshActions();
       return;
     }
-    if (!state.hasResult || workflow.operation.settings.monochrome === ui.monochrome.checked) return;
-    clearError();
-    await finishSubmission(() => workflow.changeMonochrome(ui.monochrome.checked));
-  });
-  ui.newPairing.addEventListener("click", async () => {
     if (!state.hasResult || state.working || workflow.pending || workflow.operation?.receipt?.canRePair !== true) return;
     clearError();
     await finishSubmission(() => workflow.rePair());

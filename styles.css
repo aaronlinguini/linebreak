@@ -142,7 +142,8 @@ h1 { margin: 0; font-size: 13px; font-weight: 400; letter-spacing: .025em; }
 .exposure-controls { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 12px 16px; margin-bottom: 24px; }
 .upload-instructions { grid-column: 1 / -1; margin: 0 0 12px; color: var(--foreground); font-size: 12px; }
 .exposure-controls .actions { justify-content: flex-start; padding-top: 0; }
-.output-options { display: flex; margin-top: 16px; }
+.actions.repeat-actions { justify-content: flex-start; padding-top: 0; margin-bottom: 24px; }
+.output-options { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-top: 16px; }
 .checkbox-label { display: flex; align-items: center; gap: 10px; min-height: 44px; }
 .checkbox-label input { flex-shrink: 0; width: 18px; height: 18px; margin: 0; accent-color: var(--foreground); }
 .library-option { font-size: 12px; }

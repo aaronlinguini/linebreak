@@ -23,10 +23,10 @@ const developingMessage = toolHtml.match(/<p\b[^>]*id="busy-indicator"[^>]*>([^<
 
 function harness({ configured = true, canRePair = true, forceBlackAndWhite = false, assets,
   connect = async () => ({ totalEligible: 2 }) } = {}) {
-  const ids = ["workspace", "canvas", "result-empty", "source-actions", "result-actions", "allow-reuse",
+  const ids = ["workspace", "canvas", "result-empty", "source-actions", "result-actions", "repeat-actions", "allow-reuse",
     "new-pairing-button", "reset-button", "participant-input", "participant-camera-input",
     "upload-label", "camera-label", "download-button", "rotate-button", "retry-button", "status", "error",
-    "busy-indicator", "exposure-controls", "upload-instructions", "output-options", "visitor-monochrome"];
+    "busy-indicator", "exposure-controls", "upload-instructions", "output-options", "visitor-monochrome", "visitor-colour"];
   const handlers = new Map();
   const elements = new Map(ids.map((id) => [id, {
     hidden: true, disabled: false, checked: false, files: [], value: "", textContent: "",
@@ -37,6 +37,7 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
   }]));
   const calls = { start: [], connect: 0, rePair: 0, retry: 0, changeMonochrome: [], load: [], rotate: 0, downloads: [], revoked: [], draws: [] };
   elements.get("busy-indicator").textContent = developingMessage;
+  elements.get("new-pairing-button").textContent = toolHtml.match(/<button\b[^>]*id="new-pairing-button"[^>]*>([^<]+)<\/button>/)[1].trim();
   elements.get("canvas").getContext = () => ({ drawImage(canvas) { calls.draws.push(canvas); } });
   const urls = new Map();
   let rotationGate;
@@ -163,7 +164,8 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
     click(id) { return handlers.get(id + ":click")(); },
     toggleMonochrome(checked) {
       elements.get("visitor-monochrome").checked = checked;
-      return handlers.get("visitor-monochrome:change")();
+      elements.get("visitor-colour").checked = !checked;
+      return handlers.get(`${checked ? "visitor-monochrome" : "visitor-colour"}:change`)();
     }
   };
 }
@@ -213,7 +215,7 @@ test("bootstrap's candidate enables early preview without changing frozen consen
   h.deliverPreview("preview");
   assert.equal(h.elements.get("canvas").hidden, false);
   assert.equal(h.elements.get("busy-indicator").textContent, "Finishing…");
-  for (const id of ["download-button", "rotate-button", "reset-button", "visitor-monochrome"]) {
+  for (const id of ["download-button", "rotate-button", "reset-button", "visitor-monochrome", "visitor-colour"]) {
     assert.equal(h.elements.get(id).disabled, true, "a preview does not confirm an archive");
   }
   saving.resolve();
@@ -239,8 +241,14 @@ test("public photo choices are distinct and HTML has no inline code", () => {
   assert.match(html, /id="participant-camera-input"[^>]*capture="environment"/);
   assert.match(html, /class="choice-separator">or<\/span>/);
   assert.match(html, /id="allow-reuse" type="checkbox"/);
-  assert.match(html, /<input\b[^>]*id="visitor-monochrome"[^>]*type="checkbox"/);
-  assert.match(html, /<label\b[^>]*for="visitor-monochrome"/);
+  for (const [id, label] of [["visitor-monochrome", "Black and white"], ["visitor-colour", "Original colour"]]) {
+    const radio = html.match(new RegExp(`<input\\b[^>]*id="${id}"[^>]*>`))?.[0];
+    assert.ok(radio, `${label} must be an explicit choice`);
+    assert.match(radio, /\btype="radio"/);
+    assert.match(radio, /\bname="output-colour"/);
+    assert.match(html, new RegExp(`<label\\b[^>]*for="${id}"[\\s\\S]*?${label}[\\s\\S]*?<\\/label>`));
+  }
+  assert.match(html, /<div\b[^>]*id="output-options"[^>]*role="group"[^>]*aria-label="Image colour"/);
   assert.match(html, /<button\b[^>]*id="rotate-button"[^>]*>Rotate 90°<\/button>/);
   assert.match(html, /<p\b[^>]*id="busy-indicator"[^>]*role="status"/);
   assert.doesNotMatch(html, /id="(?:participant-preview|sharing-choice|develop-button|cancel-selection)"/);
@@ -268,6 +276,21 @@ test("photo choices, permission and instructions precede the image, with colour 
   assert.ok(stage < options && options < colour, "the black-and-white choice remains below the image");
   assert.match(html, /<label\b[^>]*for="allow-reuse"/);
   assert.doesNotMatch(html.match(/<input\b[^>]*id="allow-reuse"[^>]*>/)[0], /\bchecked(?:\s|=|>)/);
+  const repeats = html.match(/<div\b[^>]*id="repeat-actions"[^>]*>([\s\S]*?)<\/div>/);
+  assert.ok(repeats && repeats.index < stage, "repeat choices belong above the image");
+  const sourceStart = html.lastIndexOf("<div", controls);
+  const sourceDepth = [...html.slice(sourceStart, repeats.index).matchAll(/<\/?div\b[^>]*>/g)]
+    .reduce((depth, [tag]) => depth + (tag.startsWith("</") ? -1 : 1), 0);
+  assert.equal(sourceDepth, 0, "repeat choices must remain outside the upload controls that hide after selection");
+  assert.deepEqual([...repeats[1].matchAll(/<button\b[^>]*id="([^"]+)"[^>]*>([^<]+)<\/button>/g)]
+    .map(([, id, label]) => [id, label.trim()]), [
+    ["reset-button", "Upload another photo"],
+    ["new-pairing-button", "Create another double exposure using this photo"]
+  ]);
+  const resultActions = html.match(/<div\b[^>]*id="result-actions"[^>]*>([\s\S]*?)<\/div>/);
+  assert.ok(resultActions && resultActions.index > stage, "download and rotation belong below the image");
+  assert.deepEqual([...resultActions[1].matchAll(/<button\b[^>]*id="([^"]+)"/g)].map(([, id]) => id),
+    ["download-button", "rotate-button"]);
 });
 
 test("Home links to the three experiment pages and exposure tool without starting the archive on static pages", () => {
@@ -288,14 +311,17 @@ test("Home links to the three experiment pages and exposure tool without startin
   }
 });
 
-test("the visitor checkbox starts from the artist default and freezes either mode at photo selection", async () => {
+test("the visitor colour radios start from the artist default and freeze either mode at photo selection", async () => {
   for (const forceBlackAndWhite of [false, true]) {
     for (const visitorChoice of [false, true]) {
       const h = harness({ forceBlackAndWhite });
       await flush();
       const checkbox = h.elements.get("visitor-monochrome");
       assert.equal(checkbox.checked, forceBlackAndWhite);
+      assert.equal(h.elements.get("visitor-colour").checked, !forceBlackAndWhite);
       assert.equal(checkbox.disabled, false);
+      assert.equal(h.elements.get("visitor-colour").disabled, false);
+      assert.equal(h.elements.get("repeat-actions").hidden, true);
       assert.equal(h.elements.get("output-options").hidden, false);
       assert.equal(h.elements.get("exposure-controls").hidden, false);
       assert.equal(h.elements.get("upload-instructions").hidden, false);
@@ -307,12 +333,17 @@ test("the visitor checkbox starts from the artist default and freezes either mod
       assert.equal(h.elements.get("output-options").hidden, false, "a saved exposure retains its colour-mode control");
       assert.equal(h.elements.get("exposure-controls").hidden, true);
       assert.equal(checkbox.disabled, false);
+      assert.equal(h.elements.get("visitor-colour").checked, !visitorChoice);
+      assert.equal(h.elements.get("visitor-colour").disabled, false);
+      assert.equal(h.elements.get("repeat-actions").hidden, false);
       h.click("reset-button");
       assert.equal(h.elements.get("output-options").hidden, false);
       assert.equal(h.elements.get("exposure-controls").hidden, false);
       assert.equal(h.elements.get("upload-instructions").hidden, false);
       assert.equal(checkbox.disabled, false);
       assert.equal(checkbox.checked, visitorChoice, "Start over retains the visitor's preference");
+      assert.equal(h.elements.get("visitor-colour").checked, !visitorChoice);
+      assert.equal(h.elements.get("repeat-actions").hidden, true);
     }
   }
 });
@@ -333,8 +364,9 @@ test("selection shows processing immediately and snapshots consent and colour be
   assert.equal(h.elements.get("canvas").hidden, true);
   assert.equal(h.elements.get("result-empty").hidden, true);
   assert.equal(h.elements.get("result-actions").hidden, true);
+  assert.equal(h.elements.get("repeat-actions").hidden, true);
   assert.equal(h.elements.get("upload-instructions").hidden, true);
-  for (const id of ["participant-input", "participant-camera-input", "allow-reuse", "visitor-monochrome"]) {
+  for (const id of ["participant-input", "participant-camera-input", "allow-reuse", "visitor-monochrome", "visitor-colour"]) {
     assert.equal(h.elements.get(id).disabled, true, `${id} must not change a selected submission`);
   }
   assert.equal(h.calls.start.length, 0);
@@ -400,12 +432,13 @@ test("library and camera selection submit once and show the developed image whil
     assert.equal(h.calls.draws.length, 1);
     assert.equal(h.elements.get("busy-indicator").textContent, "Finishing…");
     assert.equal(h.elements.get("busy-indicator").hidden, false);
-    for (const control of ["download-button", "rotate-button", "new-pairing-button", "reset-button", "visitor-monochrome"]) {
+    for (const control of ["download-button", "rotate-button", "reset-button", "visitor-monochrome", "visitor-colour"]) {
       assert.equal(h.elements.get(control).disabled, true, `${control} must wait for the archive receipt`);
     }
+    assert.equal(h.elements.get("new-pairing-button").hidden, false);
+    assert.equal(h.elements.get("new-pairing-button").disabled, false, "another pairing can be queued during finishing");
     await h.click("download-button");
     await h.click("rotate-button");
-    await h.click("new-pairing-button");
     h.click("reset-button");
     assert.equal(h.calls.downloads.length, 0);
     assert.equal(h.calls.rotate, 0);
@@ -418,6 +451,7 @@ test("library and camera selection submit once and show the developed image whil
     assert.equal(h.elements.get("canvas").width, 600);
     assert.equal(h.elements.get("canvas").height, 400);
     assert.equal(h.elements.get("result-actions").hidden, false);
+    assert.equal(h.elements.get("repeat-actions").hidden, false);
     assert.equal(h.elements.get("download-button").hidden, false);
     assert.equal(h.elements.get("download-button").disabled, false);
     assert.equal(h.elements.get("visitor-monochrome").disabled, false);
@@ -425,6 +459,69 @@ test("library and camera selection submit once and show the developed image whil
     assert.equal(h.elements.get("workspace").attributes["aria-busy"], "false");
     assert.equal(h.elements.get("status").textContent, "");
   }
+});
+
+test("one next pairing can be queued during finishing and only starts after a receipt allows it", async () => {
+  for (const canRePair of [true, false]) {
+    const h = harness({ canRePair });
+    await flush();
+    const saving = deferred();
+    h.blockStart(saving.promise);
+    const selecting = h.select("participant-input", makeFile());
+    await flush();
+    h.deliverPreview();
+    assert.equal(h.elements.get("repeat-actions").hidden, false);
+    assert.equal(h.elements.get("new-pairing-button").disabled, false);
+    await h.click("new-pairing-button");
+    await h.click("new-pairing-button");
+    assert.equal(h.calls.rePair, 0, "the first exposure must be confirmed before reusing its saved original");
+    assert.equal(h.elements.get("new-pairing-button").textContent, "Next double exposure queued…");
+    assert.equal(h.elements.get("new-pairing-button").disabled, true);
+    saving.resolve();
+    await selecting;
+    assert.equal(h.calls.rePair, canRePair ? 1 : 0);
+    assert.equal(h.calls.start.length, 1);
+    assert.equal(h.calls.load.length, 1);
+    assert.equal(h.elements.get("new-pairing-button").hidden, true);
+    assert.equal(h.elements.get("reset-button").disabled, false);
+    assert.equal(h.elements.get("status").textContent, "");
+  }
+});
+
+test("a queued pairing survives a failed save and waits for the retry receipt without resubmitting the original", async () => {
+  const h = harness();
+  await flush();
+  const saving = deferred();
+  h.blockStart(saving.promise);
+  h.failStart(Object.assign(new Error("Response lost."), { originalSaved: true }));
+  const selecting = h.select("participant-input", makeFile());
+  await flush();
+  h.deliverPreview();
+  await h.click("new-pairing-button");
+  saving.resolve();
+  await selecting;
+  assert.equal(h.workflow.pending, true);
+  assert.equal(h.calls.rePair, 0);
+  assert.equal(h.calls.draws.length, 1);
+  assert.equal(h.elements.get("canvas").hidden, false);
+  assert.equal(h.elements.get("new-pairing-button").textContent, "Next double exposure queued…");
+  assert.equal(h.elements.get("new-pairing-button").disabled, true);
+  const retryReceipt = deferred();
+  assert.equal(h.elements.get("new-pairing-button").hidden, false, "the queued request remains visible after a failed save");
+  h.blockRetry(retryReceipt.promise);
+  const retrying = h.click("retry-button");
+  h.deliverPreview();
+  await h.click("new-pairing-button");
+  assert.equal(h.calls.rePair, 0);
+  retryReceipt.resolve();
+  await retrying;
+  assert.equal(h.calls.start.length, 1);
+  assert.equal(h.calls.retry, 1);
+  assert.equal(h.calls.rePair, 1);
+  assert.equal(h.calls.load.length, 1);
+  assert.equal(h.calls.draws.length, 2);
+  assert.equal(h.elements.get("reset-button").disabled, false);
+  assert.equal(h.elements.get("status").textContent, "");
 });
 
 test("a save failure after rendering retains the pending preview and retries without resubmitting or redrawing", async () => {
@@ -444,7 +541,7 @@ test("a save failure after rendering retains the pending preview and retries wit
   assert.equal(h.elements.get("error").hidden, false);
   assert.equal(h.elements.get("retry-button").hidden, false);
   assert.equal(h.elements.get("retry-button").textContent, "Retry saving");
-  for (const control of ["download-button", "rotate-button", "new-pairing-button", "reset-button", "visitor-monochrome"]) {
+  for (const control of ["download-button", "rotate-button", "new-pairing-button", "reset-button", "visitor-monochrome", "visitor-colour"]) {
     assert.equal(h.elements.get(control).disabled, true, `${control} must not use an unconfirmed archive result`);
   }
   const retryReceipt = deferred();
@@ -479,6 +576,7 @@ test("a pending save retries the same operation without re-reading the original 
   assert.equal(h.elements.get("canvas").hidden, true);
   assert.equal(h.elements.get("result-actions").hidden, true);
   assert.equal(h.elements.get("visitor-monochrome").disabled, true);
+  assert.equal(h.elements.get("visitor-colour").disabled, true);
   assert.equal(h.elements.get("allow-reuse").disabled, true);
   assert.equal(h.elements.get("reset-button").disabled, true);
   h.elements.get("visitor-monochrome").checked = false;
@@ -563,7 +661,9 @@ test("a saved exposure can switch between colour and black and white without cho
     await h.toggleMonochrome(monochrome);
     assert.equal(h.workflow.operation.base, base);
     assert.equal(h.elements.get("visitor-monochrome").checked, monochrome);
+    assert.equal(h.elements.get("visitor-colour").checked, !monochrome);
     assert.equal(h.elements.get("visitor-monochrome").disabled, false);
+    assert.equal(h.elements.get("visitor-colour").disabled, false);
     assert.equal(h.elements.get("status").textContent, "");
     await h.click("download-button");
     const download = h.calls.downloads.at(-1);
@@ -588,6 +688,7 @@ test("a mode change blocks duplicate changes until its archive operation finishe
   const changing = h.toggleMonochrome(true);
   assert.deepEqual(h.calls.changeMonochrome, [true]);
   assert.equal(h.elements.get("visitor-monochrome").disabled, true);
+  assert.equal(h.elements.get("visitor-colour").disabled, true);
   assert.equal(h.elements.get("output-options").hidden, false);
   assert.equal(h.elements.get("new-pairing-button").disabled, true);
   assert.equal(h.elements.get("busy-indicator").hidden, false);
@@ -614,6 +715,7 @@ test("a failed mode save retains the prior image and retries its frozen mode wit
   assert.equal(h.workflow.pending, true);
   assert.equal(pendingOperation.settings.monochrome, true);
   assert.equal(h.elements.get("visitor-monochrome").disabled, true);
+  assert.equal(h.elements.get("visitor-colour").disabled, true);
   assert.equal(h.elements.get("output-options").hidden, false);
   assert.equal(h.elements.get("canvas").hidden, false);
   assert.equal(h.calls.draws.length, 1);
@@ -660,10 +762,12 @@ test("an unconfigured archive allows local choices without fabricating a result 
   assert.equal(h.elements.get("canvas").hidden, true);
   assert.equal(h.elements.get("download-button").hidden, true);
   assert.equal(h.elements.get("rotate-button").hidden, true);
-  assert.equal(h.elements.get("result-actions").hidden, false, "Start over remains available for an unsent selection");
+  assert.equal(h.elements.get("result-actions").hidden, true);
+  assert.equal(h.elements.get("repeat-actions").hidden, false, "Upload another photo remains available for an unsent selection");
   assert.equal(h.elements.get("busy-indicator").hidden, true);
   assert.equal(h.elements.get("output-options").hidden, false);
   assert.equal(h.elements.get("visitor-monochrome").disabled, true, "an unsent queued selection retains its frozen mode");
+  assert.equal(h.elements.get("visitor-colour").disabled, true);
   h.click("reset-button");
   assert.equal(h.elements.get("allow-reuse").checked, false);
   assert.equal(h.elements.get("visitor-monochrome").checked, false);
@@ -675,7 +779,7 @@ test("an unconfigured archive allows local choices without fabricating a result 
 test("connection setup stays in the status area until a selected photograph queues automatic development", async () => {
   const connection = deferred();
   const h = harness({ connect: () => connection.promise });
-  for (const id of ["participant-input", "participant-camera-input", "allow-reuse", "visitor-monochrome"]) {
+  for (const id of ["participant-input", "participant-camera-input", "allow-reuse", "visitor-monochrome", "visitor-colour"]) {
     assert.equal(h.elements.get(id).disabled, false);
   }
   assert.equal(h.elements.get("status").textContent, "Connecting…");
@@ -719,7 +823,8 @@ for (const unavailable of ["failure", "empty collection"]) {
     await h.select("participant-input", file);
     assert.equal(h.elements.get("status").textContent, message);
     assert.equal(h.elements.get("retry-button").hidden, false);
-    assert.equal(h.elements.get("result-actions").hidden, false);
+    assert.equal(h.elements.get("result-actions").hidden, true);
+    assert.equal(h.elements.get("repeat-actions").hidden, false);
     assert.equal(h.elements.get("reset-button").disabled, false);
     assert.equal(h.elements.get("download-button").hidden, true);
     assert.equal(h.elements.get("rotate-button").hidden, true);
