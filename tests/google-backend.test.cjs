@@ -564,6 +564,129 @@ test("artist asset catalogs reject malformed entries, arbitrary URLs and travers
   assert.equal(backend.begin(1, 22).base.path, literal.path, "literal percent sequences are preserved for the browser's single-filename encoding");
 });
 
+test("bootstrap offers one random eligible preview without downloading participant or artist image bytes", () => {
+  const backend = makeBackend(); backend.setup(); const artist = backend.seed(1); backend.refresh();
+  const asset = assetFor(backend, artist.getId());
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: [asset] });
+  const first = backend.begin(1, 22, true); backend.data("complete", backend.completePayload(first));
+  const reads = backend.io.blobReads;
+  vm.runInContext("Math.random = () => 0", backend.sandbox);
+  const artistPreview = backend.data("bootstrap").previewBase;
+  assert.deepEqual(artistPreview, { id: artist.getId(), ...asset });
+  vm.runInContext("Math.random = () => 0.999999", backend.sandbox);
+  const participantPreview = backend.data("bootstrap").previewBase;
+  assert.equal(participantPreview.id, first.originalId);
+  assert.equal(participantPreview.sha256, crypto.createHash("sha256").update(jpeg(22)).digest("hex"));
+  assert.equal(participantPreview.mimeType, "image/jpeg");
+  assert.equal(participantPreview.byteLength, jpeg(22).length);
+  assert.match(participantPreview.name, /^participant_photo_[1-9]\d*\.jpg$/);
+  assert.equal(participantPreview.path, undefined);
+  assert.equal(participantPreview.base64, undefined);
+  assert.equal(backend.io.blobReads, reads);
+  backend.properties.set("INCLUDE_PARTICIPANT_PHOTOS", "false");
+  assert.equal(backend.data("bootstrap").previewBase.id, artist.getId());
+  assert.equal(backend.data("bootstrap").participantCount, 0);
+});
+
+test("bootstrap has no preview for an empty pool and gives duplicate hashes only one lottery entry", () => {
+  const backend = makeBackend(); backend.setup();
+  assert.equal(backend.data("bootstrap").previewBase, null);
+  backend.seed(1); backend.seed(1, "duplicate.jpg"); const last = backend.seed(2); backend.refresh();
+  vm.runInContext("Math.random = () => 0.5", backend.sandbox);
+  const result = backend.data("bootstrap");
+  assert.equal(result.totalEligible, 2);
+  assert.equal(result.previewBase.id, last.getId());
+  assert.equal(result.previewBase.base64, undefined, "a legacy artist preview is metadata-only too");
+  const chosen = backend.data("begin", { submissionId: submissionId(1), original: original(22), preferredBaseSha256: result.previewBase.sha256 });
+  const { base64, ...metadata } = chosen.base;
+  assert.deepEqual(metadata, result.previewBase);
+  assert.equal(base64, jpeg(2).toString("base64"));
+});
+
+test("a preferred static preview is pinned before base delivery and stays stable on retry", () => {
+  const backend = makeBackend(); backend.setup(); const one = backend.seed(1); const two = backend.seed(2); backend.refresh();
+  const assets = [assetFor(backend, one.getId(), "one.jpg"), assetFor(backend, two.getId(), "two.jpg")];
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: assets });
+  vm.runInContext("Math.random = () => 0", backend.sandbox);
+  const request = { submissionId: submissionId(1), original: original(22), preferredBaseSha256: assets[1].sha256 };
+  const begun = backend.data("begin", request);
+  assert.equal(begun.base.id, two.getId(), "the server must honor the validated preview instead of drawing a different base");
+  assert.equal(begun.base.sha256, assets[1].sha256);
+  const stored = backend.records("Submissions")[0];
+  assert.equal(stored.baseId, two.getId());
+  assert.equal(stored.baseSha256, assets[1].sha256);
+  assert.equal(stored.status, "paired");
+  assert.deepEqual(backend.data("begin", request), begun);
+  assert.equal(backend.api("begin", { ...request, preferredBaseSha256: assets[0].sha256 }).error.code, "SUBMISSION_CONFLICT");
+  assert.deepEqual(backend.begin(1, 22), begun, "an old client retry without preference keeps the existing pin");
+  backend.data("complete", backend.completePayload(begun));
+  assert.equal(backend.folder("Participant").files.length, 1);
+  assert.equal(backend.folder("Double exposure").files.length, 1);
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: [assets[0]] });
+  const unavailable = backend.api("begin", request);
+  assert.equal(unavailable.error.code, "BASE_UNAVAILABLE");
+  assert.equal(unavailable.error.originalSaved, true);
+  assert.equal(backend.records("Submissions")[0].baseSha256, assets[1].sha256);
+});
+
+test("a preferred participant preview delivers verified dynamic bytes without changing inherited consent", () => {
+  const backend = makeBackend(); backend.setup(); const artist = backend.seed(1); backend.refresh();
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: [assetFor(backend, artist.getId())] });
+  const first = backend.begin(1, 22, true); backend.data("complete", backend.completePayload(first));
+  const participantHash = backend.records("Sources").find(source => source.sourceId === first.originalId).sha256;
+  vm.runInContext("Math.random = () => 0.999999", backend.sandbox);
+  const preview = backend.data("bootstrap").previewBase;
+  assert.equal(preview.id, first.originalId);
+  const chosen = backend.data("begin", { submissionId: submissionId(2), original: original(23), preferredBaseSha256: preview.sha256 });
+  const { base64, ...metadata } = chosen.base;
+  assert.deepEqual(metadata, preview, "all preview identity fields must survive the dynamic begin roundtrip");
+  assert.equal(chosen.base.id, first.originalId);
+  assert.equal(chosen.base.base64, jpeg(22).toString("base64"));
+  assert.equal(chosen.base.path, undefined);
+  assert.equal(backend.records("Submissions")[1].baseSha256, participantHash);
+  assert.equal(backend.records("Submissions")[1].allowReuse, false, "choosing a contributed base does not grant consent for this upload");
+});
+
+test("preferred choices reject invalid types, unknown/unmapped/self hashes and nonconsented sources before original writes", () => {
+  const backend = makeBackend(); backend.setup(); const one = backend.seed(1); const two = backend.seed(2); backend.refresh();
+  const asset = assetFor(backend, one.getId());
+  const other = assetFor(backend, two.getId(), "other.jpg");
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: [asset] });
+  const participant = backend.begin(1, 22, false); backend.data("complete", backend.completePayload(participant));
+  const nonconsented = backend.records("Sources").find(source => source.sourceId === participant.originalId).sha256;
+  const count = backend.files.size;
+  for (const preferredBaseSha256 of [null, 1, true, "", "wrong", "A".repeat(64), [], {}]) {
+    assert.equal(backend.api("begin", { submissionId: submissionId(2), original: original(23), preferredBaseSha256 }).error.code, "INVALID_REQUEST");
+  }
+  for (const preferredBaseSha256 of ["a".repeat(64), other.sha256, nonconsented]) {
+    assert.equal(backend.api("begin", { submissionId: submissionId(2), original: original(23), preferredBaseSha256 }).error.code, "BASE_UNAVAILABLE");
+  }
+  assert.equal(backend.api("begin", { submissionId: submissionId(2), original: original(1), preferredBaseSha256: asset.sha256 }).error.code, "BASE_UNAVAILABLE");
+  assert.equal(backend.api("begin", { submissionId: submissionId(2), reuse: { submissionId: participant.submissionId, token: participant.token }, preferredBaseSha256: asset.sha256 }).error.code, "INVALID_REQUEST");
+  assert.equal(backend.files.size, count);
+  assert.equal(backend.records("Submissions").length, 1);
+});
+
+test("failed preferred participant reads keep their exact pin and never substitute another available base", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const first = backend.begin(1, 22, true); backend.data("complete", backend.completePayload(first));
+  const source = backend.records("Sources").find(source => source.sourceId === first.originalId);
+  const file = backend.files.get(first.originalId); const read = file.getBlob.bind(file);
+  file.getBlob = () => { throw new Error("Temporary Drive read failure"); };
+  const request = { submissionId: submissionId(2), original: original(23), preferredBaseSha256: source.sha256 };
+  const failed = backend.api("begin", request);
+  assert.equal(failed.error.code, "BASE_UNAVAILABLE");
+  assert.equal(failed.error.originalSaved, true);
+  const stored = backend.records("Submissions")[1];
+  assert.equal(stored.baseId, first.originalId);
+  assert.equal(stored.baseSha256, source.sha256);
+  file.getBlob = read;
+  const retry = backend.data("begin", request);
+  assert.equal(retry.base.id, first.originalId);
+  assert.equal(retry.token, stored.token);
+  assert.equal(backend.folder("Participant").files.length, 1, "only the new nonconsented upload remains here");
+});
+
 test("another pairing rejects a forged token and cannot change opt-in", () => {
   const backend = makeBackend(); backend.setup(); backend.seed(1); backend.seed(2); backend.refresh();
   const first = backend.begin(1, 22); backend.data("complete", backend.completePayload(first));

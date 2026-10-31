@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const { File } = require("node:buffer");
+const { webcrypto, createHash } = require("node:crypto");
 
 const root = path.resolve(__dirname, "..");
 const source = fs.readFileSync(path.join(root, "scripts.js"), "utf8");
@@ -20,7 +21,7 @@ const deferred = () => {
 };
 const developingMessage = toolHtml.match(/<p\b[^>]*id="busy-indicator"[^>]*>([^<]+)<\/p>/)[1].trim();
 
-function harness({ configured = true, canRePair = true, forceBlackAndWhite = false,
+function harness({ configured = true, canRePair = true, forceBlackAndWhite = false, assets,
   connect = async () => ({ totalEligible: 2 }) } = {}) {
   const ids = ["workspace", "canvas", "result-empty", "source-actions", "result-actions", "allow-reuse",
     "new-pairing-button", "reset-button", "participant-input", "participant-camera-input",
@@ -53,7 +54,7 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
   let workflow;
   let onProgress;
   const sandbox = vm.createContext({
-    Error, File, setTimeout,
+    Error, File, setTimeout, crypto: webcrypto,
     document: {
       getElementById(id) { return mounted ? elements.get(id) : null; },
       createElement(tag) { return tag === "canvas" ? { width: 0, height: 0 } : {
@@ -118,6 +119,7 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
       }
     }
   });
+  if (assets) sandbox.ExposureBaseAssets = assets;
   vm.runInContext(source, sandbox);
   sandbox.createExposureProcessor = () => ({
     async loadPhoto(file) {
@@ -151,7 +153,7 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
     blockMonochrome(gate) { monochromeGate = gate; },
     failMonochrome(error) { monochromeError = error; },
     setConnection(connect) { connectImpl = connect; },
-    deliverPreview() { return onProgress({ stage: "archive" }); },
+    deliverPreview(stage = "archive") { return onProgress({ stage }); },
     select(id, file) {
       const input = elements.get(id);
       input.files = file ? [file] : [];
@@ -165,6 +167,71 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
     }
   };
 }
+
+test("the local asset preview starts while Google connection is still unresolved", async () => {
+  const connecting = deferred();
+  const saving = deferred();
+  const chosen = [];
+  const previewBase = { name: "base.jpg", mimeType: "image/jpeg", byteLength: 10,
+    path: "assets/base-photos/base.jpg", sha256: "a".repeat(64) };
+  const h = harness({ connect: () => connecting.promise, assets: {
+    async chooseBase(hash) { chosen.push(hash); return previewBase; }
+  } });
+  h.blockStart(saving.promise);
+  const selecting = h.select("participant-input", makeFile());
+  for (let attempt = 0; attempt < 20 && !h.calls.start.length; attempt++) await flush();
+  assert.equal(h.calls.start.length, 1, "development does not wait for Google bootstrap");
+  assert.equal(chosen.length, 1);
+  assert.match(chosen[0], /^[a-f0-9]{64}$/);
+  assert.strictEqual(h.calls.start[0].choice.previewBase, previewBase);
+  h.deliverPreview("preview");
+  assert.equal(h.elements.get("canvas").hidden, false);
+  assert.equal(h.elements.get("download-button").disabled, true);
+  connecting.resolve({ totalEligible: 113, previewBase: { ...previewBase, id: "later-choice" } });
+  await flush();
+  assert.equal(h.calls.start.length, 1, "a late Google response cannot replace the preview");
+  assert.strictEqual(h.calls.start[0].choice.previewBase, previewBase);
+  saving.resolve();
+  await selecting;
+});
+
+test("bootstrap's candidate enables early preview without changing frozen consent or colour", async () => {
+  const previewBase = { id: "base-1", name: "base.jpg", mimeType: "image/jpeg", byteLength: 10,
+    path: "assets/base-photos/base.jpg", sha256: "a".repeat(64) };
+  const h = harness({ connect: async () => ({ totalEligible: 2, previewBase }) });
+  await flush();
+  h.elements.get("allow-reuse").checked = true;
+  h.elements.get("visitor-monochrome").checked = false;
+  const saving = deferred();
+  h.blockStart(saving.promise);
+  const selecting = h.select("participant-input", makeFile());
+  for (let attempt = 0; attempt < 20 && !h.calls.start.length; attempt++) await flush();
+  assert.equal(h.calls.start.length, 1);
+  assert.strictEqual(h.calls.start[0].choice.previewBase, previewBase);
+  assert.equal(h.calls.start[0].choice.allowReuse, true);
+  assert.equal(h.calls.start[0].choice.monochrome, false);
+  h.deliverPreview("preview");
+  assert.equal(h.elements.get("canvas").hidden, false);
+  assert.equal(h.elements.get("busy-indicator").textContent, "Finishing…");
+  for (const id of ["download-button", "rotate-button", "reset-button", "visitor-monochrome"]) {
+    assert.equal(h.elements.get(id).disabled, true, "a preview does not confirm an archive");
+  }
+  saving.resolve();
+  await selecting;
+  assert.equal(h.elements.get("visitor-monochrome").disabled, false);
+});
+
+test("an identical preselected base is discarded so Google can choose a different photograph", async () => {
+  const file = makeFile();
+  const sha256 = createHash("sha256").update(Buffer.from(await file.arrayBuffer())).digest("hex");
+  const previewBase = { id: "base-1", name: "base.jpg", mimeType: "image/jpeg", byteLength: file.size,
+    path: "assets/base-photos/base.jpg", sha256 };
+  const h = harness({ connect: async () => ({ totalEligible: 2, previewBase }) });
+  await flush();
+  await h.select("participant-input", file);
+  assert.equal(h.calls.start[0].choice.previewBase, undefined);
+  assert.strictEqual(h.calls.start[0].file, file);
+});
 
 test("public photo choices are distinct and HTML has no inline code", () => {
   const html = fs.readFileSync(path.join(root, "double-exposure.html"), "utf8");

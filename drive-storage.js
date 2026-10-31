@@ -100,10 +100,11 @@
       return this._connectPromise;
     }
 
-    async begin({ submissionId, originalFile, allowReuse = false, reuse } = {}) {
+    async begin({ submissionId, originalFile, allowReuse = false, reuse, preferredBaseSha256 } = {}) {
       this._assertActive();
       if (!validSubmissionId(submissionId) || Boolean(originalFile) === Boolean(reuse) ||
           typeof allowReuse !== "boolean" ||
+          (preferredBaseSha256 !== undefined && (reuse || typeof preferredBaseSha256 !== "string" || !/^[0-9a-f]{64}$/.test(preferredBaseSha256))) ||
           (reuse && (!validSubmissionId(reuse.submissionId) || typeof reuse.token !== "string" || !reuse.token))) {
         throw storageError("INVALID_SUBMISSION", "A submission ID and one original photograph or saved exposure are required.");
       }
@@ -111,6 +112,7 @@
       if (reuse) return this._request("begin", { submissionId, reuse });
       const base64 = await this._readBase64(originalFile);
       return this._request("begin", { submissionId, allowReuse,
+        ...(preferredBaseSha256 !== undefined ? { preferredBaseSha256 } : {}),
         original: { name: originalFile.name || "photograph", mimeType: mimeType(originalFile), base64 } });
     }
 

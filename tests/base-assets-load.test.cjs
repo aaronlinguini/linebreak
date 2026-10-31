@@ -17,11 +17,12 @@ const base = (name = "base.jpg", content = bytes) => ({
 
 function fixture(fetch = async () => new Response(bytes), baseURI = "http://127.0.0.1:5500/artwork/double-exposure.html") {
   const calls = [];
-  const sandbox = { URL, File, Blob, Uint8Array, AbortController, crypto: webcrypto, setTimeout, clearTimeout,
+  const sandbox = { URL, File, Blob, Uint8Array, AbortController, TextDecoder, crypto: webcrypto, setTimeout, clearTimeout,
+    Math: Object.create(Math),
     document: { baseURI }, window: { location: { origin: "http://127.0.0.1:5500" } },
     fetch: async (...args) => { calls.push(args); return fetch(...args); } };
   vm.runInNewContext(source + "\nthis.assets = ExposureBaseAssets;", sandbox);
-  return { assets: sandbox.assets, calls };
+  return { assets: sandbox.assets, calls, setRandom: value => { sandbox.Math.random = () => value; } };
 }
 
 test("loads the exact artist file directly from this site's assets, including literal reserved filename characters", async () => {
@@ -112,4 +113,88 @@ test("keeps at most two recently used asset downloads", async () => {
   assert.equal(h.calls.length, 3);
   await h.assets.loadFile(descriptors[1]);
   assert.equal(h.calls.length, 4);
+});
+
+test("chooses a frozen static descriptor without Google or image requests and excludes identical originals", async () => {
+  const photos = [base("original.jpg"), base("other #1 ? é.jpg", Uint8Array.from([1, 2])), base("last.jpg", Uint8Array.from([3, 4]))];
+  const h = fixture(async () => Response.json({ version: 1, photos }));
+  h.setRandom(0);
+  const first = await h.assets.chooseBase(photos[0].sha256);
+  assert.deepEqual(JSON.parse(JSON.stringify(first)), {
+    path: photos[1].path, name: photos[1].name, sha256: photos[1].sha256,
+    mimeType: photos[1].mimeType, byteLength: photos[1].byteLength
+  });
+  assert.equal(Object.isFrozen(first), true);
+  assert.equal(first.id, undefined);
+  assert.equal(first.base64, undefined);
+  assert.equal(h.calls.length, 1);
+  const [url, options] = h.calls[0];
+  assert.equal(url, "http://127.0.0.1:5500/artwork/assets/base-photos.json");
+  assert.equal(options.redirect, "error");
+  assert.equal(options.credentials, "same-origin");
+  assert.equal(options.cache, "no-cache");
+  h.setRandom(0.999999);
+  assert.equal((await h.assets.chooseBase(photos[0].sha256)).sha256, photos[2].sha256);
+  assert.equal(h.calls.length, 1, "validated catalog is reused within the page");
+});
+
+test("concurrent catalog choices share one fetch and return separate immutable descriptors", async () => {
+  let finish;
+  const h = fixture(() => new Promise(resolve => { finish = () => resolve(Response.json({ version: 1, photos: [base()] })); }));
+  const first = h.assets.chooseBase("0".repeat(64));
+  const second = h.assets.chooseBase("0".repeat(64));
+  assert.equal(h.calls.length, 1);
+  finish();
+  const choices = await Promise.all([first, second]);
+  assert.notStrictEqual(choices[0], choices[1]);
+  assert.equal(Object.isFrozen(choices[0]), true);
+  assert.equal(Object.isFrozen(choices[1]), true);
+  assert.equal(h.calls.length, 1);
+});
+
+test("invalid original hashes and remote catalog bases fail before fetching", async () => {
+  const h = fixture();
+  for (const value of [undefined, null, "", "A".repeat(64), "a".repeat(63), [], ["a".repeat(64)]]) {
+    await assert.rejects(h.assets.chooseBase(value), /fingerprint is invalid/);
+  }
+  assert.equal(h.calls.length, 0);
+  const remote = fixture(undefined, "https://other.example/tool.html");
+  await assert.rejects(remote.assets.chooseBase("0".repeat(64)), /this website/);
+  assert.equal(remote.calls.length, 0);
+});
+
+test("catalog failures, bad versions and invalid entries are not cached and never silently select another pool", async () => {
+  for (const invalid of [null, {}, { version: 2, photos: [base()] }, { version: 1, photos: [] },
+    { version: 1, photos: [base(), base()] },
+    { version: 1, photos: [base(), { ...base(), sha256: "b".repeat(64) }] },
+    { version: 1, photos: [{ ...base(), path: "https://other.example/image.jpg" }] },
+    { version: 1, photos: [{ ...base(), sha256: [base().sha256] }] }]) {
+    let attempts = 0;
+    const h = fixture(async () => Response.json(++attempts === 1 ? invalid : { version: 1, photos: [base()] }));
+    await assert.rejects(h.assets.chooseBase("0".repeat(64)), /invalid|duplicate/);
+    assert.equal((await h.assets.chooseBase("0".repeat(64))).sha256, base().sha256);
+    assert.equal(h.calls.length, 2);
+  }
+  for (const response of [() => new Response("missing", { status: 404 }), () => new Response("not JSON")]) {
+    const h = fixture(async () => response());
+    await assert.rejects(h.assets.chooseBase("0".repeat(64)), /loaded|invalid/);
+  }
+});
+
+test("catalog responses enforce the one-MiB bound before selecting a photograph", async () => {
+  for (const response of [
+    () => new Response("{}", { headers: { "content-length": String(1024 * 1024 + 1) } }),
+    () => new Response(new Uint8Array(1024 * 1024 + 1)),
+    () => new Response("{}", { headers: { "content-length": "not-a-size" } })
+  ]) {
+    const h = fixture(async () => response());
+    await assert.rejects(h.assets.chooseBase("0".repeat(64)), /size limit/);
+    assert.equal(h.calls.length, 1);
+  }
+});
+
+test("a catalog containing only the submitted original fails without requesting an image", async () => {
+  const h = fixture(async () => Response.json({ version: 1, photos: [base()] }));
+  await assert.rejects(h.assets.chooseBase(base().sha256), /no different website photograph/);
+  assert.equal(h.calls.length, 1);
 });

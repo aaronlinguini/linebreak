@@ -468,13 +468,15 @@ function bootstrap_(project) {
   var includeParticipants = includeParticipants_();
   var sources = eligibleSources_(project, "", includeParticipants);
   var artistCount = sources.filter(function (source) { return source.kind === "artist"; }).length;
+  var preview = sources.length ? previewBase_(project, sources[Math.floor(Math.random() * sources.length)]) : null;
   return {
     totalEligible: sources.length,
     artistCount: artistCount,
     participantCount: sources.length - artistCount,
     includeParticipantPhotos: includeParticipants,
     maxOriginalBytes: EXPOSURE_CONFIG_.maxOriginalBytes,
-    maxResultBytes: EXPOSURE_CONFIG_.maxResultBytes
+    maxResultBytes: EXPOSURE_CONFIG_.maxResultBytes,
+    previewBase: preview
   };
 }
 
@@ -484,6 +486,10 @@ function begin_(project, payload) {
     throw apiError_("INVALID_REQUEST", "The previous exposure could not be verified.");
   }
   var reusing = isObject_(payload.reuse);
+  var preferredHash = payload.preferredBaseSha256;
+  if (preferredHash !== undefined && (reusing || typeof preferredHash !== "string" || !/^[0-9a-f]{64}$/.test(preferredHash))) {
+    throw apiError_("INVALID_REQUEST", "The preferred photograph choice is invalid.");
+  }
   if (reusing && payload.reuse.sameBase !== undefined && typeof payload.reuse.sameBase !== "boolean") {
     throw apiError_("INVALID_REQUEST", "The previous pairing choice is invalid.");
   }
@@ -533,6 +539,14 @@ function begin_(project, payload) {
       previous && Boolean(savedSameBase) !== sameBase)) {
     throw apiError_("SUBMISSION_CONFLICT", "This submission already belongs to a different photograph. Start a new submission.");
   }
+  var preferred = null;
+  if (preferredHash !== undefined) {
+    if (submission && submission.baseSha256 !== preferredHash) {
+      throw apiError_("SUBMISSION_CONFLICT", "This submission already belongs to a different photograph pairing. Retry the original choice.");
+    }
+    preferred = findRecord_(eligibleSources_(project, originalHash, includeParticipants_()), "sha256", preferredHash);
+    if (!preferred) throw apiError_("BASE_UNAVAILABLE", "The chosen photograph is unavailable for this pairing. Please retry the same photo.", Boolean(submission));
+  }
   if (!submission) {
     reserveUsage_(project, "submission:" + submissionId, "submission", 0);
     var source = previous
@@ -541,10 +555,11 @@ function begin_(project, payload) {
     if (!source || source.sha256 !== originalHash) throw apiError_("ARCHIVE_UNAVAILABLE", "The original photograph is unavailable. Please contact the artist.");
     submission = {
       submissionId: submissionId, token: newToken_(), originalId: source.sourceId,
-      originalSha256: originalHash, baseId: sameBase ? previous.baseId : "", status: sameBase ? "paired" : "pending", resultId: "",
+      originalSha256: originalHash, baseId: preferred ? preferred.sourceId : sameBase ? previous.baseId : "",
+      status: preferred || sameBase ? "paired" : "pending", resultId: "",
       resultSha256: "", width: "", height: "", settingsJson: "", createdAt: now_(), completedAt: "",
       allowReuse: allowReuse, parentSubmissionId: previous ? previous.submissionId : "",
-      baseSha256: sameBase ? previous.baseSha256 : ""
+      baseSha256: preferred ? preferred.sha256 : sameBase ? previous.baseSha256 : ""
     };
     writeRecord_(project.submissions, EXPOSURE_CONFIG_.submissionsHeaders, submission);
   }
@@ -764,8 +779,21 @@ function matchesArtistAsset_(project, source) {
     asset.mimeType === source.mimeType && asset.byteLength === Number(source.byteLength);
 }
 
+function previewBase_(project, source) {
+  if (project.artistAssets && source.kind === "artist") return readBase_(project, source);
+  var size = Number(source.byteLength);
+  if (!/^[0-9a-f]{64}$/.test(source.sha256 || "") || !/^image\/(jpeg|png|webp|avif)$/.test(source.mimeType || "") ||
+      !Number.isSafeInteger(size) || size < 1 || size > EXPOSURE_CONFIG_.maxOriginalBytes) {
+    throw apiError_("BASE_UNAVAILABLE", "The photograph preview is unavailable. Please retry.");
+  }
+  return { id: source.sourceId, name: JSON.parse(source.nameJson), mimeType: source.mimeType,
+    sha256: source.sha256, byteLength: size };
+}
+
 function readBase_(project, source) {
-  if (!project.artistAssets || source.kind !== "artist") return readSource_(source);
+  if (!project.artistAssets || source.kind !== "artist") {
+    return Object.assign(readSource_(source), { sha256: source.sha256, byteLength: Number(source.byteLength) });
+  }
   if (!matchesArtistAsset_(project, source)) throw apiError_("BASE_UNAVAILABLE", "The assigned website photograph is unavailable. Please contact the artist.");
   var asset = project.artistAssets[source.sha256];
   return { id: source.sourceId, name: asset.name, mimeType: asset.mimeType,

@@ -129,7 +129,16 @@ const PROJECT_SETTINGS = Object.freeze({
 function createExposureProcessor({ mixerFactory = ExposureMath.createMixer } = {}) {
   const MAX_BYTES = 30 * 1024 * 1024;
   const SOURCE_EDGE = 2400;
-  const nextFrame = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const nextFrame = () => new Promise((resolve) => {
+    if (typeof MessageChannel !== "function") { setTimeout(resolve, 0); return; }
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => {
+      channel.port1.close();
+      channel.port2.close();
+      resolve();
+    };
+    channel.port2.postMessage(null);
+  });
   const context = (canvas) => {
     const result = canvas.getContext("2d", { willReadFrequently: true, colorSpace: "srgb" });
     if (!result) throw new Error("This browser cannot process the photograph.");
@@ -325,7 +334,7 @@ function initializeExposureStudio() {
   const developingMessage = ui.busy.textContent;
   const state = { working: false, connecting: false, ready: false, hasResult: false, participant: null,
     selectedFile: null, selectionChoices: null, queued: false, downloadUrl: null, rePairUnavailable: false,
-    displayedSubmissionId: null, previewing: false };
+    displayedSubmissionId: null, previewing: false, previewBase: null };
   ui.monochrome.checked = PROJECT_SETTINGS.monochrome;
   ui.allowReuse.checked = false;
   const { loadPhoto, releasePhoto, develop } = createExposureProcessor();
@@ -333,7 +342,7 @@ function initializeExposureStudio() {
   const workflow = new ExposureArchiveWorkflow({
     storage, settings: PROJECT_SETTINGS, render: renderSubmission,
     onProgress: ({ stage }) => {
-      if (stage !== "archive") return;
+      if (stage !== "preview" && stage !== "archive") return;
       presentResult(workflow.operation);
       state.previewing = true;
       ui.busy.textContent = "Finishing…";
@@ -442,6 +451,7 @@ function initializeExposureStudio() {
     try {
       const collection = await storage.connect();
       state.ready = collection.totalEligible > 0;
+      state.previewBase = collection.previewBase || null;
     } catch (error) {
       state.ready = false;
       console.warn("Photo collection unavailable:", error.code || error.name, error.message);
@@ -472,8 +482,9 @@ function initializeExposureStudio() {
     ui.resultEmpty.hidden = true;
   }
   async function finishSubmission(action) {
-    state.previewing = false;
-    setWorking(true);
+    state.previewing = workflow.pending && state.hasResult &&
+      state.displayedSubmissionId === workflow.operation?.submissionId;
+    setWorking(true, state.previewing ? "Finishing…" : developingMessage);
     try {
       const operation = await action();
       state.rePairUnavailable = false;
@@ -496,10 +507,24 @@ function initializeExposureStudio() {
   }
 
   async function startSelectedPhoto() {
-    if (!state.queued || !state.participant || state.working || workflow.pending || !state.ready) return;
+    if (!state.queued || !state.participant || state.working || workflow.pending || !storage.configured) return;
+    if (!state.ready && (typeof ExposureBaseAssets === "undefined" || typeof ExposureBaseAssets.chooseBase !== "function")) return;
     state.queued = false;
     clearError();
-    await finishSubmission(() => workflow.start(state.selectedFile, state.selectionChoices));
+    const candidate = state.ready ? state.previewBase : null;
+    state.previewBase = null;
+    await finishSubmission(async () => {
+      let previewBase = candidate;
+      if (previewBase || (storage.configured && typeof ExposureBaseAssets !== "undefined")) {
+        const digest = await crypto.subtle.digest("SHA-256", await state.selectedFile.arrayBuffer());
+        const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+        // A photo cannot be paired with an identical copy of itself.
+        if (previewBase && hash === previewBase.sha256) previewBase = null;
+        if (!previewBase && !candidate && typeof ExposureBaseAssets !== "undefined") previewBase = await ExposureBaseAssets.chooseBase(hash);
+      }
+      return workflow.start(state.selectedFile, Object.freeze({ ...state.selectionChoices, ...(previewBase ? { previewBase } : {}) }));
+    });
+    if (!workflow.pending) connectArchive();
   }
 
   async function chooseParticipantPhoto(input) {

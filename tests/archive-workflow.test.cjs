@@ -15,6 +15,15 @@ const file = new Blob([new Uint8Array([1, 2, 3, 4])], { type: "image/png" });
 const blob = new Blob([new Uint8Array([255, 216, 255, 217])], { type: "image/jpeg" });
 const begin = () => ({ submissionId: id, token: "private-token", originalId: "original-1", base: { id: "base-1", mimeType: "image/jpeg", base64: "AA==" } });
 const receipt = () => ({ submissionId: id, saved: true, resultId: "result-1", originalId: "original-1", baseId: "base-1" });
+const previewBase = () => ({ id: "base-1", name: "été #1? 50%.jpg", mimeType: "image/jpeg",
+  path: "assets/base-photos/été #1? 50%.jpg", sha256: "a".repeat(64), byteLength: 1234 });
+const flush = () => new Promise(resolve => setImmediate(resolve));
+const deferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+};
 
 function fixture(overrides = {}) {
   const calls = [];
@@ -24,7 +33,8 @@ function fixture(overrides = {}) {
     ...overrides.storage
   };
   const render = overrides.render || (async (request) => { calls.push(["render", request]); return { blob, width: 1200, height: 800 }; });
-  const workflow = new Workflow({ storage, render, settings: overrides.settings || settings, makeId: () => id, onProgress: ({ stage }) => calls.push(["stage", stage]) });
+  const workflow = new Workflow({ storage, render, settings: overrides.settings || settings, makeId: () => id,
+    onProgress: progress => { calls.push(["stage", progress.stage]); overrides.onProgress?.(progress); } });
   return { workflow, calls, storage };
 }
 
@@ -79,6 +89,229 @@ test("a static base descriptor reaches the renderer unchanged and keeps its arch
   await assert.rejects(mismatched.workflow.start(file), /did not confirm/);
   assert.equal(mismatched.workflow.pending, true);
   assert.strictEqual(mismatched.workflow.operation.begin.base, base);
+});
+
+test("a local manifest candidate renders before Google supplies its authoritative source ID", async () => {
+  const previewBase = { mimeType: "image/jpeg", path: "assets/base-photos/base.jpg",
+    name: "base.jpg", sha256: "a".repeat(64), byteLength: 1234 };
+  const { workflow, calls } = fixture({ storage: {
+    begin: async () => ({ ...begin(), base: { ...previewBase, id: "base-1" } })
+  } });
+  const saved = await workflow.start(file, { previewBase });
+  assert.equal(saved.previewBase.id, undefined);
+  assert.equal(saved.begin.base.id, "base-1");
+  assert.equal(saved.receipt.baseId, "base-1");
+  assert.equal(calls.find(([type]) => type === "render")[1].base.id, undefined);
+  assert.equal(calls.filter(([type]) => type === "complete").length, 1);
+});
+
+test("a pinned static base develops while the original upload is pending and previews before archive confirmation", async () => {
+  const original = deferred();
+  const developing = deferred();
+  const requests = [];
+  const renders = [];
+  const base = previewBase();
+  let previewResult;
+  const { workflow, calls } = fixture({
+    storage: { begin: request => { requests.push(request); return original.promise; } },
+    render: request => { renders.push(request); return developing.promise; },
+    onProgress: ({ stage }) => { if (stage === "preview") previewResult = workflow.operation.result; }
+  });
+  const saving = workflow.start(file, { allowReuse: true, monochrome: true, previewBase: base });
+  await flush();
+  assert.equal(requests.length, 1);
+  assert.equal(renders.length, 1, "local development must not wait for the original upload response");
+  assert.strictEqual(requests[0].originalFile, file);
+  assert.equal(requests[0].allowReuse, true);
+  assert.equal(requests[0].preferredBaseSha256, base.sha256);
+  assert.deepEqual({ ...renders[0].base }, base);
+  assert.equal(renders[0].settings.monochrome, true);
+  developing.resolve({ blob, width: 1200, height: 800 });
+  await flush();
+  assert.strictEqual(previewResult, workflow.operation.result);
+  assert.strictEqual(previewResult.blob, blob);
+  assert.equal(workflow.operation.begin, null);
+  assert.equal(workflow.operation.receipt, null);
+  assert.equal(workflow.pending, true);
+  assert.equal(workflow.busy, true);
+  assert.equal(calls.some(([type]) => type === "complete"), false);
+  assert.equal(calls.some(([type, stage]) => type === "stage" && stage === "saved"), false);
+  original.resolve({ ...begin(), base: { ...base } });
+  const saved = await saving;
+  const archived = calls.find(([type]) => type === "complete")[1];
+  assert.strictEqual(archived.resultBlob, blob);
+  assert.strictEqual(archived.settings, renders[0].settings);
+  assert.equal(saved.begin.base.sha256, base.sha256);
+  assert.equal(saved.receipt.saved, true);
+  assert.equal(workflow.pending, false);
+});
+
+test("a confirmed original waits for its concurrent render before completing the archive", async () => {
+  const developing = deferred();
+  const base = previewBase();
+  const { workflow, calls } = fixture({ storage: { begin: async () => ({ ...begin(), base }) },
+    render: () => developing.promise });
+  const saving = workflow.start(file, { previewBase: base });
+  await flush();
+  assert.equal(calls.some(([type]) => type === "complete"), false);
+  assert.equal(workflow.operation.result, null);
+  assert.equal(workflow.pending, true);
+  developing.resolve({ blob, width: 1200, height: 800 });
+  await saving;
+  assert.equal(calls.filter(([type]) => type === "complete").length, 1);
+  assert.equal(calls.some(([type, stage]) => type === "stage" && stage === "preview"), true);
+});
+
+test("a rejected original upload retains its concurrent JPEG and retries the same pinned request", async () => {
+  const original = deferred();
+  const base = previewBase();
+  const requests = [];
+  const renders = [];
+  const { workflow, calls, storage } = fixture({
+    storage: { begin: request => { requests.push(request); return original.promise; } },
+    render: async request => { renders.push(request); return { blob, width: 1200, height: 800 }; }
+  });
+  const saving = workflow.start(file, { allowReuse: true, monochrome: true, previewBase: base });
+  await flush();
+  const pending = workflow.operation;
+  const result = pending.result;
+  assert.strictEqual(result.blob, blob);
+  const rejected = assert.rejects(saving, error => !error.originalSaved && error.resultReady);
+  original.reject(new Error("original response lost"));
+  await rejected;
+  assert.equal(workflow.pending, true);
+  assert.equal(workflow.busy, false);
+  assert.equal(calls.some(([type]) => type === "complete"), false);
+  storage.begin = async request => { requests.push(request); return { ...begin(), base: previewBase() }; };
+  workflow.settings = Object.freeze({ ...settings, monochrome: false, contrast: 40 });
+  const saved = await workflow.retry();
+  assert.strictEqual(saved, pending);
+  assert.strictEqual(saved.result, result);
+  assert.equal(renders.length, 1, "a retry preserves the already-previewed JPEG");
+  assert.equal(requests.length, 2);
+  assert.deepEqual({ ...requests[0] }, { ...requests[1] });
+  assert.equal(requests[1].preferredBaseSha256, base.sha256);
+  assert.strictEqual(requests[1].originalFile, file);
+  const archived = calls.find(([type]) => type === "complete")[1];
+  assert.strictEqual(archived.resultBlob, result.blob);
+  assert.strictEqual(archived.settings, renders[0].settings);
+  assert.equal(archived.settings.monochrome, true);
+});
+
+test("a confirmed base must match every pinned static descriptor field before any result can be archived", async () => {
+  for (const changed of [
+    { id: "another-base" }, { sha256: "b".repeat(64) }, { mimeType: "image/png" },
+    { byteLength: 1235 }, { name: "another.jpg" }, { path: "assets/base-photos/another.jpg" }
+  ]) {
+    const base = previewBase();
+    const requests = [];
+    const renders = [];
+    const { workflow, calls, storage } = fixture({
+      storage: { begin: async request => { requests.push(request); return { ...begin(), base: { ...base, ...changed } }; } },
+      render: async request => { renders.push(request); return { blob, width: 1200, height: 800 }; }
+    });
+    await assert.rejects(workflow.start(file, { previewBase: base }), /confirm|match/i);
+    const pending = workflow.operation;
+    assert.equal(pending.begin, null, `a mismatched ${Object.keys(changed)[0]} must not be committed`);
+    assert.equal(pending.receipt, null);
+    assert.equal(calls.some(([type]) => type === "complete"), false);
+    assert.equal(calls.some(([type, stage]) => type === "stage" && stage === "saved"), false);
+    assert.equal(workflow.pending, true);
+    assert.strictEqual(pending.result.blob, blob);
+    storage.begin = async request => { requests.push(request); return { ...begin(), base: previewBase() }; };
+    await workflow.retry();
+    assert.strictEqual(workflow.operation, pending);
+    assert.equal(renders.length, 1);
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].preferredBaseSha256, base.sha256);
+    assert.equal(requests[1].preferredBaseSha256, base.sha256);
+    assert.equal(workflow.pending, false);
+  }
+});
+
+test("a dynamic pinned candidate without a static path waits for its authenticated base before rendering", async () => {
+  const original = deferred();
+  const base = previewBase();
+  delete base.path;
+  const confirmed = { ...base, base64: "AA==" };
+  const requests = [];
+  const { workflow, calls } = fixture({ storage: {
+    begin: request => { requests.push(request); return original.promise; }
+  } });
+  const saving = workflow.start(file, { previewBase: base });
+  await flush();
+  assert.equal(requests[0].preferredBaseSha256, base.sha256);
+  assert.equal(calls.some(([type]) => type === "render" || type === "complete"), false);
+  assert.equal(calls.some(([type, stage]) => type === "stage" && stage === "preview"), false);
+  original.resolve({ ...begin(), base: confirmed });
+  await saving;
+  assert.strictEqual(calls.find(([type]) => type === "render")[1].base, confirmed);
+  assert.equal(workflow.operation.receipt.saved, true);
+});
+
+test("a failed concurrent render retains the confirmed original and retries only development", async () => {
+  const base = previewBase();
+  const developing = deferred();
+  let begins = 0;
+  const { workflow, calls } = fixture({
+    storage: { begin: async () => { begins++; return { ...begin(), base }; } },
+    render: () => developing.promise
+  });
+  const saving = workflow.start(file, { previewBase: base });
+  await flush();
+  const rejected = assert.rejects(saving, error => error.originalSaved && !error.resultReady);
+  developing.reject(new Error("image decoding failed"));
+  await rejected;
+  assert.equal(workflow.operation.begin.base.sha256, base.sha256);
+  assert.equal(calls.some(([type]) => type === "complete"), false);
+  assert.equal(calls.some(([type, stage]) => type === "stage" && stage === "preview"), false);
+  workflow.render = async () => ({ blob, width: 1200, height: 800 });
+  await workflow.retry();
+  assert.equal(begins, 1);
+  assert.equal(workflow.pending, false);
+});
+
+test("an invalid concurrent render cannot produce a preview or an archived result", async () => {
+  for (const result of [
+    { blob: new Blob(["not JPEG"], { type: "image/png" }), width: 1200, height: 800 },
+    { blob: new Blob([], { type: "image/jpeg" }), width: 1200, height: 800 },
+    { blob, width: 0, height: 800 }
+  ]) {
+    const base = previewBase();
+    const { workflow, calls } = fixture({ storage: { begin: async () => ({ ...begin(), base }) },
+      render: async () => result });
+    await assert.rejects(workflow.start(file, { previewBase: base }), /develop|exposure/i);
+    assert.equal(workflow.operation.result, null);
+    assert.equal(workflow.operation.receipt, null);
+    assert.equal(calls.some(([type]) => type === "complete"), false);
+    assert.equal(calls.some(([type, stage]) => type === "stage" && stage === "preview"), false);
+  }
+});
+
+test("colour variants and later pairings do not inherit the initial static candidate preference", async () => {
+  const { workflow, calls, storage } = modeFixture();
+  const originalBegin = storage.begin;
+  storage.begin = async request => ({ ...await originalBegin(request), base: previewBase() });
+  await workflow.start(file, { previewBase: previewBase() });
+  const assigned = deferred();
+  storage.begin = async request => {
+    const response = await originalBegin(request);
+    await assigned.promise;
+    return response;
+  };
+  const changing = workflow.changeMonochrome(true);
+  await flush();
+  assert.equal(calls.filter(([type]) => type === "render").length, 1, "a colour variant still waits for authenticated reuse");
+  let requests = calls.filter(([type]) => type === "begin").map(([, request]) => request);
+  assert.equal(requests[0].preferredBaseSha256, previewBase().sha256);
+  assert.equal("preferredBaseSha256" in requests[1], false);
+  assert.equal(requests[1].reuse.sameBase, true);
+  assigned.resolve();
+  await changing;
+  await workflow.rePair();
+  requests = calls.filter(([type]) => type === "begin").map(([, request]) => request);
+  assert.equal("preferredBaseSha256" in requests[2], false);
+  assert.equal("sameBase" in requests[2].reuse, false);
 });
 
 test("ambiguous or absent base data never reaches rendering or archives a result", async () => {

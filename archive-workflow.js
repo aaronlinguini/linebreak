@@ -14,14 +14,18 @@ class ExposureArchiveWorkflow {
 
   get pending() { return Boolean(this.operation && !this.operation.receipt); }
 
-  async start(file, { allowReuse = false, monochrome = this.settings.monochrome } = {}) {
+  async start(file, { allowReuse = false, monochrome = this.settings.monochrome, previewBase = null } = {}) {
     if (this.busy || this.pending) throw new Error("Finish saving this photograph before adding another.");
     if (typeof allowReuse !== "boolean") throw new Error("The photograph sharing choice is invalid.");
     if (typeof monochrome !== "boolean") throw new Error("The black-and-white choice is invalid.");
+    if (previewBase && ((!previewBase.id && !previewBase.path) || typeof previewBase.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(previewBase.sha256) ||
+        !previewBase.mimeType || !Number.isSafeInteger(previewBase.byteLength) || previewBase.byteLength < 1 ||
+        previewBase.base64 !== undefined)) throw new Error("The preview photograph is invalid.");
     // Save these settings with this exposure so retries cannot change them.
     const settings = Object.freeze({ ...this.settings, monochrome });
     this.operation = { submissionId: this.makeId(), file, allowReuse, settings,
-      reuse: null, begin: null, result: null, receipt: null };
+      reuse: null, previewBase: previewBase ? Object.freeze({ ...previewBase }) : null,
+      begin: null, result: null, receipt: null };
     return this.run();
   }
 
@@ -66,36 +70,57 @@ class ExposureArchiveWorkflow {
     return this.run();
   }
 
+  async develop(operation, base) {
+    const result = await this.render({ file: operation.file, base,
+      submissionId: operation.submissionId, settings: operation.settings });
+    if (!result?.blob || result.blob.type !== "image/jpeg" || result.blob.size === 0 ||
+        !Number.isInteger(result.width) || result.width < 1 ||
+        !Number.isInteger(result.height) || result.height < 1) {
+      throw new Error("The exposure could not be developed. Please retry.");
+    }
+    operation.result = result;
+    this.onProgress({ stage: "preview" });
+  }
+
   async run() {
     if (this.busy) throw new Error("This photograph is still being saved.");
     this.busy = true;
     const operation = this.operation;
     let stage = operation.reuse ? "pairing" : "original";
     try {
+      // Asset development can finish while Google receives and saves the original.
+      // Capture errors immediately, and settle both tasks before allowing a retry.
+      const earlyRender = !operation.result && operation.previewBase?.path
+        ? this.develop(operation, operation.previewBase).then(() => null, error => error) : null;
       if (!operation.begin) {
         this.onProgress({ stage });
-        const begin = await this.storage.begin({ submissionId: operation.submissionId,
-          ...(operation.reuse ? { reuse: operation.reuse } : { originalFile: operation.file, allowReuse: operation.allowReuse }) });
-        if (begin.submissionId !== operation.submissionId || !begin.token || !begin.originalId ||
-            !begin.base?.id || !begin.base.mimeType || Boolean(begin.base.base64) === Boolean(begin.base.path)) {
-          throw new Error("The collection did not confirm the photograph. Please retry.");
+        try {
+          const begin = await this.storage.begin({ submissionId: operation.submissionId,
+            ...(operation.reuse ? { reuse: operation.reuse } : { originalFile: operation.file, allowReuse: operation.allowReuse }),
+            ...(operation.previewBase ? { preferredBaseSha256: operation.previewBase.sha256 } : {}) });
+          if (begin.submissionId !== operation.submissionId || !begin.token || !begin.originalId ||
+              !begin.base?.id || !begin.base.mimeType || Boolean(begin.base.base64) === Boolean(begin.base.path)) {
+            throw new Error("The collection did not confirm the photograph. Please retry.");
+          }
+          if (operation.previewBase && ["id", "name", "mimeType", "sha256", "byteLength", "path"].some(key =>
+            operation.previewBase[key] !== undefined && operation.previewBase[key] !== begin.base[key])) {
+            throw new Error("The collection did not confirm the preview photograph. Please retry.");
+          }
+          operation.begin = begin;
+        } catch (error) {
+          if (earlyRender) await earlyRender;
+          throw error;
         }
-        operation.begin = begin;
       }
 
       stage = "develop";
+      if (earlyRender) {
+        const error = await earlyRender;
+        if (error) throw error;
+      }
       if (!operation.result) {
         this.onProgress({ stage });
-        const result = await this.render({
-          file: operation.file, base: operation.begin.base,
-          submissionId: operation.submissionId, settings: operation.settings
-        });
-        if (!result?.blob || result.blob.type !== "image/jpeg" || result.blob.size === 0 ||
-            !Number.isInteger(result.width) || result.width < 1 ||
-            !Number.isInteger(result.height) || result.height < 1) {
-          throw new Error("The exposure could not be developed. Please retry.");
-        }
-        operation.result = result;
+        await this.develop(operation, operation.begin.base);
       }
 
       stage = "archive";

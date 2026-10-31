@@ -149,7 +149,57 @@ test("participant upload transmits the actual original file bytes", async () => 
   assert.equal(outgoing.payload.original.name, "Original.PNG");
   assert.equal(outgoing.payload.original.mimeType, "image/png");
   assert.deepEqual(Buffer.from(outgoing.payload.original.base64, "base64"), bytes);
+  assert.equal("preferredBaseSha256" in outgoing.payload, false);
   harness.storage.dispose();
+});
+
+test("a preferred artist hash travels at the top level with the untouched original and consent", async () => {
+  const harness = makeTransport(); await harness.connect();
+  const bytes = Buffer.from([0, 255, 13, 10, 200, 42]);
+  const originalFile = Object.freeze({ name: "my photo.PNG", type: "image/png", bytes });
+  const preferredBaseSha256 = "0123456789abcdef".repeat(4);
+  const readBase64 = harness.storage._readBase64.bind(harness.storage);
+  let suppliedFile;
+  harness.storage._readBase64 = source => { suppliedFile = source; return readBase64(source); };
+  await harness.storage.begin({ submissionId: "preferred-submission", originalFile, allowReuse: true, preferredBaseSha256 });
+  const outgoing = harness.messages.filter(({ message }) => message.request?.action === "begin").at(-1).message.request.payload;
+  assert.strictEqual(suppliedFile, originalFile);
+  assert.deepEqual(outgoing, {
+    submissionId: "preferred-submission", allowReuse: true, preferredBaseSha256,
+    original: { name: originalFile.name, mimeType: originalFile.type, base64: bytes.toString("base64") }
+  });
+  assert.deepEqual(originalFile.bytes, bytes);
+  assert.equal("reuse" in outgoing, false);
+  harness.storage.dispose();
+});
+
+test("invalid preferred hashes are rejected before connecting or sending an RPC", async () => {
+  const validHash = "a".repeat(64);
+  for (const preferredBaseSha256 of [null, "", "not-a-hash", "a".repeat(63), "a".repeat(65), "A".repeat(64),
+    123, {}, [], [validHash], new String(validHash)]) {
+    const harness = makeTransport();
+    await assert.rejects(harness.storage.begin({ submissionId: "submission-1",
+      originalFile: { name: "photo.jpg", type: "image/jpeg", bytes: Buffer.from([255, 216, 255]) },
+      preferredBaseSha256 }), error => error.code === "INVALID_SUBMISSION");
+    assert.equal(harness.iframes.length, 0);
+    assert.equal(harness.messages.length, 0);
+    assert.equal(harness.listeners.size, 0);
+    harness.storage.dispose();
+  }
+});
+
+test("a preferred hash cannot change an authenticated re-pairing or same-base variant", async () => {
+  for (const sameBase of [undefined, true]) {
+    const harness = makeTransport();
+    const reuse = { submissionId: "previous-submission", token: "private-token",
+      ...(sameBase === undefined ? {} : { sameBase }) };
+    await assert.rejects(harness.storage.begin({ submissionId: "submission-2", reuse,
+      preferredBaseSha256: "b".repeat(64) }), error => error.code === "INVALID_SUBMISSION");
+    assert.equal(harness.iframes.length, 0);
+    assert.equal(harness.messages.length, 0);
+    assert.equal(harness.listeners.size, 0);
+    harness.storage.dispose();
+  }
 });
 
 test("sharing choice travels with the original, while another pairing sends no image bytes", async () => {

@@ -138,6 +138,12 @@ Photo selection freezes both the colour mode and future-use consent, including w
 
 Each operation freezes its mode for rendering, archiving, and retries; an uncertain save retries the identical JPEG and recipe. Another random pairing inherits the current operation's colour mode and requests a different base. **Start over** lets the visitor choose again for a new exposure. This affects the finished output only: original upload bytes, orientation, and future-use consent remain independent and unchanged.
 
+## Development and saving
+
+The browser develops artist pairings directly from `assets/base-photos/` while Google connects and saves the exact original. If Google has already supplied a random candidate from the full artist/participant pool, that candidate is used. Otherwise, the first pairing is selected from the website manifest, excluding the uploaded file’s SHA-256. Consented participant bases remain in the random pool once Google is available; they still need a Google image download. There is no Drive fallback for artist image bytes.
+
+A preview is shown as soon as rendering finishes. Google must confirm the same hash and metadata before the result is archived. No upload response may silently substitute another base. Saving failures retain the preview and the same JPEG for retry; controls unlock only after a matching receipt. Pixel batches use browser message tasks instead of repeated zero-delay timers, preserving all calculations, dimensions and JPEG settings.
+
 ## Checks
 
 With Node 18 or newer:
@@ -149,11 +155,13 @@ node scripts/build-base-assets.cjs --check
 node --test tests/*.test.cjs
 ```
 
-The current local revision passes **375/375 checks**, including asset building/loading, exact source identity, saved colour variants, retries, previews, and batched sheet reads. The builder's read-only check reconfirmed 113 unchanged photographs, Version 7 is deployed, and the owner refresh verified all 113 asset/index matches with zero unmatched entries. Browser checks used an actual HTTP artist asset and the real processor in both colour modes with simulated storage; they do not establish a live archived result or physical-device behaviour. A fresh Version 7 production bootstrap succeeded after Retry following an initial handshake timeout.
+The current revision passes **403/403 checks**, including local base selection, concurrent rendering and original saving, exact source identity, colour variants, retries, consent and batched sheet reads. Google **Version 8** is deployed on the existing URL. A foreground Live Server test with a synthetic 2400 × 1600 participant image and an actual artist asset displayed the result at **0.92 seconds**, before Google connected at 5.89 seconds; the matching real archive receipt arrived at 18.84 seconds. These are individual test timings, not a guarantee for every photo or device. Physical-device camera and consent-folder checks remain separate.
 
 The checks cover exposure maths, exact original bytes, consent, another pairing, duplicate and self-pairing rules, result eligibility timing, interrupted archive writes, stable retries, limited-access API boundaries, owner imports, iframe-message validation, and the separation of HTML, CSS, and JavaScript. Google services are simulated in those tests; live account authorization and deployment require the setup guide's smoke test.
 
 ## Version history
+
+Checkpoint **`cfd8b73`** and Google **Version 7** preserve the state before local-first preview development. Reverting local files and selecting the earlier Google deployment version are separate operations; preserve any later work first.
 
 Git history starts with the current restored project. The `baseline` tag names this first saved version. Later work should be saved in small commits so it can be undone directly.
 

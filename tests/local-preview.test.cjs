@@ -5,12 +5,13 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { MessageChannel } = require("node:worker_threads");
 
 const root = path.resolve(__dirname, "..");
 const sharedSource = fs.readFileSync(path.join(root, "scripts.js"), "utf8");
 const localSource = fs.readFileSync(path.join(root, "local-test.js"), "utf8");
 
-function processorHarness(imageSize = { width: 4, height: 6 }, processorOptions = {}) {
+function processorHarness(imageSize = { width: 4, height: 6 }, processorOptions = {}, scheduling = {}) {
   const canvases = [];
   const decoded = [];
   function canvas() {
@@ -49,7 +50,7 @@ function processorHarness(imageSize = { width: 4, height: 6 }, processorOptions 
     createElement(tag) { assert.equal(tag, "canvas"); return canvas(); }
   };
   const sandbox = vm.createContext({
-    document, setTimeout,
+    document, setTimeout, ...scheduling,
     URL: { createObjectURL() { return "blob:test-photo"; }, revokeObjectURL() {} },
     Image: class {
       constructor() { this.naturalWidth = imageSize.width; this.naturalHeight = imageSize.height; }
@@ -71,7 +72,7 @@ function processorHarness(imageSize = { width: 4, height: 6 }, processorOptions 
   // No GoogleDriveStorage, archive workflow, or endpoint config is supplied.
   vm.runInContext(sharedSource, sandbox);
   const processor = sandbox.createExposureProcessor(processorOptions);
-  return { processor, canvas, canvases, decoded };
+  return { processor, canvas, canvases, decoded, createMixer: vm.runInContext("ExposureMath.createMixer", sandbox) };
 }
 
 test("the shared processor loads on a non-archive page without a Google connection", () => {
@@ -114,6 +115,63 @@ test("the shared browser develop path uses the actual two-way light treatment an
   assert.ok(decoded.every((bitmap) => bitmap.closed), "both decoded images should be released");
   assert.equal(canvases[1].width, 1, "scratch canvas should release its backing pixels");
   assert.equal(canvases[1].height, 1);
+});
+
+test("message-channel and timer yields keep multi-batch colour and monochrome pixels identical and release every port", async (t) => {
+  const channels = [];
+  class TrackedMessageChannel {
+    constructor() {
+      const channel = new MessageChannel();
+      const record = { messages: 0, closed: [0, 0] };
+      const close = [channel.port1.close.bind(channel.port1), channel.port2.close.bind(channel.port2)];
+      for (const [index, port] of [channel.port1, channel.port2].entries()) {
+        port.close = () => { record.closed[index]++; close[index](); };
+      }
+      const postMessage = channel.port2.postMessage.bind(channel.port2);
+      channel.port2.postMessage = (message) => { record.messages++; postMessage(message); };
+      record.cleanup = () => close.forEach((release) => release());
+      channels.push(record);
+      this.port1 = channel.port1;
+      this.port2 = channel.port2;
+    }
+  }
+  t.after(() => channels.forEach((record) => record.cleanup()));
+  const timers = [];
+  const fallback = processorHarness(undefined, {}, {
+    setTimeout(callback, delay) { timers.push(delay); return setImmediate(callback); }
+  });
+  const messaging = processorHarness(undefined, {}, {
+    MessageChannel: TrackedMessageChannel,
+    setTimeout() { throw new Error("A message-channel yield must not use a timer."); }
+  });
+  const width = 700;
+  const height = 300;
+  const pixels = (red, green, blue) => Uint8ClampedArray.from({ length: width * height * 4 }, (_, index) => {
+    const pixel = Math.floor(index / 4);
+    return index % 4 === 3 ? 255 : pixel * [red, green, blue][index % 4] % 256;
+  });
+  const base = { width, height, blob: { pixels: pixels(1, 3, 5) } };
+  const second = { width, height, blob: { pixels: pixels(7, 11, 13) } };
+  for (const monochrome of [false, true]) {
+    const settings = { baseExposure: 0, participantExposure: 0, contrast: 12, monochrome };
+    const expected = new Uint8ClampedArray(width * height * 4);
+    fallback.createMixer(settings)(base.blob.pixels, second.blob.pixels, expected);
+    for (const harness of [fallback, messaging]) {
+      const output = harness.canvas();
+      const result = await harness.processor.develop(base, second, output, settings);
+      assert.deepEqual(output.written.data, expected, "yield scheduling must not change any pixel or batch boundary");
+      assert.equal(result.width, width);
+      assert.equal(result.height, height);
+      assert.deepEqual(output.encoding, { type: "image/jpeg", quality: 0.95 });
+    }
+  }
+  const yields = 2 * (Math.ceil(width * height / 65536) - 1);
+  assert.deepEqual(timers, Array(yields).fill(0), "browsers without MessageChannel retain the timer fallback");
+  assert.equal(channels.length, yields);
+  for (const channel of channels) {
+    assert.equal(channel.messages, 1);
+    assert.deepEqual(channel.closed, [1, 1], "both ports close before a batch yield finishes");
+  }
 });
 
 test("local and archive processing preserve the full smaller photograph without enlargement", async () => {
