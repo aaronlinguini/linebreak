@@ -340,6 +340,26 @@ var ArchiveSheets = (function () {
   }
   function values(id, title) {
     var key = id + ":" + title;
+    if (!rows[key] && ["Sources", "Submissions", "Usage"].indexOf(title) >= 0) {
+      var titles = (details(id).sheets || []).map(function (item) { return item.properties.title; })
+        .filter(function (name) { return ["Sources", "Submissions", "Usage"].indexOf(name) >= 0 && !rows[id + ":" + name]; });
+      if (titles.length) {
+        var batch = Sheets.Spreadsheets.Values.batchGet(id, {
+          ranges: titles.map(quote), majorDimension: "ROWS", valueRenderOption: "UNFORMATTED_VALUE"
+        });
+        if (!batch || batch.spreadsheetId !== id || !Array.isArray(batch.valueRanges) || batch.valueRanges.length !== titles.length ||
+            batch.valueRanges.some(function (range, index) {
+              if (!range || typeof range.range !== "string" || range.values !== undefined && !Array.isArray(range.values)) return true;
+              var title = range.range.split("!")[0];
+              return title !== titles[index] && title !== quote(titles[index]) ||
+                (range.values || []).some(function (row) { return !Array.isArray(row); });
+            })) {
+          throw new Error("The archive index could not be read completely. Please retry.");
+        }
+        // Fill the request-local cache together, only after a complete response.
+        titles.forEach(function (name, index) { rows[id + ":" + name] = batch.valueRanges[index].values || []; });
+      }
+    }
     if (!rows[key]) rows[key] = Sheets.Spreadsheets.Values.get(id, quote(title), { valueRenderOption: "UNFORMATTED_VALUE" }).values || [];
     return rows[key];
   }

@@ -322,15 +322,23 @@ function initializeExposureStudio() {
     download: byId("download-button"), rotate: byId("rotate-button"), retry: byId("retry-button"),
     status: byId("status"), error: byId("error"), busy: byId("busy-indicator")
   };
-  const developingMessage = "Please wait while your photo is developed.";
+  const developingMessage = ui.busy.textContent;
   const state = { working: false, connecting: false, ready: false, hasResult: false, participant: null,
-    selectedFile: null, selectionChoices: null, queued: false, downloadUrl: null, rePairUnavailable: false };
+    selectedFile: null, selectionChoices: null, queued: false, downloadUrl: null, rePairUnavailable: false,
+    displayedSubmissionId: null, previewing: false };
   ui.monochrome.checked = PROJECT_SETTINGS.monochrome;
   ui.allowReuse.checked = false;
   const { loadPhoto, releasePhoto, develop } = createExposureProcessor();
   const storage = new GoogleDriveStorage(EXPOSURE_CONFIG);
   const workflow = new ExposureArchiveWorkflow({
-    storage, settings: PROJECT_SETTINGS, render: renderSubmission
+    storage, settings: PROJECT_SETTINGS, render: renderSubmission,
+    onProgress: ({ stage }) => {
+      if (stage !== "archive") return;
+      presentResult(workflow.operation);
+      state.previewing = true;
+      ui.busy.textContent = "Finishing…";
+      refreshActions();
+    }
   });
   function announce(message) { ui.status.textContent = message; }
   function restoreConnectionStatus() {
@@ -356,24 +364,25 @@ function initializeExposureStudio() {
     ui.sourceActions.hidden = selected || state.hasResult;
     ui.uploadInstructions.hidden = selected;
     ui.exposureControls.hidden = selected || state.hasResult || pending;
-    ui.outputOptions.hidden = selected || state.hasResult || pending;
-    ui.monochrome.disabled = state.working || selected || pending || state.hasResult;
+    ui.outputOptions.hidden = false;
+    ui.monochrome.disabled = state.working || pending || (selected && !state.hasResult);
     ui.resultActions.hidden = !state.hasResult && !(selected && !processing && !pending);
     ui.allowReuse.disabled = state.working || selected || pending;
     ui.download.hidden = !state.hasResult;
     ui.rotate.hidden = !state.hasResult;
-    ui.download.disabled = !state.hasResult || state.working;
+    ui.download.disabled = !completed || state.working;
     ui.rotate.disabled = !state.hasResult || state.working || pending;
     ui.newPairing.hidden = !completed || state.rePairUnavailable || workflow.operation?.receipt?.canRePair !== true;
     ui.newPairing.disabled = state.working || pending;
     ui.reset.disabled = processing || pending;
     ui.retry.disabled = state.working || state.connecting;
     ui.busy.hidden = !processing;
-    ui.canvas.hidden = !state.hasResult || processing;
+    ui.canvas.hidden = !state.hasResult || (processing && !state.previewing);
     ui.resultEmpty.hidden = state.hasResult || processing;
     ui.resultEmpty.textContent = selected ? "Your double exposure is not ready yet." : "Your double exposure will appear here.";
     ui.workspace.setAttribute("aria-busy", String(processing));
     ui.workspace.classList.toggle("has-result", state.hasResult);
+    ui.busy.classList.toggle("is-finishing", state.previewing);
   }
   function setWorking(value, message) {
     state.working = value;
@@ -382,6 +391,8 @@ function initializeExposureStudio() {
   }
   function clearResult() {
     state.hasResult = false;
+    state.displayedSubmissionId = null;
+    state.previewing = false;
     ui.canvas.hidden = true;
     ui.canvas.width = ui.canvas.height = 1;
     ui.resultEmpty.hidden = false;
@@ -411,7 +422,6 @@ function initializeExposureStudio() {
   async function renderSubmission({ base, settings }) {
     const basePhoto = await loadPhoto(fileFromBase(base));
     try {
-      // Show the new image only after it has been saved.
       const preparedCanvas = document.createElement("canvas");
       return { ...await develop(basePhoto, state.participant, preparedCanvas, settings), preparedCanvas };
     } finally { releasePhoto(basePhoto); }
@@ -441,24 +451,32 @@ function initializeExposureStudio() {
     }
     await startSelectedPhoto();
   }
+  function presentResult(operation) {
+    if (state.displayedSubmissionId === operation.submissionId) return;
+    const preparedCanvas = operation.result.preparedCanvas;
+    if (!preparedCanvas) throw new Error("The developed image is unavailable. Please retry.");
+    ui.canvas.width = operation.result.width;
+    ui.canvas.height = operation.result.height;
+    const visibleContext = ui.canvas.getContext("2d");
+    if (!visibleContext) throw new Error("This browser cannot display the double exposure.");
+    visibleContext.drawImage(preparedCanvas, 0, 0);
+    preparedCanvas.width = preparedCanvas.height = 1;
+    delete operation.result.preparedCanvas;
+    if (state.downloadUrl) URL.revokeObjectURL(state.downloadUrl);
+    state.downloadUrl = URL.createObjectURL(operation.result.blob);
+    state.hasResult = true;
+    state.displayedSubmissionId = operation.submissionId;
+    ui.monochrome.checked = operation.settings.monochrome;
+    ui.canvas.hidden = false;
+    ui.resultEmpty.hidden = true;
+  }
   async function finishSubmission(action) {
+    state.previewing = false;
     setWorking(true);
     try {
       const operation = await action();
       state.rePairUnavailable = false;
-      const preparedCanvas = operation.result.preparedCanvas;
-      ui.canvas.width = operation.result.width;
-      ui.canvas.height = operation.result.height;
-      const visibleContext = ui.canvas.getContext("2d");
-      if (!visibleContext) throw new Error("This browser cannot display the double exposure.");
-      visibleContext.drawImage(preparedCanvas, 0, 0);
-      preparedCanvas.width = preparedCanvas.height = 1;
-      delete operation.result.preparedCanvas;
-      if (state.downloadUrl) URL.revokeObjectURL(state.downloadUrl);
-      state.downloadUrl = URL.createObjectURL(operation.result.blob);
-      state.hasResult = true;
-      ui.canvas.hidden = false;
-      ui.resultEmpty.hidden = true;
+      presentResult(operation);
       announce("");
     } catch (error) {
       showError(error);
@@ -469,7 +487,11 @@ function initializeExposureStudio() {
       announce(error.previousResultRestored ? "Your previous exposure is still saved."
         : error.originalSaved ? "Your photo is saved. Please retry to finish the double exposure."
           : "The save could not be confirmed.");
-    } finally { setWorking(false); }
+    } finally {
+      if (workflow.operation?.settings) ui.monochrome.checked = workflow.operation.settings.monochrome;
+      state.previewing = workflow.pending && state.displayedSubmissionId === workflow.operation?.submissionId;
+      setWorking(false);
+    }
   }
 
   async function startSelectedPhoto() {
@@ -502,6 +524,15 @@ function initializeExposureStudio() {
   for (const input of [ui.participantInput, ui.cameraInput]) {
     input.addEventListener("change", () => chooseParticipantPhoto(input));
   }
+  ui.monochrome.addEventListener("change", async () => {
+    if (state.working || workflow.pending || state.queued) {
+      ui.monochrome.checked = workflow.operation?.settings.monochrome ?? state.selectionChoices?.monochrome ?? ui.monochrome.checked;
+      return;
+    }
+    if (!state.hasResult || workflow.operation.settings.monochrome === ui.monochrome.checked) return;
+    clearError();
+    await finishSubmission(() => workflow.changeMonochrome(ui.monochrome.checked));
+  });
   ui.newPairing.addEventListener("click", async () => {
     if (!state.hasResult || state.working || workflow.pending || workflow.operation?.receipt?.canRePair !== true) return;
     clearError();
@@ -535,7 +566,7 @@ function initializeExposureStudio() {
     } finally { setWorking(false); }
   });
   ui.download.addEventListener("click", () => {
-    if (!state.hasResult || state.working || !state.downloadUrl) return;
+    if (!state.hasResult || state.working || workflow.pending || !state.downloadUrl) return;
     const link = document.createElement("a");
     link.href = state.downloadUrl;
     link.download = `double-exposure-${workflow.operation.submissionId}.jpg`;

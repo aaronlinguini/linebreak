@@ -28,6 +28,30 @@ function fixture(overrides = {}) {
   return { workflow, calls, storage };
 }
 
+function modeFixture({ monochrome = false, canRePair = true } = {}) {
+  const calls = [];
+  const bases = new Map();
+  let serial = 0;
+  const storage = {
+    begin: async request => {
+      calls.push(["begin", request]);
+      const baseId = request.reuse && request.reuse.sameBase !== true ? "base-2" : "base-1";
+      bases.set(request.submissionId, baseId);
+      return { ...begin(), submissionId: request.submissionId, token: `token-${request.submissionId}`,
+        base: { id: baseId, mimeType: "image/jpeg", base64: "AA==" } };
+    },
+    complete: async request => {
+      calls.push(["complete", request]);
+      return { ...receipt(), submissionId: request.submissionId, resultId: `result-${request.submissionId}`,
+        baseId: bases.get(request.submissionId), canRePair };
+    }
+  };
+  const workflow = new Workflow({ storage,
+    render: async request => { calls.push(["render", request]); return { blob, width: 1200, height: 800 }; },
+    settings: { ...settings, monochrome }, makeId: () => `submission-${++serial}` });
+  return { workflow, storage, calls, get idCount() { return serial; } };
+}
+
 test("saves the exact original before developing, then requires a matching archive receipt", async () => {
   const { workflow, calls } = fixture();
   const operation = await workflow.start(file);
@@ -125,6 +149,151 @@ test("another pairing inherits its original visitor colour mode rather than a ch
   assert.equal(second.settings.monochrome, false);
   assert.deepEqual(renders.map(request => request.settings.monochrome), [false, false]);
   assert.deepEqual(saves.map(request => request.settings.monochrome), [false, false]);
+});
+
+test("changing a saved colour mode archives a new result with the same original, base and consent", async () => {
+  for (const monochrome of [false, true]) {
+    for (const allowReuse of [false, true]) {
+      const { workflow, calls } = modeFixture({ monochrome, canRePair: false });
+      const first = await workflow.start(file, { allowReuse });
+      const second = await workflow.changeMonochrome(!monochrome);
+      assert.notEqual(second.submissionId, first.submissionId);
+      assert.strictEqual(second.file, first.file);
+      assert.equal(second.allowReuse, allowReuse);
+      assert.equal(second.begin.originalId, first.begin.originalId);
+      assert.equal(second.begin.base.id, first.begin.base.id);
+      assert.notEqual(second.receipt.resultId, first.receipt.resultId);
+      assert.equal(first.settings.monochrome, monochrome, "the earlier saved recipe stays unchanged");
+      assert.equal(second.settings.monochrome, !monochrome);
+      assert.equal(Object.isFrozen(second.settings), true);
+      assert.deepEqual({ ...second.settings }, { ...first.settings, monochrome: !monochrome });
+      assert.equal(workflow.settings.monochrome, monochrome, "visitor variants do not rewrite the artist default");
+      const requests = calls.filter(([type]) => type === "begin").map(([, request]) => request);
+      assert.strictEqual(requests[0].originalFile, file);
+      assert.deepEqual(JSON.parse(JSON.stringify(requests[1])), {
+        submissionId: second.submissionId,
+        reuse: { submissionId: first.submissionId, token: first.begin.token, sameBase: true }
+      });
+      const rendering = calls.filter(([type]) => type === "render")[1][1];
+      const archiving = calls.filter(([type]) => type === "complete")[1][1];
+      assert.equal(rendering.settings.monochrome, !monochrome);
+      assert.strictEqual(rendering.settings, archiving.settings);
+      assert.strictEqual(archiving.resultBlob, second.result.blob);
+      assert.equal(workflow.pending, false);
+    }
+  }
+});
+
+test("unchanged and invalid saved colour choices do not create another operation", async () => {
+  const fixture = modeFixture();
+  await assert.rejects(fixture.workflow.changeMonochrome(true), /save.*exposure/i);
+  const saved = await fixture.workflow.start(file);
+  const count = fixture.calls.length;
+  assert.strictEqual(await fixture.workflow.changeMonochrome(false), saved);
+  for (const value of [undefined, null, 0, 1, "false", {}, []]) {
+    await assert.rejects(fixture.workflow.changeMonochrome(value), /black.and.white|monochrome/i);
+    assert.strictEqual(fixture.workflow.operation, saved);
+  }
+  assert.equal(fixture.calls.length, count);
+  assert.equal(fixture.idCount, 1, "neither invalid choices nor no-ops allocate submission IDs");
+});
+
+test("a saved colour change cannot overlap another save or replace a pending variant", async () => {
+  const { workflow, storage, calls } = modeFixture();
+  await workflow.start(file);
+  const complete = storage.complete;
+  let rejectSave;
+  storage.complete = () => new Promise((resolve, reject) => { rejectSave = reject; });
+  const saving = workflow.changeMonochrome(true);
+  // Let begin and render finish so the new JPEG is waiting for its archive.
+  await new Promise(resolve => setImmediate(resolve));
+  const pending = workflow.operation;
+  for (const value of [false, true]) {
+    await assert.rejects(workflow.changeMonochrome(value), /Finish saving|still being saved/);
+  }
+  await assert.rejects(workflow.rePair(), /Finish saving/);
+  assert.strictEqual(workflow.operation, pending);
+  rejectSave(new Error("response lost"));
+  await assert.rejects(saving, error => error.stage === "archive" && error.resultReady);
+  for (const value of [false, true]) {
+    await assert.rejects(workflow.changeMonochrome(value), /Finish saving/);
+  }
+  assert.strictEqual(workflow.operation, pending);
+  storage.complete = complete;
+  await workflow.retry();
+  assert.equal(calls.filter(([type]) => type === "begin").length, 2);
+  assert.equal(calls.filter(([type]) => type === "render").length, 2);
+  assert.equal(workflow.operation.settings.monochrome, true);
+});
+
+test("an uncertain saved colour change retries its identical JPEG and frozen recipe", async () => {
+  const { workflow, storage, calls } = modeFixture();
+  const original = await workflow.start(file, { allowReuse: true });
+  const complete = storage.complete;
+  const attempts = [];
+  storage.complete = async request => { attempts.push(request); throw new Error("response lost"); };
+  await assert.rejects(workflow.changeMonochrome(true), error => error.stage === "archive" && error.originalSaved && error.resultReady);
+  const variant = workflow.operation;
+  workflow.settings = Object.freeze({ baseExposure: 2, participantExposure: 2, contrast: 30, monochrome: false });
+  storage.complete = async request => { attempts.push(request); return complete(request); };
+  await workflow.retry();
+  assert.equal(calls.filter(([type]) => type === "begin").length, 2, "retry does not choose or upload another source");
+  assert.equal(calls.filter(([type]) => type === "render").length, 2, "retry does not regenerate a possibly different JPEG");
+  assert.strictEqual(attempts[0].resultBlob, attempts[1].resultBlob);
+  assert.strictEqual(attempts[0].settings, attempts[1].settings);
+  assert.equal(attempts[0].submissionId, attempts[1].submissionId);
+  assert.equal(attempts[0].token, attempts[1].token);
+  assert.deepEqual({ ...variant.settings }, { ...original.settings, monochrome: true });
+  assert.equal(variant.begin.base.id, original.begin.base.id);
+});
+
+test("a lost same-base request retries the same authenticated identity without uploading the original", async () => {
+  const { workflow, storage, calls } = modeFixture();
+  const saved = await workflow.start(file);
+  const beginVariant = storage.begin;
+  const attempts = [];
+  storage.begin = async request => { attempts.push(request); throw new Error("connection lost"); };
+  await assert.rejects(workflow.changeMonochrome(true), /connection lost/);
+  const variantId = workflow.operation.submissionId;
+  storage.begin = async request => { attempts.push(request); return beginVariant(request); };
+  await workflow.retry();
+  assert.equal(attempts[0].submissionId, variantId);
+  assert.equal(attempts[1].submissionId, variantId);
+  assert.deepEqual(JSON.parse(JSON.stringify(attempts[0])), JSON.parse(JSON.stringify(attempts[1])));
+  assert.deepEqual({ ...attempts[0].reuse }, { submissionId: saved.submissionId, token: saved.begin.token, sameBase: true });
+  assert.equal("originalFile" in attempts[0], false);
+  assert.equal("allowReuse" in attempts[0], false);
+  assert.equal(calls.filter(([type]) => type === "render").length, 2);
+  assert.equal(workflow.operation.begin.base.id, saved.begin.base.id);
+  assert.equal(workflow.operation.settings.monochrome, true);
+});
+
+test("a failed variant render keeps its assigned base and selected mode for retry", async () => {
+  const { workflow, calls } = modeFixture();
+  const saved = await workflow.start(file);
+  const renderVariant = workflow.render;
+  const attempts = [];
+  workflow.render = async request => { attempts.push(request); throw new Error("image decoding failed"); };
+  await assert.rejects(workflow.changeMonochrome(true), error => error.stage === "develop" && error.originalSaved && !error.resultReady);
+  workflow.render = async request => { attempts.push(request); return renderVariant(request); };
+  await workflow.retry();
+  assert.equal(calls.filter(([type]) => type === "begin").length, 2);
+  assert.strictEqual(attempts[0].base, attempts[1].base);
+  assert.strictEqual(attempts[0].settings, attempts[1].settings);
+  assert.equal(attempts[0].base.id, saved.begin.base.id);
+  assert.equal(attempts[0].settings.monochrome, true);
+});
+
+test("another pairing after a colour change inherits its mode but requests a different base", async () => {
+  const { workflow, calls } = modeFixture();
+  await workflow.start(file);
+  const variant = await workflow.changeMonochrome(true);
+  const next = await workflow.rePair();
+  const request = calls.filter(([type]) => type === "begin").at(-1)[1];
+  assert.deepEqual({ ...request.reuse }, { submissionId: variant.submissionId, token: variant.begin.token });
+  assert.equal("sameBase" in request.reuse, false);
+  assert.equal(next.settings.monochrome, true);
+  assert.notEqual(next.begin.base.id, variant.begin.base.id);
 });
 
 test("another pairing uses a new identity and prior token without another original upload", async () => {

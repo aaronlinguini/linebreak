@@ -47,6 +47,20 @@ class ExposureArchiveWorkflow {
     }
   }
 
+  async changeMonochrome(monochrome) {
+    if (typeof monochrome !== "boolean") throw new Error("The black-and-white choice is invalid.");
+    if (this.busy || this.pending) throw new Error("Finish saving this photograph before changing its colour mode.");
+    const previous = this.operation;
+    if (!previous?.receipt || !previous.begin?.token) throw new Error("Save an exposure before changing its colour mode.");
+    if (previous.settings.monochrome === monochrome) return previous;
+    this.operation = { submissionId: this.makeId(), file: previous.file,
+      allowReuse: previous.allowReuse,
+      settings: Object.freeze({ ...previous.settings, monochrome }),
+      reuse: { submissionId: previous.submissionId, token: previous.begin.token, sameBase: true },
+      begin: null, result: null, receipt: null };
+    return this.run();
+  }
+
   async retry() {
     if (!this.pending) throw new Error("There is no photograph waiting to be saved.");
     return this.run();

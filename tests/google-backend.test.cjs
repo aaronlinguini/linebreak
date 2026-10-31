@@ -322,6 +322,124 @@ test("a re-pair cannot reuse the same base when no alternative is available", ()
   assert.equal(backend.folder("Double exposure").files.length, 1);
 });
 
+for (const consent of [false, true]) {
+  test(`a same-pair colour variant preserves exact inputs, consent ${consent}, and duplicate-free archives`, () => {
+    const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+    const first = backend.begin(1, 22, consent);
+    const firstResult = backend.completePayload(first, 90);
+    const saved = backend.data("complete", firstResult);
+    const originalName = backend.files.get(first.originalId).getName();
+    const request = { submissionId: submissionId(2), reuse: { submissionId: first.submissionId, token: first.token, sameBase: true } };
+    const variant = backend.data("begin", request);
+    assert.equal(variant.originalId, first.originalId);
+    assert.deepEqual(variant.base, first.base);
+    assert.notEqual(variant.token, first.token);
+    assert.deepEqual(backend.data("begin", request), variant);
+    const nextResult = backend.completePayload(variant, 91);
+    nextResult.settings.monochrome = true;
+    const nextSaved = backend.data("complete", nextResult);
+    assert.equal(nextSaved.baseId, saved.baseId);
+    assert.equal(backend.files.get(first.originalId).getName(), originalName);
+    assert.equal(backend.records("Sources").filter(source => source.kind === "participant").length, 1);
+    assert.equal(backend.folder("Double exposure").files.length, 2);
+    const row = backend.records("Submissions").find(row => row.submissionId === variant.submissionId);
+    assert.equal(row.allowReuse, consent);
+    assert.equal(row.parentSubmissionId, first.submissionId);
+    assert.equal(row.baseSha256, backend.records("Submissions")[0].baseSha256);
+    assert.equal(JSON.parse(row.settingsJson).monochrome, true);
+    assert.equal(backend.folder(consent ? "Artist" : "Participant").files.filter(file => file.getId() === first.originalId).length, 1);
+
+    const back = backend.data("begin", { submissionId: submissionId(3), reuse: { submissionId: variant.submissionId, token: variant.token, sameBase: true } });
+    const backSaved = backend.data("complete", { ...firstResult, submissionId: back.submissionId, token: back.token });
+    assert.equal(backSaved.resultId, saved.resultId, "identical finished bytes reuse the first colour version's archived file");
+    assert.equal(backend.folder("Double exposure").files.length, 2);
+    assert.equal(backend.files.get(first.originalId).getName(), originalName);
+  });
+}
+
+test("same-pair variants work with one base even when another pairing is unavailable", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const first = backend.begin(1, 22);
+  assert.equal(backend.data("complete", backend.completePayload(first)).canRePair, false);
+  const variant = backend.data("begin", { submissionId: submissionId(2), reuse: { submissionId: first.submissionId, token: first.token, sameBase: true } });
+  assert.equal(variant.base.id, first.base.id);
+  const receipt = backend.data("complete", backend.completePayload(variant, 91));
+  assert.equal(receipt.canRePair, false);
+});
+
+test("same-pair variants reject invalid flag types and require a completed authenticated parent", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const first = backend.begin(1, 22);
+  const reuse = { submissionId: first.submissionId, token: first.token, sameBase: true };
+  assert.equal(backend.api("begin", { submissionId: submissionId(2), reuse }).error.code, "INVALID_TOKEN");
+  backend.data("complete", backend.completePayload(first));
+  for (const sameBase of [null, 0, 1, "true", "false", [], {}]) {
+    assert.equal(backend.api("begin", { submissionId: submissionId(2), reuse: { ...reuse, sameBase } }).error.code, "INVALID_REQUEST");
+  }
+  assert.equal(backend.api("begin", { submissionId: submissionId(2), reuse: { ...reuse, token: "wrong-token" } }).error.code, "INVALID_TOKEN");
+  assert.equal(backend.api("begin", { submissionId: submissionId(2), reuse, allowReuse: true }).error.code, "INVALID_REQUEST");
+  assert.equal(backend.folder("Participant").files.length, 1);
+  assert.equal(backend.records("Submissions").length, 1);
+});
+
+test("a same-pair request cannot replace the parent's base with caller-selected IDs or hashes", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.seed(2); backend.refresh();
+  const first = backend.begin(1, 22); backend.data("complete", backend.completePayload(first));
+  const variant = backend.data("begin", { submissionId: submissionId(2), reuse: {
+    submissionId: first.submissionId, token: first.token, sameBase: true, baseId: "caller-controlled-file-id", baseSha256: "a".repeat(64)
+  } });
+  assert.equal(variant.base.id, first.base.id);
+  assert.deepEqual(variant.base, first.base);
+});
+
+test("a submission cannot switch between same-pair and different-pair intent", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.seed(2); backend.refresh();
+  const first = backend.begin(1, 22); backend.data("complete", backend.completePayload(first));
+  const reuse = { submissionId: first.submissionId, token: first.token };
+  backend.data("begin", { submissionId: submissionId(2), reuse: { ...reuse, sameBase: true } });
+  for (const requested of [reuse, { ...reuse, sameBase: false }]) {
+    assert.equal(backend.api("begin", { submissionId: submissionId(2), reuse: requested }).error.code, "SUBMISSION_CONFLICT");
+  }
+  const another = backend.data("begin", { submissionId: submissionId(3), reuse });
+  assert.deepEqual(backend.data("begin", { submissionId: submissionId(3), reuse: { ...reuse, sameBase: false } }), another);
+  assert.equal(backend.api("begin", { submissionId: submissionId(3), reuse: { ...reuse, sameBase: true } }).error.code, "SUBMISSION_CONFLICT");
+});
+
+test("an older pending different-pair retry cannot be converted into a same-pair variant", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const first = backend.begin(1, 22); backend.data("complete", backend.completePayload(first));
+  const reuse = { submissionId: first.submissionId, token: first.token };
+  assert.equal(backend.api("begin", { submissionId: submissionId(2), reuse }).error.code, "NO_ALTERNATIVE_BASE");
+  assert.equal(backend.records("Submissions")[1].baseId, "");
+  assert.equal(backend.api("begin", { submissionId: submissionId(2), reuse: { ...reuse, sameBase: true } }).error.code, "SUBMISSION_CONFLICT");
+  backend.seed(2); backend.refresh();
+  const retried = backend.data("begin", { submissionId: submissionId(2), reuse });
+  assert.notEqual(retried.base.id, first.base.id);
+});
+
+test("same-pair retries preserve their pin after a failed base read and reject changed base bytes", () => {
+  const backend = makeBackend(); backend.setup(); const artist = backend.seed(1); backend.refresh();
+  const first = backend.begin(1, 22); backend.data("complete", backend.completePayload(first));
+  const request = { submissionId: submissionId(2), reuse: { submissionId: first.submissionId, token: first.token, sameBase: true } };
+  const read = artist.getBlob.bind(artist);
+  artist.getBlob = () => { throw new Error("Temporary base read failure"); };
+  assert.equal(backend.api("begin", request).error.code, "BASE_UNAVAILABLE");
+  const pending = backend.records("Submissions")[1];
+  assert.equal(pending.baseId, first.base.id);
+  assert.equal(pending.baseSha256, backend.records("Submissions")[0].baseSha256);
+  artist.getBlob = read;
+  const retried = backend.data("begin", request);
+  assert.equal(retried.token, pending.token);
+  assert.deepEqual(retried.base, first.base);
+  artist.blob = new backend.Blob(jpeg(2), "image/jpeg", artist.getName());
+  artist.date = new Date("2026-10-29T12:01:00Z");
+  backend.advance(60000);
+  assert.equal(backend.api("begin", request).error.code, "BASE_UNAVAILABLE");
+  assert.equal(backend.records("Submissions")[1].baseSha256, pending.baseSha256);
+  assert.equal(backend.folder("Participant").files.length, 1);
+  assert.equal(backend.folder("Double exposure").files.length, 1);
+});
+
 test("another pairing rejects a forged token and cannot change opt-in", () => {
   const backend = makeBackend(); backend.setup(); backend.seed(1); backend.seed(2); backend.refresh();
   const first = backend.begin(1, 22); backend.data("complete", backend.completePayload(first));

@@ -9,6 +9,7 @@ const { File } = require("node:buffer");
 
 const root = path.resolve(__dirname, "..");
 const source = fs.readFileSync(path.join(root, "scripts.js"), "utf8");
+const toolHtml = fs.readFileSync(path.join(root, "double-exposure.html"), "utf8");
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 const makeFile = () => new File([Uint8Array.from([1, 2, 3])], "phone.jpg", { type: "image/jpeg" });
 const deferred = () => {
@@ -17,7 +18,7 @@ const deferred = () => {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 };
-const developingMessage = "Please wait while your photo is developed.";
+const developingMessage = toolHtml.match(/<p\b[^>]*id="busy-indicator"[^>]*>([^<]+)<\/p>/)[1].trim();
 
 function harness({ configured = true, canRePair = true, forceBlackAndWhite = false,
   connect = async () => ({ totalEligible: 2 }) } = {}) {
@@ -33,7 +34,8 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
     getContext() { return { drawImage() {} }; },
     addEventListener(type, fn) { handlers.set(id + ":" + type, fn); }
   }]));
-  const calls = { start: [], connect: 0, rePair: 0, retry: 0, load: [], rotate: 0, downloads: [], revoked: [], draws: [] };
+  const calls = { start: [], connect: 0, rePair: 0, retry: 0, changeMonochrome: [], load: [], rotate: 0, downloads: [], revoked: [], draws: [] };
+  elements.get("busy-indicator").textContent = developingMessage;
   elements.get("canvas").getContext = () => ({ drawImage(canvas) { calls.draws.push(canvas); } });
   const urls = new Map();
   let rotationGate;
@@ -44,9 +46,12 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
   let rePairGate;
   let rePairError;
   let retryGate;
+  let monochromeGate;
+  let monochromeError;
   let connectImpl = connect;
   let mounted = false;
   let workflow;
+  let onProgress;
   const sandbox = vm.createContext({
     Error, File, setTimeout,
     document: {
@@ -70,11 +75,12 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
     ExposureArchiveWorkflow: class {
       pending = false;
       operation = null;
-      constructor() { workflow = this; }
+      constructor(options) { workflow = this; onProgress = options.onProgress; }
       async start(file, choice) {
         calls.start.push({ file, choice });
         this.pending = true;
-        this.operation = { submissionId: "first", result: { blob: {}, width: 600, height: 400, preparedCanvas: {} },
+        this.operation = { submissionId: "first", settings: { monochrome: choice.monochrome }, base: { id: "first-base" },
+          result: { blob: { monochrome: choice.monochrome }, width: 600, height: 400, preparedCanvas: {} },
           receipt: { canRePair } };
         if (startGate) await startGate;
         if (startError) throw startError;
@@ -84,10 +90,23 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
       async rePair() {
         calls.rePair++;
         this.pending = true;
-        this.operation = { submissionId: "second", result: { blob: {}, width: 800, height: 600, preparedCanvas: {} },
+        this.operation = { submissionId: "second", settings: this.operation.settings, base: { id: "second-base" },
+          result: { blob: { monochrome: this.operation.settings.monochrome }, width: 800, height: 600, preparedCanvas: {} },
           receipt: { canRePair: false } };
         if (rePairGate) await rePairGate;
         if (rePairError) throw rePairError;
+        this.pending = false;
+        return this.operation;
+      }
+      async changeMonochrome(monochrome) {
+        calls.changeMonochrome.push(monochrome);
+        this.pending = true;
+        this.operation = { submissionId: `mode-${calls.changeMonochrome.length}`, base: this.operation.base,
+          settings: { ...this.operation.settings, monochrome },
+          result: { blob: { monochrome }, width: 600, height: 400, preparedCanvas: {} },
+          receipt: { canRePair } };
+        if (monochromeGate) await monochromeGate;
+        if (monochromeError) throw monochromeError;
         this.pending = false;
         return this.operation;
       }
@@ -129,14 +148,21 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
     blockRePair(gate) { rePairGate = gate; },
     failRePair(error) { rePairError = error; },
     blockRetry(gate) { retryGate = gate; },
+    blockMonochrome(gate) { monochromeGate = gate; },
+    failMonochrome(error) { monochromeError = error; },
     setConnection(connect) { connectImpl = connect; },
+    deliverPreview() { return onProgress({ stage: "archive" }); },
     select(id, file) {
       const input = elements.get(id);
       input.files = file ? [file] : [];
       input.value = file ? "fakepath/phone.jpg" : "";
       return handlers.get(id + ":change")();
     },
-    click(id) { return handlers.get(id + ":click")(); }
+    click(id) { return handlers.get(id + ":click")(); },
+    toggleMonochrome(checked) {
+      elements.get("visitor-monochrome").checked = checked;
+      return handlers.get("visitor-monochrome:change")();
+    }
   };
 }
 
@@ -206,13 +232,14 @@ test("the visitor checkbox starts from the artist default and freezes either mod
       assert.equal(h.elements.get("output-options").hidden, false);
       assert.equal(h.elements.get("exposure-controls").hidden, false);
       assert.equal(h.elements.get("upload-instructions").hidden, false);
-      checkbox.checked = visitorChoice;
+      await h.toggleMonochrome(visitorChoice);
+      assert.equal(h.calls.changeMonochrome.length, 0, "choosing a mode before a photo does not create a result");
       await h.select("participant-input", makeFile());
       assert.equal(h.calls.start.length, 1);
       assert.equal(h.calls.start[0].choice.monochrome, visitorChoice);
-      assert.equal(h.elements.get("output-options").hidden, true, "an archived result cannot be relabelled as another colour mode");
+      assert.equal(h.elements.get("output-options").hidden, false, "a saved exposure retains its colour-mode control");
       assert.equal(h.elements.get("exposure-controls").hidden, true);
-      assert.equal(checkbox.disabled, true);
+      assert.equal(checkbox.disabled, false);
       h.click("reset-button");
       assert.equal(h.elements.get("output-options").hidden, false);
       assert.equal(h.elements.get("exposure-controls").hidden, false);
@@ -272,7 +299,7 @@ test("consent can be chosen before either picker, and cancelling the picker does
     assert.equal(h.calls.start.length, 0);
     await h.select(input, makeFile());
     assert.equal(h.calls.start[0].choice.allowReuse, true);
-    assert.equal(h.elements.get("output-options").hidden, true);
+    assert.equal(h.elements.get("output-options").hidden, false);
     assert.equal(h.elements.get("exposure-controls").hidden, true);
     h.click("reset-button");
     assert.equal(h.elements.get("allow-reuse").checked, false, "a new contribution requires a fresh opt-in");
@@ -281,7 +308,7 @@ test("consent can be chosen before either picker, and cancelling the picker does
   }
 });
 
-test("library and camera selection automatically submit the original once and display only the confirmed result", async () => {
+test("library and camera selection submit once and show the developed image while its archive finishes", async () => {
   for (const id of ["participant-input", "participant-camera-input"]) {
     const h = harness();
     await flush();
@@ -296,11 +323,26 @@ test("library and camera selection automatically submit the original once and di
     assert.equal(h.calls.start[0].choice.allowReuse, false);
     assert.equal(h.elements.get(id).value, "");
     assert.equal(h.elements.get("canvas").hidden, true);
-    assert.equal(h.calls.draws.length, 0, "an original or an unsaved composite must not appear as the finished exposure");
+    assert.equal(h.calls.draws.length, 0, "the selected original must not appear as the developed exposure");
     assert.equal(h.elements.get("busy-indicator").hidden, false);
     assert.equal(h.elements.get("status").textContent, "");
     await h.select(id, makeFile());
     assert.equal(h.calls.start.length, 1, "a duplicate picker event cannot start another operation");
+    h.deliverPreview();
+    assert.equal(h.elements.get("canvas").hidden, false, "the rendered double exposure appears before the archive receipt");
+    assert.equal(h.calls.draws.length, 1);
+    assert.equal(h.elements.get("busy-indicator").textContent, "Finishing…");
+    assert.equal(h.elements.get("busy-indicator").hidden, false);
+    for (const control of ["download-button", "rotate-button", "new-pairing-button", "reset-button", "visitor-monochrome"]) {
+      assert.equal(h.elements.get(control).disabled, true, `${control} must wait for the archive receipt`);
+    }
+    await h.click("download-button");
+    await h.click("rotate-button");
+    await h.click("new-pairing-button");
+    h.click("reset-button");
+    assert.equal(h.calls.downloads.length, 0);
+    assert.equal(h.calls.rotate, 0);
+    assert.equal(h.calls.rePair, 0);
     saving.resolve();
     await selecting;
     assert.deepEqual(Array.from(new Uint8Array(await file.arrayBuffer())), [1, 2, 3]);
@@ -310,10 +352,50 @@ test("library and camera selection automatically submit the original once and di
     assert.equal(h.elements.get("canvas").height, 400);
     assert.equal(h.elements.get("result-actions").hidden, false);
     assert.equal(h.elements.get("download-button").hidden, false);
+    assert.equal(h.elements.get("download-button").disabled, false);
+    assert.equal(h.elements.get("visitor-monochrome").disabled, false);
     assert.equal(h.elements.get("busy-indicator").hidden, true);
     assert.equal(h.elements.get("workspace").attributes["aria-busy"], "false");
     assert.equal(h.elements.get("status").textContent, "");
   }
+});
+
+test("a save failure after rendering retains the pending preview and retries without resubmitting or redrawing", async () => {
+  const h = harness();
+  await flush();
+  const saving = deferred();
+  h.blockStart(saving.promise);
+  h.failStart(Object.assign(new Error("Response lost."), { originalSaved: true }));
+  const selecting = h.select("participant-input", makeFile());
+  await flush();
+  h.deliverPreview();
+  saving.resolve();
+  await selecting;
+  assert.equal(h.workflow.pending, true);
+  assert.equal(h.elements.get("canvas").hidden, false);
+  assert.equal(h.elements.get("busy-indicator").hidden, true);
+  assert.equal(h.elements.get("error").hidden, false);
+  assert.equal(h.elements.get("retry-button").hidden, false);
+  assert.equal(h.elements.get("retry-button").textContent, "Retry saving");
+  for (const control of ["download-button", "rotate-button", "new-pairing-button", "reset-button", "visitor-monochrome"]) {
+    assert.equal(h.elements.get(control).disabled, true, `${control} must not use an unconfirmed archive result`);
+  }
+  const retryReceipt = deferred();
+  h.blockRetry(retryReceipt.promise);
+  const retrying = h.click("retry-button");
+  h.deliverPreview();
+  assert.equal(h.elements.get("canvas").hidden, false);
+  assert.equal(h.elements.get("busy-indicator").textContent, "Finishing…");
+  retryReceipt.resolve();
+  await retrying;
+  assert.equal(h.calls.start.length, 1);
+  assert.equal(h.calls.retry, 1);
+  assert.equal(h.calls.load.length, 1);
+  assert.equal(h.calls.draws.length, 1);
+  assert.equal(h.urls.size, 1);
+  assert.equal(h.elements.get("download-button").disabled, false);
+  assert.equal(h.elements.get("visitor-monochrome").disabled, false);
+  assert.equal(h.elements.get("status").textContent, "");
 });
 
 test("a pending save retries the same operation without re-reading the original or changing picker choices", async () => {
@@ -373,7 +455,7 @@ test("a second pairing does not reupload the original and Start over clears cons
   assert.equal(h.calls.start.length, 1);
 });
 
-test("a failed second-pairing save retains the saved image and download until a retry is confirmed", async () => {
+test("a second-pairing failure before its preview retains the saved image until a retry is confirmed", async () => {
   const h = harness();
   await flush();
   await h.select("participant-input", makeFile());
@@ -386,6 +468,7 @@ test("a failed second-pairing save retains the saved image and download until a 
   assert.equal(h.elements.get("canvas").width, 600);
   assert.equal(h.elements.get("canvas").height, 400);
   assert.equal(h.calls.draws.length, 1);
+  assert.equal(h.elements.get("download-button").disabled, true);
   await h.click("download-button");
   assert.equal(h.calls.downloads.at(-1).href, originalUrl);
   assert.deepEqual(h.calls.revoked, []);
@@ -399,6 +482,100 @@ test("a failed second-pairing save retains the saved image and download until a 
   assert.equal(h.calls.draws.length, 2);
   assert.deepEqual(h.calls.revoked, [originalUrl]);
   assert.equal(h.elements.get("status").textContent, "");
+});
+
+test("a saved exposure can switch between colour and black and white without choosing another pair or original", async () => {
+  const h = harness();
+  await flush();
+  const file = makeFile();
+  await h.select("participant-input", file);
+  const base = h.workflow.operation.base;
+  assert.equal(h.elements.get("output-options").hidden, false);
+  assert.equal(h.elements.get("visitor-monochrome").disabled, false);
+  for (const monochrome of [true, false, true]) {
+    await h.toggleMonochrome(monochrome);
+    assert.equal(h.workflow.operation.base, base);
+    assert.equal(h.elements.get("visitor-monochrome").checked, monochrome);
+    assert.equal(h.elements.get("visitor-monochrome").disabled, false);
+    assert.equal(h.elements.get("status").textContent, "");
+    await h.click("download-button");
+    const download = h.calls.downloads.at(-1);
+    assert.equal(h.urls.get(download.href).monochrome, monochrome, "the download follows the confirmed variant");
+  }
+  assert.deepEqual(h.calls.changeMonochrome, [true, false, true]);
+  assert.equal(h.calls.start.length, 1);
+  assert.equal(h.calls.start[0].file, file);
+  assert.equal(h.calls.rePair, 0);
+  assert.equal(h.calls.load.length, 1);
+  h.click("reset-button");
+  assert.equal(h.elements.get("visitor-monochrome").checked, true, "Start over keeps the latest confirmed colour preference");
+  assert.equal(h.elements.get("allow-reuse").checked, false);
+});
+
+test("a mode change blocks duplicate changes until its archive operation finishes", async () => {
+  const h = harness();
+  await flush();
+  await h.select("participant-input", makeFile());
+  const receipt = deferred();
+  h.blockMonochrome(receipt.promise);
+  const changing = h.toggleMonochrome(true);
+  assert.deepEqual(h.calls.changeMonochrome, [true]);
+  assert.equal(h.elements.get("visitor-monochrome").disabled, true);
+  assert.equal(h.elements.get("output-options").hidden, false);
+  assert.equal(h.elements.get("new-pairing-button").disabled, true);
+  assert.equal(h.elements.get("busy-indicator").hidden, false);
+  assert.equal(h.elements.get("status").textContent, "");
+  await h.toggleMonochrome(false);
+  assert.deepEqual(h.calls.changeMonochrome, [true], "a second event cannot start another archive operation");
+  receipt.resolve();
+  await changing;
+  assert.equal(h.elements.get("visitor-monochrome").checked, true, "the checkbox reflects the completed operation rather than an ignored event");
+  assert.equal(h.elements.get("visitor-monochrome").disabled, false);
+  assert.equal(h.elements.get("busy-indicator").hidden, true);
+});
+
+test("a failed mode save retains the prior image and retries its frozen mode without changing the pair", async () => {
+  const h = harness();
+  await flush();
+  await h.select("participant-input", makeFile());
+  const base = h.workflow.operation.base;
+  await h.click("download-button");
+  const originalUrl = h.calls.downloads.at(-1).href;
+  h.failMonochrome(Object.assign(new Error("Response lost."), { originalSaved: true }));
+  await h.toggleMonochrome(true);
+  const pendingOperation = h.workflow.operation;
+  assert.equal(h.workflow.pending, true);
+  assert.equal(pendingOperation.settings.monochrome, true);
+  assert.equal(h.elements.get("visitor-monochrome").disabled, true);
+  assert.equal(h.elements.get("output-options").hidden, false);
+  assert.equal(h.elements.get("canvas").hidden, false);
+  assert.equal(h.calls.draws.length, 1);
+  assert.equal(h.elements.get("download-button").disabled, true);
+  assert.equal(h.elements.get("retry-button").textContent, "Retry saving");
+  await h.click("download-button");
+  assert.equal(h.calls.downloads.at(-1).href, originalUrl);
+  assert.deepEqual(h.calls.revoked, []);
+  await h.toggleMonochrome(false);
+  assert.deepEqual(h.calls.changeMonochrome, [true]);
+  const receipt = deferred();
+  h.blockRetry(receipt.promise);
+  const retrying = h.click("retry-button");
+  assert.equal(h.elements.get("visitor-monochrome").disabled, true);
+  assert.equal(h.workflow.operation.settings.monochrome, true);
+  receipt.resolve();
+  await retrying;
+  assert.equal(h.workflow.operation, pendingOperation);
+  assert.equal(h.workflow.operation.base, base);
+  assert.equal(h.calls.start.length, 1);
+  assert.equal(h.calls.rePair, 0);
+  assert.equal(h.calls.retry, 1);
+  assert.equal(h.calls.draws.length, 2);
+  assert.deepEqual(h.calls.revoked, [originalUrl]);
+  assert.equal(h.elements.get("visitor-monochrome").checked, true);
+  assert.equal(h.elements.get("visitor-monochrome").disabled, false);
+  assert.equal(h.elements.get("status").textContent, "");
+  await h.click("download-button");
+  assert.equal(h.urls.get(h.calls.downloads.at(-1).href).monochrome, true);
 });
 
 test("an unconfigured archive allows local choices without fabricating a result or a successful save", async () => {
@@ -418,6 +595,8 @@ test("an unconfigured archive allows local choices without fabricating a result 
   assert.equal(h.elements.get("rotate-button").hidden, true);
   assert.equal(h.elements.get("result-actions").hidden, false, "Start over remains available for an unsent selection");
   assert.equal(h.elements.get("busy-indicator").hidden, true);
+  assert.equal(h.elements.get("output-options").hidden, false);
+  assert.equal(h.elements.get("visitor-monochrome").disabled, true, "an unsent queued selection retains its frozen mode");
   h.click("reset-button");
   assert.equal(h.elements.get("allow-reuse").checked, false);
   assert.equal(h.elements.get("visitor-monochrome").checked, false);

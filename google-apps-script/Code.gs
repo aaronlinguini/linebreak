@@ -476,6 +476,10 @@ function begin_(project, payload) {
     throw apiError_("INVALID_REQUEST", "The previous exposure could not be verified.");
   }
   var reusing = isObject_(payload.reuse);
+  if (reusing && payload.reuse.sameBase !== undefined && typeof payload.reuse.sameBase !== "boolean") {
+    throw apiError_("INVALID_REQUEST", "The previous pairing choice is invalid.");
+  }
+  var sameBase = reusing && payload.reuse.sameBase === true;
   if (reusing) syncArtistSourcesIfDue_(project);
   if (reusing === (payload.original !== undefined)) {
     throw apiError_("INVALID_REQUEST", "Choose one photograph or one saved exposure to pair.");
@@ -496,6 +500,9 @@ function begin_(project, payload) {
     }
     originalHash = previous.originalSha256;
     allowReuse = previous.allowReuse === true || previous.allowReuse === "true";
+    if (sameBase && (!previous.baseId || !/^[0-9a-f]{64}$/.test(previous.baseSha256))) {
+      throw apiError_("BASE_UNAVAILABLE", "The previous photograph pairing is unavailable. Please contact the artist.", true);
+    }
   } else {
     if (payload.allowReuse !== undefined && typeof payload.allowReuse !== "boolean") {
       throw apiError_("INVALID_REQUEST", "The photograph sharing choice is invalid.");
@@ -509,9 +516,13 @@ function begin_(project, payload) {
     allowReuse = payload.allowReuse === true;
   }
   var submission = findRecord_(submissions, "submissionId", submissionId);
+  // Same-pair variants inherit the pin on their first write; a new pairing excludes it.
+  var savedSameBase = previous && submission && submission.baseId === previous.baseId &&
+    submission.baseSha256 === previous.baseSha256;
   if (submission && (submission.originalSha256 !== originalHash ||
       (submission.allowReuse === true || submission.allowReuse === "true") !== allowReuse ||
-      String(submission.parentSubmissionId || "") !== (previous ? previous.submissionId : ""))) {
+      String(submission.parentSubmissionId || "") !== (previous ? previous.submissionId : "") ||
+      previous && Boolean(savedSameBase) !== sameBase)) {
     throw apiError_("SUBMISSION_CONFLICT", "This submission already belongs to a different photograph. Start a new submission.");
   }
   if (!submission) {
@@ -522,9 +533,10 @@ function begin_(project, payload) {
     if (!source || source.sha256 !== originalHash) throw apiError_("ARCHIVE_UNAVAILABLE", "The original photograph is unavailable. Please contact the artist.");
     submission = {
       submissionId: submissionId, token: newToken_(), originalId: source.sourceId,
-      originalSha256: originalHash, baseId: "", status: "pending", resultId: "",
+      originalSha256: originalHash, baseId: sameBase ? previous.baseId : "", status: sameBase ? "paired" : "pending", resultId: "",
       resultSha256: "", width: "", height: "", settingsJson: "", createdAt: now_(), completedAt: "",
-      allowReuse: allowReuse, parentSubmissionId: previous ? previous.submissionId : "", baseSha256: ""
+      allowReuse: allowReuse, parentSubmissionId: previous ? previous.submissionId : "",
+      baseSha256: sameBase ? previous.baseSha256 : ""
     };
     writeRecord_(project.submissions, EXPOSURE_CONFIG_.submissionsHeaders, submission);
   }

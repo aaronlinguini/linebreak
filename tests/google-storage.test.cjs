@@ -25,8 +25,8 @@ function fingerprintFixture(overrides = {}, bytes = [255, 216, 255, ...Array(125
 function harness() {
   let nextId = 0;
   const files = new Map(), books = new Map();
-  const calls = { get: [], create: [], list: [], update: [], fetch: [], sheets: [], valuesGet: [], valuesUpdate: [] };
-  const controls = { pages: null, httpCode: 200, body: null, range: false, rangeHeaders: null, failValueWrite: false, failGet: null, onFetch: null };
+  const calls = { get: [], create: [], list: [], update: [], fetch: [], sheets: [], valuesGet: [], valuesBatchGet: [], valuesUpdate: [] };
+  const controls = { pages: null, httpCode: 200, body: null, range: false, rangeHeaders: null, failValueWrite: false, failGet: null, onFetch: null, batchResponse: null };
   class Blob {
     constructor(bytes, mimeType, name) { this.bytes = [...bytes]; this.mimeType = mimeType; this.name = name; }
     getName() { return this.name; }
@@ -114,6 +114,16 @@ function harness() {
       return {};
     },
     Values: {
+      batchGet(id, options) {
+        calls.valuesBatchGet.push({ id, options: clone(options) });
+        if (controls.batchResponse) return clone(controls.batchResponse);
+        return { spreadsheetId: id, valueRanges: options.ranges.map(range => {
+          const title = parseTitle(range);
+          assert.ok(book(id).sheets.some(sheet => sheet.properties.title === title), "batch reads must not include a missing legacy tab");
+          const values = clone(book(id).values[title]);
+          return { range: `${title}!A1:Z1000`, ...(values.length ? { values } : {}) };
+        }) };
+      },
       get(id, range, options) {
         calls.valuesGet.push({ id, range, options: clone(options) });
         return { values: clone(book(id).values[parseTitle(range)]) };
@@ -575,6 +585,97 @@ test("Sheets cache reset reads current external values and denies unrelated spre
   const gets = h.calls.sheets.length;
   assert.throws(() => h.sheets.openById(unrelated.id), /limited-access/);
   assert.equal(h.calls.sheets.length, gets);
+});
+
+test("the real backend reads its three existing index tabs in one batch per locked operation", () => {
+  const h = backendHarness(); h.sandbox.setupProject();
+  const artistFolderId = h.properties.get("EXPOSURE_ARTIST_FOLDER_ID");
+  h.addFile({ parents: [artistFolderId] }, Buffer.from(image(1).base64, "base64"));
+  function operation(action) {
+    const batches = h.calls.valuesBatchGet.length;
+    const gets = h.calls.valuesGet.length;
+    const result = action();
+    assert.equal(h.calls.valuesBatchGet.length, batches + 1);
+    assert.equal(h.calls.valuesGet.length, gets, "repeated tab reads must use the same request-local cache");
+    const request = h.calls.valuesBatchGet.at(-1);
+    assert.deepEqual([...request.options.ranges].sort(), ["'Sources'", "'Submissions'", "'Usage'"].sort());
+    assert.equal(request.options.valueRenderOption, "UNFORMATTED_VALUE");
+    assert.equal(request.options.majorDimension, "ROWS");
+    return result;
+  }
+  assert.equal(operation(() => h.api("bootstrap")).artistCount, 1);
+  const begun = operation(() => h.api("begin", { submissionId: crypto.randomUUID(), original: image(2) }));
+  const receipt = operation(() => h.api("complete", { submissionId: begun.submissionId, token: begun.token,
+    result: image(3), width: 640, height: 480, settings: { baseExposure: 0, participantExposure: 0, contrast: 12, monochrome: true } }));
+  assert.equal(receipt.saved, true);
+});
+
+test("batched tab caches retain successful writes, reject failed writes, and refresh only after reset", () => {
+  const h = harness(); const book = h.sheets.create("Index");
+  for (const title of ["Sources", "Submissions", "Usage"]) book.insertSheet(title);
+  const stored = h.books.get(book.getId());
+  stored.values.Sources = [["source-before"]];
+  stored.values.Submissions = [["submission-before"]];
+  stored.values.Usage = [["usage-before"]];
+  h.sheets.reset();
+  const opened = h.sheets.openById(book.getId());
+  const source = opened.getSheetByName("Sources");
+  const before = h.calls.valuesBatchGet.length;
+  assert.equal(source.getRange(1, 1).getValues()[0][0], "source-before");
+  source.getRange(1, 1).setValues([["source-after"]]);
+  assert.equal(source.getRange(1, 1).getValues()[0][0], "source-after");
+  h.controls.failValueWrite = true;
+  assert.throws(() => source.getRange(1, 1).setValues([["must-not-enter-cache"]]), /Temporary write failure/);
+  assert.equal(source.getRange(1, 1).getValues()[0][0], "source-after");
+  stored.values.Usage[0][0] = "usage-external-update";
+  assert.equal(opened.getSheetByName("Usage").getRange(1, 1).getValues()[0][0], "usage-before");
+  assert.equal(h.calls.valuesBatchGet.length, before + 1);
+  h.sheets.reset();
+  const fresh = h.sheets.openById(book.getId());
+  assert.equal(fresh.getSheetByName("Usage").getRange(1, 1).getValues()[0][0], "usage-external-update");
+  assert.equal(fresh.getSheetByName("Sources").getRange(1, 1).getValues()[0][0], "source-after");
+  assert.equal(h.calls.valuesBatchGet.length, before + 2);
+});
+
+test("a missing legacy Usage tab is created without batching a nonexistent range or changing prior records", () => {
+  const h = backendHarness(); h.sandbox.setupProject();
+  h.addFile({ parents: [h.properties.get("EXPOSURE_ARTIST_FOLDER_ID")] }, Buffer.from(image(1).base64, "base64"));
+  h.api("begin", { submissionId: crypto.randomUUID(), original: image(2) });
+  const stored = h.books.get(h.properties.get("EXPOSURE_SPREADSHEET_ID"));
+  const originalSources = clone(stored.values.Sources);
+  const originalSubmissions = clone(stored.values.Submissions);
+  stored.sheets = stored.sheets.filter(sheet => sheet.properties.title !== "Usage");
+  delete stored.values.Usage;
+  const before = h.calls.valuesBatchGet.length;
+  assert.equal(h.api("bootstrap").artistCount, 1);
+  const requests = h.calls.valuesBatchGet.slice(before);
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[0].options.ranges, ["'Sources'", "'Submissions'"]);
+  assert.deepEqual(requests[1].options.ranges, ["'Usage'"]);
+  assert.deepEqual(stored.values.Usage, [["key", "day", "kind", "bytes"]]);
+  assert.deepEqual(stored.values.Sources, originalSources);
+  assert.deepEqual(stored.values.Submissions, originalSubmissions);
+});
+
+test("malformed or incomplete batch responses fail before any index tab enters the cache", () => {
+  const h = harness(); const book = h.sheets.create("Index");
+  for (const title of ["Sources", "Submissions", "Usage"]) book.insertSheet(title);
+  const stored = h.books.get(book.getId());
+  stored.values.Sources = [["verified-source"]];
+  const ranges = ["Sources", "Submissions", "Usage"].map(title => ({ range: `${title}!A1:Z1000`, values: [] }));
+  for (const response of [
+    { spreadsheetId: "wrong-book", valueRanges: ranges },
+    { spreadsheetId: book.getId(), valueRanges: ranges.slice(0, 2) },
+    { spreadsheetId: book.getId(), valueRanges: [...ranges].reverse() },
+    { spreadsheetId: book.getId(), valueRanges: [{ range: "Sources!A1:Z1000", values: ["invalid-row"] }, ...ranges.slice(1)] }
+  ]) {
+    h.sheets.reset();
+    const source = h.sheets.openById(book.getId()).getSheetByName("Sources");
+    h.controls.batchResponse = response;
+    assert.throws(() => source.getRange(1, 1).getValues(), /could not be read completely/);
+    h.controls.batchResponse = null;
+    assert.equal(source.getRange(1, 1).getValues()[0][0], "verified-source");
+  }
 });
 
 test("the real backend archives through the limited adapters with consent, original deduplication and unique usage reservations", () => {
