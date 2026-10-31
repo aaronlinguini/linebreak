@@ -313,35 +313,28 @@ function initializeExposureStudio() {
   const byId = (id) => document.getElementById(id);
   const ui = {
     workspace: byId("workspace"), canvas: byId("canvas"),
-    resultEmpty: byId("result-empty"), participantPreview: byId("participant-preview"),
-    sourceActions: byId("source-actions"), sharingChoice: byId("sharing-choice"),
+    resultEmpty: byId("result-empty"), sourceActions: byId("source-actions"),
     exposureControls: byId("exposure-controls"), uploadInstructions: byId("upload-instructions"),
     outputOptions: byId("output-options"), monochrome: byId("visitor-monochrome"),
     resultActions: byId("result-actions"), allowReuse: byId("allow-reuse"),
-    develop: byId("develop-button"), cancelSelection: byId("cancel-selection"),
     newPairing: byId("new-pairing-button"), reset: byId("reset-button"),
     participantInput: byId("participant-input"), cameraInput: byId("participant-camera-input"),
     download: byId("download-button"), rotate: byId("rotate-button"), retry: byId("retry-button"),
     status: byId("status"), error: byId("error"), busy: byId("busy-indicator")
   };
+  const developingMessage = "Please wait while your photo is developed.";
   const state = { working: false, connecting: false, ready: false, hasResult: false, participant: null,
-    selectedFile: null, downloadUrl: null, rePairUnavailable: false };
+    selectedFile: null, selectionChoices: null, queued: false, downloadUrl: null, rePairUnavailable: false };
   ui.monochrome.checked = PROJECT_SETTINGS.monochrome;
   ui.allowReuse.checked = false;
   const { loadPhoto, releasePhoto, develop } = createExposureProcessor();
   const storage = new GoogleDriveStorage(EXPOSURE_CONFIG);
   const workflow = new ExposureArchiveWorkflow({
-    storage, settings: PROJECT_SETTINGS, render: renderSubmission,
-    onProgress: ({ stage }) => {
-      const labels = { original: "Saving photograph…", pairing: "Finding another pairing…",
-        develop: "Developing…", archive: "Saving exposure…", saved: "Saved." };
-      announce(labels[stage]);
-      ui.busy.textContent = labels[stage];
-    }
+    storage, settings: PROJECT_SETTINGS, render: renderSubmission
   });
   function announce(message) { ui.status.textContent = message; }
   function restoreConnectionStatus() {
-    announce(state.connecting ? "Connecting…"
+    announce(state.connecting && state.selectedFile ? "" : state.connecting ? "Connecting…"
       : state.ready || !storage.configured ? "" : "Photo submissions are temporarily unavailable.");
     ui.retry.hidden = state.connecting || state.ready || !storage.configured;
   }
@@ -356,32 +349,35 @@ function initializeExposureStudio() {
     const selected = Boolean(state.selectedFile);
     const pending = workflow.pending;
     const completed = state.hasResult && !pending;
+    const processing = state.working || (state.queued && state.connecting);
     for (const input of [ui.participantInput, ui.cameraInput]) {
       input.disabled = state.working || selected || pending;
     }
     ui.sourceActions.hidden = selected || state.hasResult;
     ui.uploadInstructions.hidden = selected;
-    ui.exposureControls.hidden = state.hasResult || pending;
-    ui.outputOptions.hidden = state.hasResult || pending;
-    ui.monochrome.disabled = state.working || pending || state.hasResult;
-    ui.sharingChoice.hidden = !selected || state.hasResult || pending;
-    ui.resultActions.hidden = !state.hasResult;
-    ui.develop.disabled = state.working || !state.ready || pending;
-    ui.cancelSelection.disabled = state.working || pending;
-    ui.allowReuse.disabled = state.working || pending;
+    ui.exposureControls.hidden = selected || state.hasResult || pending;
+    ui.outputOptions.hidden = selected || state.hasResult || pending;
+    ui.monochrome.disabled = state.working || selected || pending || state.hasResult;
+    ui.resultActions.hidden = !state.hasResult && !(selected && !processing && !pending);
+    ui.allowReuse.disabled = state.working || selected || pending;
+    ui.download.hidden = !state.hasResult;
+    ui.rotate.hidden = !state.hasResult;
     ui.download.disabled = !state.hasResult || state.working;
     ui.rotate.disabled = !state.hasResult || state.working || pending;
     ui.newPairing.hidden = !completed || state.rePairUnavailable || workflow.operation?.receipt?.canRePair !== true;
     ui.newPairing.disabled = state.working || pending;
-    ui.reset.disabled = state.working || pending;
+    ui.reset.disabled = processing || pending;
     ui.retry.disabled = state.working || state.connecting;
-    ui.busy.hidden = !state.working;
-    ui.workspace.setAttribute("aria-busy", String(state.working));
+    ui.busy.hidden = !processing;
+    ui.canvas.hidden = !state.hasResult || processing;
+    ui.resultEmpty.hidden = state.hasResult || processing;
+    ui.resultEmpty.textContent = selected ? "Your double exposure is not ready yet." : "Your double exposure will appear here.";
+    ui.workspace.setAttribute("aria-busy", String(processing));
     ui.workspace.classList.toggle("has-result", state.hasResult);
   }
   function setWorking(value, message) {
     state.working = value;
-    if (message) { announce(message); ui.busy.textContent = message; }
+    if (value) { announce(""); ui.busy.textContent = message || developingMessage; }
     refreshActions();
   }
   function clearResult() {
@@ -398,10 +394,10 @@ function initializeExposureStudio() {
     releasePhoto(state.participant);
     state.participant = null;
     state.selectedFile = null;
+    state.selectionChoices = null;
+    state.queued = false;
     state.rePairUnavailable = false;
     ui.allowReuse.checked = false;
-    ui.participantPreview.hidden = true;
-    ui.participantPreview.removeAttribute("src");
     clearResult();
     restoreConnectionStatus();
   }
@@ -443,6 +439,7 @@ function initializeExposureStudio() {
       if (!state.working && !workflow.pending && !state.hasResult) restoreConnectionStatus();
       refreshActions();
     }
+    await startSelectedPhoto();
   }
   async function finishSubmission(action) {
     setWorking(true);
@@ -461,9 +458,8 @@ function initializeExposureStudio() {
       state.downloadUrl = URL.createObjectURL(operation.result.blob);
       state.hasResult = true;
       ui.canvas.hidden = false;
-      ui.participantPreview.hidden = true;
       ui.resultEmpty.hidden = true;
-      announce("Double exposure saved.");
+      announce("");
     } catch (error) {
       showError(error);
       if (error.previousResultRestored) {
@@ -476,41 +472,36 @@ function initializeExposureStudio() {
     } finally { setWorking(false); }
   }
 
+  async function startSelectedPhoto() {
+    if (!state.queued || !state.participant || state.working || workflow.pending || !state.ready) return;
+    state.queued = false;
+    clearError();
+    await finishSubmission(() => workflow.start(state.selectedFile, state.selectionChoices));
+  }
+
   async function chooseParticipantPhoto(input) {
     const file = input.files?.[0];
-    if (!file || state.working || workflow.pending) return;
+    if (!file || state.selectedFile || state.working || workflow.pending) return;
     clearError();
-    setWorking(true, "Preparing photograph…");
-    let photo;
-    try { photo = await loadPhoto(file); }
-    catch (error) { showError(error); restoreConnectionStatus(); }
-    finally { input.value = ""; setWorking(false); }
-    if (!photo) return;
-    releasePhoto(state.participant);
-    state.participant = photo;
     state.selectedFile = file;
+    state.selectionChoices = Object.freeze({ allowReuse: ui.allowReuse.checked, monochrome: ui.monochrome.checked });
+    state.queued = true;
     clearResult();
-    ui.participantPreview.src = photo.thumbnail;
-    ui.participantPreview.hidden = false;
-    ui.resultEmpty.hidden = true;
+    setWorking(true);
+    try { state.participant = await loadPhoto(file); }
+    catch (error) {
+      clearSelection();
+      showError(error);
+      ui.retry.hidden = true;
+      return;
+    } finally { input.value = ""; setWorking(false); }
     restoreConnectionStatus();
     refreshActions();
+    await startSelectedPhoto();
   }
   for (const input of [ui.participantInput, ui.cameraInput]) {
     input.addEventListener("change", () => chooseParticipantPhoto(input));
   }
-  ui.develop.addEventListener("click", async () => {
-    if (!state.selectedFile || state.working || workflow.pending || !state.ready) return;
-    clearError();
-    await finishSubmission(() => workflow.start(state.selectedFile, {
-      allowReuse: ui.allowReuse.checked, monochrome: ui.monochrome.checked
-    }));
-  });
-  ui.cancelSelection.addEventListener("click", () => {
-    if (state.working || workflow.pending) return;
-    clearError();
-    clearSelection();
-  });
   ui.newPairing.addEventListener("click", async () => {
     if (!state.hasResult || state.working || workflow.pending || workflow.operation?.receipt?.canRePair !== true) return;
     clearError();

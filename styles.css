@@ -87,7 +87,7 @@ h1 { margin: 0; font-size: 13px; font-weight: 400; letter-spacing: .025em; }
   letter-spacing: -.015em;
 }
 
-.image-stage canvas, .image-stage img {
+.image-stage canvas {
   display: block;
   width: auto;
   height: auto;
@@ -97,16 +97,24 @@ h1 { margin: 0; font-size: 13px; font-weight: 400; letter-spacing: .025em; }
 }
 
 .busy-indicator {
-  position: absolute;
-  right: 0;
-  bottom: 15px;
-  left: 0;
+  display: grid;
+  justify-items: center;
+  gap: 16px;
   margin: 0;
   color: var(--foreground);
-  font-size: 12px;
+  font-size: 14px;
   text-align: center;
-  text-shadow: 0 1px 8px #000;
 }
+.busy-indicator::before {
+  content: "";
+  width: 24px;
+  height: 24px;
+  border: 2px solid #444;
+  border-top-color: var(--foreground);
+  border-radius: 50%;
+  animation: developing 1s linear infinite;
+}
+@keyframes developing { to { transform: rotate(360deg); } }
 
 .actions {
   display: flex;
@@ -187,7 +195,7 @@ h1 { margin: 0; font-size: 13px; font-weight: 400; letter-spacing: .025em; }
   .experiment-page { padding-block: 12px 48px; }
   .experiment-entries { gap: 40px; }
   .image-stage { min-height: 280px; height: 59svh; padding: 12px; }
-  .image-stage canvas, .image-stage img { max-height: calc(59svh - 26px); }
+  .image-stage canvas { max-height: calc(59svh - 26px); }
   .empty-state { font-size: 15px; }
   .actions { padding-top: 23px; gap: 14px 24px; }
   .source-actions { gap: 10px 14px; }
@@ -199,4 +207,5 @@ h1 { margin: 0; font-size: 13px; font-weight: 400; letter-spacing: .025em; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; }
+  .busy-indicator::before { animation: none; }
 }

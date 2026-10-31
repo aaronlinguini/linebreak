@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#050505">
     <title>Double Exposure</title>
-    <link rel="stylesheet" href="styles.css?v=local-connection-v1">
+    <link rel="stylesheet" href="styles.css?v=automatic-development-v1">
     <script src="project-config.js" defer></script>
     <script src="drive-storage.js" defer></script>
     <script src="archive-workflow.js?v=visitor-monochrome-v1" defer></script>
-    <script src="scripts.js?v=local-connection-v1" defer></script>
+    <script src="scripts.js?v=automatic-development-v1" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#workspace">Skip to photograph</a>
@@ -36,13 +36,6 @@
               <label id="camera-label" class="upload-label" for="participant-camera-input">Take a photo</label>
             </div>
           </div>
-
-          <div id="sharing-choice" hidden>
-            <div class="actions">
-              <button id="develop-button" class="save-button" type="button">Create double exposure</button>
-              <button id="cancel-selection" class="save-button" type="button">Back</button>
-            </div>
-          </div>
         </div>
 
         <div class="library-option">
@@ -56,9 +49,8 @@
 
       <div class="image-stage">
         <p id="result-empty" class="empty-state">Your double exposure will appear here.</p>
-        <img id="participant-preview" hidden alt="Your selected photograph">
         <canvas id="canvas" width="1" height="1" hidden aria-label="Your double exposure"></canvas>
-        <p id="busy-indicator" class="busy-indicator" hidden>Developing…</p>
+        <p id="busy-indicator" class="busy-indicator" role="status" aria-live="polite" hidden>Please wait while your photo is developed.</p>
       </div>
 
       <div id="output-options" class="output-options">
