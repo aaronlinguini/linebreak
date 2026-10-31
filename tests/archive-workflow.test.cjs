@@ -63,6 +63,41 @@ test("saves the exact original before developing, then requires a matching archi
   assert.equal(workflow.busy, false);
 });
 
+test("a static base descriptor reaches the renderer unchanged and keeps its archive identity", async () => {
+  const base = { id: "base-1", mimeType: "image/jpeg", path: "assets/base-photos/été #1? 50%.jpg",
+    name: "été #1? 50%.jpg", sha256: "a".repeat(64), byteLength: 1234 };
+  const { workflow, calls } = fixture({ storage: { begin: async () => ({ ...begin(), base }) } });
+  const saved = await workflow.start(file);
+  assert.strictEqual(saved.begin.base, base);
+  assert.strictEqual(calls.find(([type]) => type === "render")[1].base, base);
+  assert.equal(saved.receipt.baseId, base.id);
+  assert.equal(saved.begin.base.base64, undefined);
+  assert.equal(workflow.pending, false);
+  const mismatched = fixture({ storage: {
+    begin: async () => ({ ...begin(), base }), complete: async () => ({ ...receipt(), baseId: "another-base" })
+  } });
+  await assert.rejects(mismatched.workflow.start(file), /did not confirm/);
+  assert.equal(mismatched.workflow.pending, true);
+  assert.strictEqual(mismatched.workflow.operation.begin.base, base);
+});
+
+test("ambiguous or absent base data never reaches rendering or archives a result", async () => {
+  for (const base of [
+    { id: "base-1", mimeType: "image/jpeg", path: "assets/base-photos/base.jpg", base64: "AA==" },
+    { id: "base-1", mimeType: "image/jpeg" }
+  ]) {
+    const { workflow, calls } = fixture({ storage: { begin: async () => ({ ...begin(), base }) } });
+    await assert.rejects(workflow.start(file), /did not confirm/);
+    assert.equal(calls.some(([type]) => type === "render" || type === "complete"), false);
+    assert.equal(workflow.operation.submissionId, id);
+    assert.strictEqual(workflow.operation.file, file);
+    assert.equal(workflow.operation.begin, null);
+    assert.equal(workflow.operation.result, null);
+    assert.equal(workflow.operation.receipt, null);
+    assert.equal(workflow.pending, true);
+  }
+});
+
 test("sharing is opt-in and is sent with the exact original", async () => {
   const { workflow, calls } = fixture();
   await workflow.start(file);

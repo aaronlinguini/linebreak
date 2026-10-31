@@ -413,14 +413,15 @@ function initializeExposureStudio() {
     restoreConnectionStatus();
   }
 
-  function fileFromBase(base) {
+  async function fileFromBase(base) {
     if (!/^image\/(jpeg|png|webp|avif)$/.test(base.mimeType)) throw new Error("The base photograph is not supported.");
+    if (base.path !== undefined) return ExposureBaseAssets.loadFile(base, { timeoutMs: EXPOSURE_CONFIG.requestTimeoutMs });
     const binary = atob(base.base64);
     const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
     return new File([bytes], base.name || "base.jpg", { type: base.mimeType });
   }
   async function renderSubmission({ base, settings }) {
-    const basePhoto = await loadPhoto(fileFromBase(base));
+    const basePhoto = await loadPhoto(await fileFromBase(base));
     try {
       const preparedCanvas = document.createElement("canvas");
       return { ...await develop(basePhoto, state.participant, preparedCanvas, settings), preparedCanvas };

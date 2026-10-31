@@ -1,10 +1,10 @@
-# Google archive: project account and Drive-folder intake
+# Google archive and artist base files
 
 The double-exposure tool runs in the browser. The Google program supplies base photographs and saves participant originals, completed JPEGs, consent, and duplicate checks. It runs on Google's infrastructure; you do not rent a server or connect a Google account to an AI assistant.
 
 ## Current status — October 30, 2026
 
-The user chose the dedicated account **aaron.double.exposure.project@gmail.com** so they can add base photos by dragging files into Google Drive. The new [Apps Script project](https://script.google.com/home/projects/1gj7CIChAW6rMFOmP_Pb16TWSAwUKzZQxnOUOvvEUvDFOwQxKo65lYols/edit) exists in that account. Its manifest is visible, and these Script Properties have been configured:
+The dedicated account **aaron.double.exposure.project@gmail.com** holds the private photo archive and source index. Artist image delivery is being moved to the website's selected static files; retained Drive originals still support index and duplicate verification. The [Apps Script project](https://script.google.com/home/projects/1gj7CIChAW6rMFOmP_Pb16TWSAwUKzZQxnOUOvvEUvDFOwQxKo65lYols/edit) uses these configured properties:
 
 | Property | Current value |
 | --- | --- |
@@ -13,7 +13,9 @@ The user chose the dedicated account **aaron.double.exposure.project@gmail.com**
 | `UPLOADS_PAUSED` | `false` — explicitly approved and saved for live testing |
 | `ALLOWED_ORIGINS` | `http://127.0.0.1:5500,http://localhost:5500` |
 
-**Google Version 6 deployed successfully on October 30 at 10:00 PM.** `Code.gs` and `Storage.gs` were installed and verified byte-for-byte after reloading the Google editor. The [Google web app](https://script.google.com/macros/s/AKfycbyzIdwIui57NUjmTMm_XyNMvWNHZixo4UyMedoRtz7Qod4COqvjAbcwGDQounUvsCPv/exec) keeps the same `/exec` URL configured in `project-config.js`, executing account **aaron.double.exposure.project@gmail.com**, **Anyone** access, OAuth scopes, properties, and archive IDs. The current local revision passes **342/342** checks. The user explicitly approved activating the existing public service for live tests; `UPLOADS_PAUSED=false` was then saved and verified. This activation is separate from publishing the frontend.
+**Google Version 7 deployed October 30 at 11:43 PM.** `Code.gs` and generated `AssetCatalog.gs` were verified byte-for-byte after reloading the Google editor. The [Google web app](https://script.google.com/macros/s/AKfycbyzIdwIui57NUjmTMm_XyNMvWNHZixo4UyMedoRtz7Qod4COqvjAbcwGDQounUvsCPv/exec) keeps the same `/exec` URL, dedicated account, **Anyone** access, OAuth scopes, properties, and archive IDs. The current local revision passes **375/375** checks. `UPLOADS_PAUSED=false` remains explicitly approved for testing. This does not authorize frontend publication.
+
+The actual local asset build validated **113 unique artist files** in `assets/base-photos/` without changing names or bytes; a final read-only builder check reconfirmed them. It generated public `assets/base-photos.json` and private `google-apps-script/AssetCatalog.gs`. The **11:39:43 PM** owner refresh returned **artistCount: 113**, **complete: true**, zero skipped/deferred/issues, **websiteAssetCount: 113**, **websiteAssetCatalogCount: 113**, and **unmatchedWebsiteAssetCount: 0**. Browser QA loaded the actual **4,702,374-byte** `30thbirthday.JPG` over same-site HTTP with a SHA query through the verifying loader and real processor in both colour modes, with no load errors. Storage was simulated; this is not a new external upload or proof of a live saved exposure. A fresh Version 7 Chrome/Live Server production bootstrap succeeded after Retry with clear status/no error; its initial handshake timed out. Preserve local checkpoint **`29b2d1b`** and Google **Version 6** for rollback.
 
 **Local Google connection verified:** real bridge and `exposureApi` requests from `http://127.0.0.1:5500` completed in Google's execution log. After Version 5 activation, a Chrome retry and a fresh in-app-browser page both completed bootstrap, cleared the connection status, and enabled the upload, camera, consent, and black-and-white controls. An earlier fresh Chrome attempt timed out; its cause was not established. The visitor bridge JavaScript is served by Google at `/exec?asset=bridge`, so this connection no longer needs GitHub Pages assets. The optional owner page still loads its CSS and JavaScript from `SITE_URL`. Around **9:09 PM on October 30**, the user reported successful manual double-exposure generation. That report is separate from independent checks of archive-folder contents, consent-based moves, duplicate reuse, another pairing, and phone/tablet behaviour; those checks remain pending. Earlier browser automation could not select a local photo because Chrome's automation extension lacked file-URL permission.
 
@@ -27,7 +29,7 @@ The last published frontend is the visitor black-and-white release `949dc1`, pre
 
 Historical setup: the user approved the dedicated account's Google permissions, and `setupProject` created its folders and index on October 30 at **2:18:51 PM**. Version 1 deployed at **2:27 PM**; Version 3 added the consent-folder/duplicate handling revision at **3:25 PM**; Version 4 added the Google-served bridge; Version 5 added faster base-photo intake. The old **3:10:49–3:11:01 PM** scan's zero-base result concerned two earlier files only: accidentalselfie.jpeg had an unrecognized content signature and balcony.jpeg exceeded 30 MB. Those files were later replaced, so that result does not describe the current collection. The optional owner page previously showed correct folder links, and a real Incognito check denied owner access while signed out. Do not repeat initial authorization/setup, clear working IDs, or create another initial deployment.
 
-The user can now drag chosen base photos directly into the new [My_photos folder](https://drive.google.com/drive/folders/1KTwgNyGgTgv8HwT1MrBaJeWk-JJIupKY), while signed into **aaron.double.exposure.project@gmail.com**. These are the new project-account archive links:
+Keep the existing originals in [My_photos](https://drive.google.com/drive/folders/1KTwgNyGgTgv8HwT1MrBaJeWk-JJIupKY), signed into **aaron.double.exposure.project@gmail.com**. The selected static artist library must match their indexed exact hashes; Drive is not a separate fallback artist pool. Current archive links:
 
 | Project item | Link |
 | --- | --- |
@@ -39,7 +41,7 @@ The user can now drag chosen base photos directly into the new [My_photos folder
 
 The [GitHub repository](https://github.com/aaronlinguini/double-exposure-online-project) is private and retains the last published frontend `949dc1`; the former Pages site is offline. Its project-account endpoint configuration is unchanged. The earlier personal-account deployment and its folders remain unchanged and paused as a rollback reference. Distinct new-account installation, folder-link, and deployment records are saved privately in the Git-ignored `secrets/` directory.
 
-There is no need to share a personal Drive folder for this setup. All project folders have been created in the dedicated account, and the user can drag photos into that account's **My_photos** folder. The optional import page is available as a fallback; it is not required for normal photo intake in this version.
+No personal Drive-folder sharing, repeated authorization, or new setup is needed. The optional owner import page is not required to manage the selected static artist assets.
 
 ## Keep the two Google projects separate
 
@@ -98,13 +100,14 @@ The consent-folder revision uses the existing folders as follows:
 
 If a participant submits a byte-identical copy of an artist base already in `My_photos`, the existing artist file is reused and keeps its name and location. A folder scan preserves participant provenance and consent; a filename alone never grants consent.
 
-## Add and manage base photographs in Google Drive
+## Add and manage artist base files
 
-Use the new project-account folder links above:
+1. Copy selected JPEG, PNG, WebP, or AVIF files up to **30 MiB** each directly into local `assets/base-photos/`, preserving raw filenames. Do not include subfolders or unrelated files apart from `.DS_Store`.
+2. Run `node scripts/build-base-assets.cjs`, then `node scripts/build-base-assets.cjs --check`. The builder validates signatures and hashes, deduplicates manifest entries, and writes `assets/base-photos.json` plus private `google-apps-script/AssetCatalog.gs`. It never copies, renames, resizes, re-encodes, or deletes the input photos. Empty/invalid input leaves previous outputs intact.
+3. Retain the corresponding exact-byte Drive originals directly inside **My_photos** for the current metadata index and duplicate-original checks. New/changed assets must match indexed artist sources; a local file alone does not make an unmapped hash eligible.
+4. Save generated **AssetCatalog.gs** in the existing Google project, and save **Code.gs** only when its code changed. Deploy a new version of the existing endpoint. Refresh the owner collection and confirm `websiteAssetCount` and `websiteAssetCatalogCount` agree with zero `unmatchedWebsiteAssetCount`. No new scopes, IDs, or OAuth approval are needed.
 
-1. Open **My_photos** in the dedicated account's Google Drive.
-2. Drag or upload the chosen base photos directly into that folder. The program reads JPEG, PNG, WebP, and AVIF files up to 30 MB each. Export HEIC or RAW files first.
-3. Keep photos directly inside **My_photos**. This reader does not recurse through subfolders or follow Drive shortcuts.
+With the static catalog installed, Google returns a pinned artist descriptor rather than image base64. `base-assets.js` loads only the same website's encoded single-filename path, validates byte length and SHA-256, and caches the two most recent assets. Only matching mapped artists are eligible; an unavailable artist file fails without silently downloading a Drive fallback or selecting another artist collection. Consented participant bases continue through the dynamic Google pool. The exposure calculation and input bytes stay unchanged.
 
 No import app or scheduled trigger is needed for normal use. With visitor uploads enabled, the program checks for folder changes when the site connects and before a new pairing. A completed scan is reused for up to one minute. Reload the site or use Retry after adding photographs. While visitor uploads are paused, run **refreshArtistCollection** in the project account's Apps Script editor to check the collection; the optional owner page can also check it.
 
@@ -114,7 +117,7 @@ The deployed faster scan uses Drive's output-only **SHA-256 checksum**, when ava
 
 The scan starts at most **150 header probes** and stops starting further artist reads after **25 seconds**, checking that deadline between files. This limits new requests rather than aborting work already in progress; it does not guarantee a 25-second request duration. Missing or invalid checksums and AVIF use full-file signature and SHA-256 validation, bounded by the existing **10 full reads / 64 MiB** allowance. AVIF stays on that path because its type information may extend beyond 64 bytes. If Drive ignores the range and returns HTTP 200, the program verifies and hashes that already downloaded full body once and counts its actual bytes against the full-read allowance; it does not fetch the file again. Failed full responses and buffered HTTP error bodies also consume that allowance. Unfinished scans resume on later requests, reusing verified unchanged records. A fresh supplied Drive checksum must still match the cached hash, even if size and modification time are unchanged.
 
-The selected photograph is still downloaded completely and checked against its exact stored SHA-256 in `readSource_` before use. New-original intake still refuses to proceed until the collection scan completes. Participant provenance, consent, folder moves, and duplicate handling are unchanged. The program is not an always-running folder watcher: without site or owner requests, it does not scan in the background.
+Full Drive-byte verification remains for existing original reuse and dynamic participant bases. Static artist bytes are checked against the assigned SHA-256 in the browser instead. New-original intake still refuses to proceed until the source scan completes. Participant provenance, consent, folder moves, and duplicate handling are unchanged. Without site or owner requests, the program does not scan in the background.
 
 **Fast scan is installed as Version 5.** Google Version 4 and local checkpoint `89746ec` preserve the prior scan for rollback. The current counts and remaining live checks are recorded above. This performance edit changes no image treatment, original retention, consent, duplicate handling, scopes, or archive IDs. Public service activation was separately approved; further pause changes remain the user's choice.
 
@@ -122,7 +125,7 @@ Byte-identical artist photos get only one eligible source-pool entry. Duplicate 
 
 Base photos can be supplied to visitors for random pairings even though the Drive folders remain private. Photos displayed on future gallery pages are a separate selection; adding a base does not create a gallery page.
 
-The optional `/exec?view=artist` page is still owner-only. Its upload control works only for an app-owned artist folder; direct Drive-folder management is the intended workflow. The folder can later be changed to an explicitly shared source folder accessible to the project account, but that is not required for this setup.
+The optional `/exec?view=artist` page remains owner-only. Its upload control does not build the static website catalog; use the local artist-file steps above.
 
 ## Deployment and publication reference
 
@@ -141,20 +144,22 @@ Then set `googleScriptUrl` in `project-config.js` to that new `/exec` URL. Prese
 node scripts/prepare-public-site.cjs
 ```
 
-Preparation is local only. If publication is explicitly requested later, publish only the generated `.public-site/` contents. The prepared site has thirteen approved files:
+Preparation is local only. If publication is explicitly requested later, publish only the generated `.public-site/` contents. It contains fifteen core files plus only the artist photos listed in the public manifest—currently 113:
 
 - `index.html`, `double-exposure.html`, `experiment-1.html`, `experiment-2.html`, `experiment-3.html`
 - `styles.css`, `scripts.js`, `project-config.js`
 - `archive-workflow.js`, `drive-storage.js`, `drive-bridge.js`
 - `artist-import.js`, `artist-import.css`
+- `base-assets.js`, `assets/base-photos.json`
+- The exact `assets/base-photos/<filename>` entries in that manifest.
 
-Do not publish the working repository, its history, `google-apps-script/`, docs, tests, secrets, local experiments, or private photos. The two optional owner-page assets contain no credentials. Future home/gallery pages and selected public images must be added deliberately to the publication allowlist; never publish every project file automatically.
+Do not publish the working repository, its history, `google-apps-script/` including **AssetCatalog.gs**, docs, tests, secrets, local comparisons, or unselected photos. The packager does not sweep in `images/` or experiment photographs; these need a separate explicit selection. The optional owner-page assets contain no credentials. Never publish every project file automatically.
 
 Keep `SITE_URL` as the HTTPS repository base, including its path and trailing slash. The prepared tool page is `double-exposure.html`; the home page remains `index.html`. This split does not require an Apps Script update. `SITE_URL` supplies the public website's permitted origin and the optional owner-page asset base. Local HTTP previews need their exact origins in `ALLOWED_ORIGINS`; `file://` cannot connect to the archive.
 
 The visitor bridge HTML now points to the same Google deployment's fixed `?asset=bridge` route. That route serves only the generated JavaScript with a JavaScript MIME type; it reads no script properties or Google files and accepts no filename or caller-supplied code. The normal bridge page still checks the website origin, and the JavaScript still checks its top window, channel, message origin, and permitted operations. The route uses [Google's Content Service](https://developers.google.com/apps-script/guides/content), which redirects the static response to a Google content URL. HTML continues to contain only an external script reference.
 
-The bridge repair is already installed and verified in the existing Google project. Its six source files include the generated **Client.gs**. Future changes to the bridge require rebuilding that file, saving the affected Google sources, and updating the existing deployment version while preserving its `/exec` URL, account, Anyone access, permissions, properties, and folder IDs. Do not rerun setup or grant new scopes for this repair.
+The bridge repair is installed in the existing Google project. Its generated **Client.gs** is separate from the new private artist **AssetCatalog.gs**. Bridge changes require rebuilding Client.gs; artist file changes require rebuilding the asset catalog. Save affected Google sources and update the existing deployment while preserving its `/exec` URL, account, Anyone access, permissions, properties, and folder IDs. Do not rerun setup or grant new scopes.
 
 While GitHub Pages is offline, the optional owner page's external assets remain unavailable. Direct Drive uploads, collection checks in the Apps Script editor, and `local-test.html` remain available. The visitor bridge is verified from an explicitly allowed local HTTP origin while the public website remains offline. **`UPLOADS_PAUSED=true` blocks visitor bootstrap, uploads, and completion**; the current value is **false**, explicitly approved for live testing. Publishing frontend files or changing the service's pause state requires the user's instruction.
 
@@ -162,7 +167,7 @@ While GitHub Pages is offline, the optional owner page's external assets remain 
 
 The existing Google service is active as explicitly approved, and the frontend remains local. The user has reported successful manual generation; the checks below still need independent archive confirmation. The automated tests, connected bridge, and successful displayed result do not replace the consent, duplicate, and folder checks. Use the local HTTP website. At least two distinct usable bases are required to test another pairing. Do not repeat setup or change the pause setting to begin testing.
 
-1. Confirm new photos dropped into **My_photos** become eligible without using the import upload control. Check duplicate files and a later folder addition. The first scan may need several requests for a large batch.
+1. The Version 7 owner refresh verified all **113** selected assets against the source index with zero unmatched entries, and fresh production bootstrap completed after Retry. A real website asset passed direct HTTP loading/hash checks in both colour modes with simulated storage. Verify the live end-to-end archive separately, then check a later catalog change, missing/mismatched asset failure without Drive fallback, and duplicate-file handling using the artist-file steps above.
 2. Open `double-exposure.html` from the home page in a genuinely signed-out/private browser. Before choosing a photo, leave future reuse unchecked and set the colour choice. Select a different photo; it develops automatically. The rendered preview appears while **Finishing…** is shown. Confirm that download, rotation, colour changes, reset, and another pairing stay locked until the matching save receipt, then unlock without a success message.
 3. Verify its exact original in **participant_uploads**, its JPEG in **Completed_double_exposures**, and a completed row with `allowReuse=false`. The participant source must remain ineligible for future pairings.
 4. Start over, check future reuse before selecting another photo, and let it develop automatically. After its result is saved, confirm that the original **moves** from `participant_uploads` into `My_photos`, gets a stable **participant_photo_N.ext** name, and joins future pairings. Confirm that its original file ID is unchanged and no second image copy exists. Random selection does not guarantee it is selected immediately.
@@ -189,6 +194,8 @@ The public image treatment remains **Saved Current, contrast 12, 0/0 EV**. `forc
 Later backend edits require saving the Google files and deploying a new version through **Manage deployments → Edit → New version**. Keeping the deployment preserves its `/exec` address. Frontend publication is a separate manual step; none is currently authorized. The public repository is a selected copy, not a mirror of the working repository: GitHub edits do not sync locally, and local saves or commits do not publish. Compare remote and local changes before replacing public files. A local file edit does not update either service automatically.
 
 To undo only the fast-scan revision, preserve current work, restore its affected files from local checkpoint **`89746ec`**, and select the existing Google deployment's **Version 4**. Local Git and the deployed Google version are separate; neither action changes the other environment or the current pause property. Older history also remains: the direct-folder **Version 1** is paired with local checkpoint **`23fad50`**, the import-page implementation with **`6e966b3`**, and **`before-limited-drive-access`** with **`f458bb2`**. Those are broader historical rollbacks. Restoring local files does not republish GitHub Pages or revoke an OAuth grant.
+
+For the static-artist migration specifically, checkpoint **`29b2d1b`** and Google **Version 6** preserve the previous delivery path. Preserve later work before restoring recorded local files; select the Google version separately. Keep all original Drive files and working IDs.
 
 ## Intake and storage limits
 

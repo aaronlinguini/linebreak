@@ -13,6 +13,11 @@ const signed = (bytes) => Array.from(bytes, (value) => value > 127 ? value - 256
 const jpeg = (marker) => Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, marker, 0xff, 0xd9]);
 const original = (marker, name = `photo-${marker}.jpg`) => ({ name, mimeType: "image/jpeg", base64: jpeg(marker).toString("base64") });
 const submissionId = (number) => `11111111-1111-4111-8111-${String(number).padStart(12, "0")}`;
+function assetFor(backend, sourceId, name = "base.jpg") {
+  const source = backend.records("Sources").find(source => source.sourceId === sourceId);
+  return { path: `assets/base-photos/${name}`, sha256: source.sha256, mimeType: source.mimeType,
+    byteLength: Number(source.byteLength), name };
+}
 
 // In-memory fakes implement the Google service boundary. The application's
 // real Apps Script is executed unchanged, so persistence and retry assertions
@@ -438,6 +443,125 @@ test("same-pair retries preserve their pin after a failed base read and reject c
   assert.equal(backend.records("Submissions")[1].baseSha256, pending.baseSha256);
   assert.equal(backend.folder("Participant").files.length, 1);
   assert.equal(backend.folder("Double exposure").files.length, 1);
+});
+
+test("trusted website artist assets replace base-byte downloads while keeping pins and same-pair variants", () => {
+  const backend = makeBackend(); backend.setup(); const artist = backend.seed(1); backend.refresh();
+  const asset = assetFor(backend, artist.getId(), "été #1? 50%.jpg");
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: [asset] });
+  const reads = backend.io.blobReads;
+  const first = backend.begin(1, 22);
+  assert.deepEqual(first.base, { id: artist.getId(), ...asset });
+  assert.equal(first.base.base64, undefined);
+  assert.equal(first.base.url, undefined);
+  assert.equal(backend.io.blobReads, reads, "cached artist intake and base delivery must not download the original photograph");
+  assert.deepEqual(backend.begin(1, 22), first);
+  backend.data("complete", backend.completePayload(first));
+  const variant = backend.data("begin", { submissionId: submissionId(2), reuse: { submissionId: first.submissionId, token: first.token, sameBase: true } });
+  assert.deepEqual(variant.base, first.base);
+  assert.equal(variant.originalId, first.originalId);
+  assert.equal(backend.io.blobReads, reads);
+  assert.equal(backend.records("Submissions")[1].baseSha256, asset.sha256);
+});
+
+test("website artist delivery retains full existing-file verification for duplicate original uploads", () => {
+  const backend = makeBackend(); backend.setup(); const firstArtist = backend.seed(1); const secondArtist = backend.seed(2); backend.refresh();
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: [assetFor(backend, firstArtist.getId(), "one.jpg"), assetFor(backend, secondArtist.getId(), "two.jpg")] });
+  const reads = backend.io.blobReads;
+  const begun = backend.begin(1, 1);
+  assert.equal(begun.originalId, firstArtist.getId());
+  assert.equal(begun.base.id, secondArtist.getId(), "the identical artist photograph must still be excluded from its own pairing");
+  assert.equal(backend.io.blobReads, reads + 1, "original archive deduplication still verifies its existing exact bytes");
+  assert.equal(backend.folder("Participant").files.length, 0);
+  assert.equal(begun.base.base64, undefined);
+});
+
+test("consented participant bases remain dynamic beside the fixed website artist library", () => {
+  const backend = makeBackend(); backend.setup(); const artist = backend.seed(1); backend.refresh();
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: [assetFor(backend, artist.getId())] });
+  const first = backend.begin(1, 22, true);
+  backend.data("complete", backend.completePayload(first));
+  const pool = backend.data("bootstrap");
+  assert.equal(pool.artistCount, 1);
+  assert.equal(pool.participantCount, 1);
+  const second = backend.begin(2, 1);
+  assert.equal(second.base.id, first.originalId);
+  assert.equal(second.base.base64, jpeg(22).toString("base64"));
+  assert.equal(second.base.path, undefined);
+  assert.match(second.base.name, /^participant_photo_[1-9]\d*\.jpg$/);
+});
+
+test("configured artist assets exclude unmapped sources and never fall back to a different old pin", () => {
+  const backend = makeBackend(); backend.setup(); const firstArtist = backend.seed(1); const secondArtist = backend.seed(2); backend.refresh();
+  const firstAsset = assetFor(backend, firstArtist.getId(), "one.jpg");
+  const secondAsset = assetFor(backend, secondArtist.getId(), "two.jpg");
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: [firstAsset] });
+  assert.equal(backend.data("bootstrap").artistCount, 1);
+  const first = backend.begin(1, 22);
+  assert.equal(first.base.id, firstArtist.getId());
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: [secondAsset] });
+  assert.equal(backend.api("begin", { submissionId: first.submissionId, original: original(22) }).error.code, "BASE_UNAVAILABLE");
+  assert.equal(backend.records("Submissions")[0].baseId, firstArtist.getId());
+  assert.equal(backend.records("Submissions")[0].baseSha256, firstAsset.sha256);
+  assert.equal(backend.begin(2, 23).base.id, secondArtist.getId());
+});
+
+test("owner refresh counts matched catalog hashes once and reports ineligible catalog entries as unmatched", () => {
+  const backend = makeBackend(); backend.setup();
+  const one = backend.seed(1); const two = backend.seed(2); const three = backend.seed(3);
+  backend.seed(1, "duplicate-one.jpg");
+  const legacy = clone(backend.refresh());
+  assert.equal(legacy.websiteAssetCount, undefined, "the legacy refresh payload is unchanged without a catalog");
+  const photos = [assetFor(backend, one.getId(), "one.jpg"), assetFor(backend, two.getId(), "two.jpg"), assetFor(backend, three.getId(), "three.jpg")];
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos });
+  const all = clone(backend.refresh());
+  assert.equal(all.websiteAssetCount, 3);
+  assert.equal(all.websiteAssetCatalogCount, 3);
+  assert.equal(all.unmatchedWebsiteAssetCount, 0);
+  assert.equal(backend.records("Sources").length, 4, "duplicate source rows must not inflate matched hash counts");
+  three.setTrashed(true);
+  const missing = clone(backend.refresh());
+  assert.equal(missing.websiteAssetCount, 2);
+  assert.equal(missing.websiteAssetCatalogCount, 3);
+  assert.equal(missing.unmatchedWebsiteAssetCount, 1);
+  assert.equal(missing.complete, true);
+  assert.equal(backend.records("Sources").find(source => source.sourceId === three.getId()).eligible, false);
+  const logged = JSON.parse(backend.logs.at(-1));
+  assert.equal(logged.websiteAssetCount, 2);
+  assert.equal(logged.unmatchedWebsiteAssetCount, 1);
+});
+
+test("changed artist bytes cannot be returned under a trusted website asset's old hash", () => {
+  const backend = makeBackend(); backend.setup(); const artist = backend.seed(1); backend.refresh();
+  const asset = assetFor(backend, artist.getId());
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: [asset] });
+  const first = backend.begin(1, 22);
+  artist.blob = new backend.Blob(jpeg(2), "image/jpeg", artist.getName());
+  artist.date = new Date("2026-10-29T12:01:00Z"); backend.advance(60000);
+  assert.equal(backend.api("begin", { submissionId: first.submissionId, original: original(22) }).error.code, "BASE_UNAVAILABLE");
+  assert.equal(backend.data("bootstrap").artistCount, 0);
+  assert.equal(backend.records("Submissions")[0].baseSha256, asset.sha256);
+});
+
+test("artist asset catalogs reject malformed entries, arbitrary URLs and traversal paths", () => {
+  const backend = makeBackend(); backend.setup(); const artist = backend.seed(1); backend.refresh();
+  const asset = assetFor(backend, artist.getId());
+  const bad = [{ version: 0, photos: [asset] }, { version: 1, photos: [] }, null, [],
+    ...["https://attacker.example/photo.jpg", "../base.jpg", "assets/base-photos/", "assets/base-photos/.", "assets/base-photos/..",
+      "assets/base-photos/../base.jpg", "assets/base-photos/sub/base.jpg", "assets/base-photos/sub\\base.jpg", "assets/base-photos/bad\nname.jpg"]
+      .map(path => ({ version: 1, photos: [{ ...asset, path, name: path.split("/").at(-1) }] })),
+    ...[{ sha256: "not-a-hash" }, { mimeType: "image/svg+xml" }, { byteLength: 0 }, { byteLength: 31 * 1024 * 1024 }, { name: "different.jpg" }]
+      .map(change => ({ version: 1, photos: [{ ...asset, ...change }] })),
+    { version: 1, photos: [asset, asset] }];
+  for (const catalog of bad) {
+    backend.sandbox.artistAssetCatalog_ = () => catalog;
+    assert.equal(backend.api("bootstrap").error.code, "ASSET_CONFIGURATION");
+  }
+  backend.sandbox.artistAssetCatalog_ = "not-a-function";
+  assert.equal(backend.api("bootstrap").error.code, "ASSET_CONFIGURATION");
+  const literal = { ...asset, path: "assets/base-photos/%2E%2E%2Fphoto.jpg", name: "%2E%2E%2Fphoto.jpg" };
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: [literal] });
+  assert.equal(backend.begin(1, 22).base.path, literal.path, "literal percent sequences are preserved for the browser's single-filename encoding");
 });
 
 test("another pairing rejects a forged token and cannot change opt-in", () => {

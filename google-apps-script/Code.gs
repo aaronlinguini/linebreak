@@ -451,6 +451,14 @@ function refreshArtistSources_(project) {
     skipped: skipped, preserved: preserved, deferred: deferred, complete: complete,
     issues: issues, omittedIssues: omittedIssues
   };
+  if (project.artistAssets) {
+    var mappedWebsiteHashes = Object.create(null);
+    eligibleSources_(project, "", false).forEach(function (source) { mappedWebsiteHashes[source.sha256] = true; });
+    var websiteHashes = Object.keys(project.artistAssets);
+    summary.websiteAssetCount = Object.keys(mappedWebsiteHashes).length;
+    summary.websiteAssetCatalogCount = websiteHashes.length;
+    summary.unmatchedWebsiteAssetCount = websiteHashes.filter(function (hash) { return !mappedWebsiteHashes[hash]; }).length;
+  }
   console.log(JSON.stringify(summary));
   return summary;
 }
@@ -547,7 +555,7 @@ function begin_(project, payload) {
       if (!assigned || !submission.baseSha256 || assigned.sha256 !== submission.baseSha256) {
         throw apiError_("BASE_UNAVAILABLE", "The assigned photograph has changed or is unavailable. Please contact the artist.");
       }
-      base = readSource_(assigned);
+      base = readBase_(project, assigned);
     } else {
       var excludedBaseHash = "";
       if (previous) {
@@ -560,7 +568,7 @@ function begin_(project, payload) {
       while (candidates.length && !base) {
         var choice = Math.floor(Math.random() * candidates.length);
         var selected = candidates.splice(choice, 1)[0];
-        try { base = readSource_(selected); baseHash = selected.sha256; }
+        try { base = readBase_(project, selected); baseHash = selected.sha256; }
         catch (error) {
           // A Drive read can fail transiently. Skip this candidate only for this
           // request; owner refresh controls persistent collection eligibility.
@@ -726,6 +734,44 @@ function recoverOrCreate_(project, folder, filename, image) {
   return folder.createFile(Utilities.newBlob(image.bytes, image.mimeType, filename));
 }
 
+function artistAssetIndex_() {
+  if (typeof artistAssetCatalog_ === "undefined") return null;
+  if (typeof artistAssetCatalog_ !== "function") throw apiError_("ASSET_CONFIGURATION", "The website photo library needs attention.");
+  var catalog = artistAssetCatalog_();
+  if (!isObject_(catalog) || catalog.version !== 1 || !Array.isArray(catalog.photos) || !catalog.photos.length) {
+    throw apiError_("ASSET_CONFIGURATION", "The website photo library needs attention.");
+  }
+  var index = Object.create(null);
+  catalog.photos.forEach(function (asset) {
+    var prefix = "assets/base-photos/";
+    var filename = isObject_(asset) && typeof asset.path === "string" && asset.path.indexOf(prefix) === 0 ? asset.path.slice(prefix.length) : "";
+    if (!filename || filename === "." || filename === ".." || /[\/\\\u0000-\u001f\u007f]/.test(filename) ||
+        typeof asset.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(asset.sha256) ||
+        typeof asset.mimeType !== "string" || !/^image\/(jpeg|png|webp|avif)$/.test(asset.mimeType) ||
+        !Number.isSafeInteger(asset.byteLength) || asset.byteLength < 1 || asset.byteLength > EXPOSURE_CONFIG_.maxOriginalBytes ||
+        asset.name !== filename || index[asset.sha256]) {
+      throw apiError_("ASSET_CONFIGURATION", "The website photo library needs attention.");
+    }
+    index[asset.sha256] = { path: asset.path, sha256: asset.sha256, mimeType: asset.mimeType,
+      byteLength: asset.byteLength, name: filename };
+  });
+  return index;
+}
+
+function matchesArtistAsset_(project, source) {
+  var asset = project.artistAssets && project.artistAssets[source.sha256];
+  return asset && source.kind === "artist" && asset.sha256 === source.sha256 &&
+    asset.mimeType === source.mimeType && asset.byteLength === Number(source.byteLength);
+}
+
+function readBase_(project, source) {
+  if (!project.artistAssets || source.kind !== "artist") return readSource_(source);
+  if (!matchesArtistAsset_(project, source)) throw apiError_("BASE_UNAVAILABLE", "The assigned website photograph is unavailable. Please contact the artist.");
+  var asset = project.artistAssets[source.sha256];
+  return { id: source.sourceId, name: asset.name, mimeType: asset.mimeType,
+    path: asset.path, sha256: asset.sha256, byteLength: asset.byteLength };
+}
+
 function readSource_(source) {
   try {
     var file = source.kind === "artist"
@@ -743,6 +789,7 @@ function readSource_(source) {
 function eligibleSources_(project, excludedHash, includeParticipants, excludedBaseHash) {
   var candidates = readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders).filter(function (source) {
     return isEligible_(source) && source.sha256 !== excludedHash && source.sha256 !== excludedBaseHash &&
+      (!project.artistAssets || source.kind !== "artist" || matchesArtistAsset_(project, source)) &&
       (source.kind === "artist" || (includeParticipants && source.kind === "participant"));
   });
   // Archive roles remain separate, but byte-identical photographs get one
@@ -826,7 +873,8 @@ function project_() {
   ensureSubmissionHeaders_(submissions);
   // Add the ledger when an older deployment first opens its existing index.
   var usage = setupSheet_(spreadsheet, "Usage", EXPOSURE_CONFIG_.usageHeaders);
-  var project = { artist: ArchiveDrive.getArtistFolderById(ids[0]), originals: ArchiveDrive.getFolderById(ids[1]), results: ArchiveDrive.getFolderById(ids[2]), sources: sources, submissions: submissions, usage: usage };
+  var project = { artist: ArchiveDrive.getArtistFolderById(ids[0]), originals: ArchiveDrive.getFolderById(ids[1]), results: ArchiveDrive.getFolderById(ids[2]), sources: sources, submissions: submissions, usage: usage,
+    artistAssets: artistAssetIndex_() };
   // Pin old assignments before a refresh can replace an artist source hash,
   // including requests that skip the scan because its freshness window is open.
   pinLegacyBases_(project, readRecords_(sources, EXPOSURE_CONFIG_.sourcesHeaders));

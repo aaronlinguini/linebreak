@@ -77,7 +77,7 @@ class ExposureArchiveWorkflow {
         const begin = await this.storage.begin({ submissionId: operation.submissionId,
           ...(operation.reuse ? { reuse: operation.reuse } : { originalFile: operation.file, allowReuse: operation.allowReuse }) });
         if (begin.submissionId !== operation.submissionId || !begin.token || !begin.originalId ||
-            !begin.base?.id || !begin.base.mimeType || !begin.base.base64) {
+            !begin.base?.id || !begin.base.mimeType || Boolean(begin.base.base64) === Boolean(begin.base.path)) {
           throw new Error("The collection did not confirm the photograph. Please retry.");
         }
         operation.begin = begin;
