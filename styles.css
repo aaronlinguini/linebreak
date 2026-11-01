@@ -115,7 +115,7 @@ h1 {
 }
 
 .page-nav a {
-  color: var(--muted);
+  color: var(--foreground);
   font-size: 12px;
   text-underline-offset: 5px;
   display: inline-flex;
@@ -124,7 +124,7 @@ h1 {
 }
 
 .page-nav a[aria-current="page"] {
-  color: var(--foreground);
+  color: var(--muted);
   text-decoration: none;
 }
 
