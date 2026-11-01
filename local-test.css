@@ -1,22 +1,89 @@
+
 .local-test .site-header,
 .local-test .workspace,
-.local-test .site-footer { width: min(1440px, calc(100% - 72px)); }
+.local-test .site-footer {
+  width: min(1440px, calc(100% - 72px));
+}
 
-.local-test .site-header { padding-block: 20px 8px; }
-.local-test .workspace > .actions { padding-top: 8px; padding-bottom: 20px; }
-.editor-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) 260px; gap: 24px; align-items: start; }
-.trial-editor { grid-column: 2 / span 2; display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 24px; align-items: start; }
-.comparison-panel { min-width: 0; }
-.reference-panel, .trial-panel { position: sticky; top: 16px; }
-.comparison-panel h2 { margin: 0 0 12px; font-size: 12px; font-weight: 400; color: var(--muted); }
-.local-test .image-stage { height: min(49svh, 560px); min-height: 250px; padding: 12px; }
-.local-test .image-stage canvas { max-height: min(calc(49svh - 26px), 534px); }
-.comparison-panel > .save-button { margin-top: 8px; font-size: 12px; }
-.comparison-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; margin-top: 8px; }
-.comparison-actions .save-button { font-size: 12px; }
-.photo-picker-group { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
+.local-test .site-header {
+  padding-block: 20px 8px;
+}
+
+.local-test .workspace > .actions {
+  padding-top: 8px;
+  padding-bottom: 20px;
+}
+
+.editor-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) 260px;
+  gap: 24px;
+  align-items: start;
+}
+
+.trial-editor {
+  grid-column: 2 / span 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 24px;
+  align-items: start;
+}
+
+.comparison-panel {
+  min-width: 0;
+}
+
+.reference-panel,
+.trial-panel {
+  position: sticky;
+  top: 16px;
+}
+
+.comparison-panel h2 {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.local-test .image-stage {
+  height: min(49svh, 560px);
+  min-height: 250px;
+  padding: 12px;
+}
+
+.local-test .image-stage canvas {
+  max-height: min(calc(49svh - 26px), 534px);
+}
+
+.comparison-panel > .save-button {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.comparison-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px;
+  margin-top: 8px;
+}
+
+.comparison-actions .save-button {
+  font-size: 12px;
+}
+
+.photo-picker-group {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+
 .local-test .upload-label,
-.local-test .save-button { min-height: 44px; }
+.local-test .save-button {
+  min-height: 44px;
+}
 
 .test-controls {
   display: grid;
@@ -25,9 +92,20 @@
   margin-top: 20px;
   border-top: 1px solid #292929;
 }
-.test-controls label { font-size: 12px; }
-.renderer-control { display: grid; gap: 7px; }
-.renderer-control > label { color: var(--muted); }
+
+.test-controls label {
+  font-size: 12px;
+}
+
+.renderer-control {
+  display: grid;
+  gap: 7px;
+}
+
+.renderer-control > label {
+  color: var(--muted);
+}
+
 .renderer-control select {
   max-width: 100%;
   min-height: 44px;
@@ -39,45 +117,179 @@
   font: inherit;
   font-size: 12px;
 }
-.exposure-control { display: grid; gap: 3px; width: 100%; }
-.exposure-control label { display: flex; justify-content: space-between; gap: 12px; }
-.exposure-control output { color: var(--muted); font-variant-numeric: tabular-nums; }
-.exposure-control input { width: 100%; height: 44px; margin: 0; accent-color: #d0d0d0; cursor: pointer; }
-.control-help { margin: 0; font-size: 11px; line-height: 1.5; color: var(--muted); }
-.monochrome-control { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; white-space: nowrap; }
-.monochrome-control input { accent-color: #d0d0d0; }
-.test-controls .save-button { font-size: 12px; }
-.test-controls select:focus-visible { outline: 1px solid var(--foreground); outline-offset: 4px; }
-.tone-panel { margin: 0; }
-.tone-panel h2 { margin: 0; padding-bottom: 8px; font-size: 13px; font-weight: 400; }
-.tone-panel > .control-help { margin-block: 0 12px; }
-.tone-control-grid { display: grid; gap: 6px; }
-.tone-control-grid .exposure-control { width: 100%; }
-.tone-panel > .save-button { margin-top: 12px; font-size: 12px; }
+
+.exposure-control {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+}
+
+.exposure-control label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.exposure-control output {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.exposure-control input {
+  width: 100%;
+  height: 44px;
+  margin: 0;
+  accent-color: #d0d0d0;
+  cursor: pointer;
+}
+
+.control-help {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.monochrome-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  white-space: nowrap;
+}
+
+.monochrome-control input {
+  accent-color: #d0d0d0;
+}
+
+.test-controls .save-button {
+  font-size: 12px;
+}
+
+.test-controls select:focus-visible {
+  outline: 1px solid var(--foreground);
+  outline-offset: 4px;
+}
+
+.tone-panel {
+  margin: 0;
+}
+
+.tone-panel h2 {
+  margin: 0;
+  padding-bottom: 8px;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.tone-panel > .control-help {
+  margin-block: 0 12px;
+}
+
+.tone-control-grid {
+  display: grid;
+  gap: 6px;
+}
+
+.tone-control-grid .exposure-control {
+  width: 100%;
+}
+
+.tone-panel > .save-button {
+  margin-top: 12px;
+  font-size: 12px;
+}
+
 .test-controls input:disabled,
 .test-controls select:disabled,
-.tone-panel input:disabled { opacity: .5; cursor: wait; }
+.tone-panel input:disabled {
+  opacity: .5;
+  cursor: wait;
+}
 
 @media (max-width: 1100px) {
-  .editor-layout { display: flex; flex-direction: column; }
-  .trial-editor { order: 0; width: 100%; }
-  .reference-panel { order: 1; position: static; width: 100%; margin-top: 24px; }
+  .editor-layout {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .trial-editor {
+    order: 0;
+    width: 100%;
+  }
+
+  .reference-panel {
+    order: 1;
+    position: static;
+    width: 100%;
+    margin-top: 24px;
+  }
 }
 
 @media (max-width: 680px) {
   .local-test .site-header,
   .local-test .workspace,
-  .local-test .site-footer { width: calc(100% - 32px); }
-  .trial-editor { display: block; }
-  .trial-panel { top: 0; z-index: 2; padding-block: 8px; background: var(--background); }
-  .trial-panel h2 { margin-bottom: 6px; }
-  .local-test .trial-panel .image-stage { height: 30svh; min-height: 120px; padding: 6px; }
-  .local-test .trial-panel .image-stage canvas { max-height: calc(30svh - 14px); }
-  .comparison-actions { margin-top: 0; }
-  .editor-controls { padding-top: 16px; }
-  .tone-control-grid, .test-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; }
-  .renderer-control, #test-balance-control { grid-column: 1 / -1; }
-  .photo-picker-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
-  .photo-picker-group .upload-label { width: 100%; padding-inline: 10px; text-align: center; }
-  .renderer-control select { font-size: 16px; }
+  .local-test .site-footer {
+    width: calc(100% - 32px);
+  }
+
+  .trial-editor {
+    display: block;
+  }
+
+  .trial-panel {
+    top: 0;
+    z-index: 2;
+    padding-block: 8px;
+    background: var(--background);
+  }
+
+  .trial-panel h2 {
+    margin-bottom: 6px;
+  }
+
+  .local-test .trial-panel .image-stage {
+    height: 30svh;
+    min-height: 120px;
+    padding: 6px;
+  }
+
+  .local-test .trial-panel .image-stage canvas {
+    max-height: calc(30svh - 14px);
+  }
+
+  .comparison-actions {
+    margin-top: 0;
+  }
+
+  .editor-controls {
+    padding-top: 16px;
+  }
+
+  .tone-control-grid,
+  .test-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 20px;
+  }
+
+  .renderer-control,
+  #test-balance-control {
+    grid-column: 1 / -1;
+  }
+
+  .photo-picker-group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .photo-picker-group .upload-label {
+    width: 100%;
+    padding-inline: 10px;
+    text-align: center;
+  }
+
+  .renderer-control select {
+    font-size: 16px;
+  }
 }

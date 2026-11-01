@@ -327,12 +327,12 @@ test("Home links to the three experiment pages and exposure tool without startin
   const home = fs.readFileSync(path.join(root, "index.html"), "utf8");
   const tool = fs.readFileSync(path.join(root, "double-exposure.html"), "utf8");
   assert.match(home, /<a\b[^>]*href="double-exposure\.html"[^>]*>/i);
-  assert.match(tool, /<a\b[^>]*href="index\.html"[^>]*>\s*Home\s*<\/a>/i);
+  assert.match(tool, /<a\b[^>]*href="index\.html"[^>]*>\s*(?:Home|Ghost Images)\s*<\/a>/i);
   const pages = [home];
   for (const number of [1, 2, 3]) {
     assert.match(home, new RegExp(`<a\\b[^>]*href="experiment-${number}\\.html"[^>]*>`, "i"));
     const experiment = fs.readFileSync(path.join(root, `experiment-${number}.html`), "utf8");
-    assert.match(experiment, /<a\b[^>]*href="index\.html"[^>]*>\s*Home\s*<\/a>/i);
+    assert.match(experiment, /<a\b[^>]*href="index\.html"[^>]*>\s*(?:Home|Ghost Images)\s*<\/a>/i);
     pages.push(experiment);
   }
   for (const page of pages) {

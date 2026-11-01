@@ -5,6 +5,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const { createHash } = require("node:crypto");
 const { spawnSync } = require("node:child_process");
+const { parse } = require("./vendor/es-module-lexer/lexer.cjs");
 
 const ORIGINAL_PUBLIC_FILES = Object.freeze([
   "index.html", "styles.css", "scripts.js", "project-config.js",
@@ -23,7 +24,8 @@ const HEIC_PUBLIC_FILES = Object.freeze([
   "heic-input.js", "vendor/heic-to/heic-to.js", "vendor/heic-to/LICENSE",
   "vendor/heic-to/NOTICE.txt", "vendor/heic-to/SOURCES.tar.gz"
 ]);
-const PUBLIC_FILES = Object.freeze([...STATIC_PUBLIC_FILES, ...HEIC_PUBLIC_FILES]);
+const PREBUILT_PUBLIC_FILES = Object.freeze([...STATIC_PUBLIC_FILES, ...HEIC_PUBLIC_FILES]);
+const PUBLIC_FILES = Object.freeze([...PREBUILT_PUBLIC_FILES, ".nojekyll"]);
 const MODULE_FILES = new Set(["heic-input.js", "vendor/heic-to/heic-to.js"]);
 const OUTPUT_DIRECTORY = ".public-site";
 
@@ -124,6 +126,70 @@ function validateJavaScript(bytes, filename) {
   }
 }
 
+function addContentVersions(contents) {
+  const output = new Map(contents);
+  const hashes = new Map();
+  const visiting = new Set();
+
+  function versionUrl(reference, owner) {
+    const fragmentAt = reference.indexOf("#");
+    const fragment = fragmentAt < 0 ? "" : reference.slice(fragmentAt);
+    const address = fragmentAt < 0 ? reference : reference.slice(0, fragmentAt);
+    const queryAt = address.indexOf("?");
+    const pathname = queryAt < 0 ? address : address.slice(0, queryAt);
+    const filename = path.posix.normalize(path.posix.join(path.posix.dirname(owner), decodeURIComponent(pathname)));
+    if (!contents.has(filename) || !/\.(?:css|js)$/.test(filename)) {
+      throw new Error(`${owner} references an unpublished CSS or JavaScript file: ${reference}`);
+    }
+    const query = new URLSearchParams(queryAt < 0 ? "" : address.slice(queryAt + 1));
+    query.set("v", hashFile(filename));
+    return `${pathname}?${query}${fragment}`;
+  }
+
+  function hashFile(filename) {
+    if (hashes.has(filename)) return hashes.get(filename);
+    if (visiting.has(filename)) throw new Error(`Circular script imports cannot be versioned: ${filename}`);
+    visiting.add(filename);
+    let bytes = contents.get(filename);
+    if (filename.endsWith(".js") && !filename.startsWith("vendor/")) {
+      // Version lazy imports before hashing the script that loads them.
+      let source = bytes.toString("utf8");
+      const [imports] = parse(source, filename);
+      for (const entry of [...imports].reverse()) {
+        if (entry.type === "import-meta") continue;
+        if (!entry.specifier || entry.glob) throw new Error(`${filename} needs a literal import URL for automatic cache labels.`);
+        if (!entry.specifier.startsWith(".")) continue;
+        const url = versionUrl(entry.specifier, filename);
+        const start = entry.type === "dynamic" ? entry.start : entry.start - 1;
+        const end = entry.type === "dynamic" ? entry.end : entry.end + 1;
+        source = source.slice(0, start) + JSON.stringify(url) + source.slice(end);
+      }
+      bytes = Buffer.from(source);
+    }
+    output.set(filename, bytes);
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    hashes.set(filename, hash);
+    visiting.delete(filename);
+    return hash;
+  }
+
+  for (const filename of contents.keys()) if (/\.(?:css|js)$/.test(filename)) hashFile(filename);
+  for (const [filename, bytes] of contents) {
+    if (!filename.endsWith(".html")) continue;
+    const html = bytes.toString("utf8").replace(/<!--[\s\S]*?-->|(\b(?:src|href)\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi,
+      (match, attribute, double, single, unquoted) => {
+        if (!attribute) return match;
+        const reference = double ?? single ?? unquoted;
+        if (!/\.(?:css|js)(?:[?#]|$)/.test(reference)) return match;
+        const quote = double !== undefined ? '"' : single !== undefined ? "'" : "";
+        const versioned = versionUrl(reference.replace(/&amp;/g, "&"), filename).replace(/&/g, "&amp;");
+        return `${attribute}${quote}${versioned}${quote}`;
+      });
+    output.set(filename, Buffer.from(html));
+  }
+  return output;
+}
+
 function validatePreviousOutput(destination) {
   let stat;
   try { stat = fs.lstatSync(destination); } catch (error) { if (error.code === "ENOENT") return; throw error; }
@@ -143,8 +209,9 @@ function validatePreviousOutput(destination) {
   let photos;
   try { photos = readCatalogue(readRegularFile(destination, CATALOGUE_FILE, true)); }
   catch (error) { throw new Error(`${OUTPUT_DIRECTORY} contains unexpected files or an invalid catalogue; nothing was replaced. ${error.message}`); }
-  // A complete prior static release has neither the converter nor its vendor directory.
-  const coreFiles = entries.includes("heic-input.js") || entries.includes("vendor") ? PUBLIC_FILES : STATIC_PUBLIC_FILES;
+  // Accept complete earlier releases before the static-site marker or HEIC support.
+  const coreFiles = entries.includes(".nojekyll") ? PUBLIC_FILES
+    : entries.includes("heic-input.js") || entries.includes("vendor") ? PREBUILT_PUBLIC_FILES : STATIC_PUBLIC_FILES;
   const expectedFiles = new Set([...coreFiles, ...photos.map((photo) => photo.path)]);
   const expectedDirectories = new Set();
   for (const filename of expectedFiles) {
@@ -174,7 +241,7 @@ function preparePublicSite(root = path.resolve(__dirname, "..")) {
   // Read and validate everything before touching the previous publication.
   const contents = new Map(PUBLIC_FILES.map((name) => {
     const bytes = readRegularFile(root, name);
-    if (!bytes.length) throw new Error(`${name} is empty; nothing was published.`);
+    if (!bytes.length && name !== ".nojekyll") throw new Error(`${name} is empty; nothing was published.`);
     if (name.endsWith(".js")) validateJavaScript(bytes, name);
     return [name, bytes];
   }));
@@ -187,6 +254,11 @@ function preparePublicSite(root = path.resolve(__dirname, "..")) {
   for (const [name, bytes] of contents) {
     if (name.endsWith(".html")) validateHtml(bytes.toString("utf8"), name, publicFiles);
   }
+  const versionedContents = addContentVersions(contents);
+  for (const [name, bytes] of versionedContents) {
+    if (name.endsWith(".html")) validateHtml(bytes.toString("utf8"), name, publicFiles);
+    if (name.endsWith(".js") && !bytes.equals(contents.get(name))) validateJavaScript(bytes, name);
+  }
   validatePreviousOutput(destination);
 
   const staging = fs.mkdtempSync(path.join(root, ".public-site-stage-"));
@@ -196,7 +268,7 @@ function preparePublicSite(root = path.resolve(__dirname, "..")) {
   let installed = false;
   try {
     fs.mkdirSync(next);
-    for (const [name, bytes] of contents) {
+    for (const [name, bytes] of versionedContents) {
       const filename = path.join(next, name);
       fs.mkdirSync(path.dirname(filename), { recursive: true });
       fs.writeFileSync(filename, bytes, { flag: "wx" });

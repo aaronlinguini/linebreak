@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { createHash } = require("node:crypto");
+const { spawnSync } = require("node:child_process");
 const { PUBLIC_FILES, OUTPUT_DIRECTORY, preparePublicSite } = require("../scripts/prepare-public-site.cjs");
 
 const project = path.resolve(__dirname, "..");
@@ -64,18 +65,53 @@ function snapshot(root) {
   return files;
 }
 
-test("publication contains only the twenty core files and manifest-listed photographs, byte for byte", (t) => {
+function sha256(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function assetReferences(files, page) {
+  const html = files[page].toString("utf8").replace(/<!--[\s\S]*?-->/g, "");
+  return [...html.matchAll(/\b(?:src|href)\s*=\s*["']([^"']+)["']/gi)]
+    .map(([, reference]) => new URL(reference.replace(/&amp;/g, "&"), `https://site.example/${page}`))
+    .filter(url => /\.(?:css|js)$/.test(url.pathname));
+}
+
+function assetReference(files, page, name) {
+  const reference = assetReferences(files, page).find(url => url.pathname === `/${name}`);
+  assert.ok(reference, `${page} must reference ${name}`);
+  return reference;
+}
+
+function assertContentLabels(files) {
+  for (const page of PUBLIC_FILES.filter(name => name.endsWith(".html"))) {
+    for (const url of assetReferences(files, page)) {
+      assert.deepEqual(url.searchParams.getAll("v"), [sha256(files[url.pathname.slice(1)])],
+        `${page}: ${url.pathname} must identify its emitted contents`);
+    }
+  }
+  for (const [parent, target] of [["scripts.js", "heic-input.js"], ["heic-input.js", "vendor/heic-to/heic-to.js"]]) {
+    const imports = [...files[parent].toString("utf8").matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g)]
+      .map(([, reference]) => new URL(reference, `https://site.example/${parent}`));
+    const imported = imports.find(url => url.pathname === `/${target}`);
+    assert.ok(imported, `${parent} must still load ${target} lazily`);
+    assert.deepEqual(imported.searchParams.getAll("v"), [sha256(files[target])], `${parent}: stale lazy import`);
+  }
+}
+
+test("publication contains only the twenty-one core files and selected photos, preserving bytes apart from generated cache labels", (t) => {
   assert.deepEqual([...PUBLIC_FILES].sort(), [
     "index.html", "double-exposure.html", "styles.css", "scripts.js", "project-config.js",
     "archive-workflow.js", "drive-storage.js", "drive-bridge.js", "artist-import.js", "artist-import.css",
     "experiment-1.html", "experiment-2.html", "experiment-3.html", "base-assets.js", catalogueFile,
     "heic-input.js", "vendor/heic-to/heic-to.js", "vendor/heic-to/LICENSE",
-    "vendor/heic-to/NOTICE.txt", "vendor/heic-to/SOURCES.tar.gz"
+    "vendor/heic-to/NOTICE.txt", "vendor/heic-to/SOURCES.tar.gz", ".nojekyll"
   ].sort());
   const root = fixture(t);
   for (const name of ["private-photo.jpg", "local-test.html", ".env", "README.md", "AGENTS.md", "Code.gs", "Storage.gs", "Artist.html"]) fs.writeFileSync(path.join(root, name), "private");
   fs.mkdirSync(path.join(root, "google-apps-script"));
   fs.writeFileSync(path.join(root, "google-apps-script", "Code.gs"), "private backend");
+  fs.mkdirSync(path.join(root, "scripts", "vendor", "es-module-lexer"), { recursive: true });
+  fs.writeFileSync(path.join(root, "scripts", "vendor", "es-module-lexer", "lexer.cjs"), "private preparation tool");
   fs.mkdirSync(path.join(root, ".git"));
   fs.writeFileSync(path.join(root, ".git", "config"), "private history");
   fs.mkdirSync(path.join(root, "images", "experiment-1"), { recursive: true });
@@ -86,8 +122,66 @@ test("publication contains only the twenty core files and manifest-listed photog
   const destination = preparePublicSite(root);
   assert.equal(destination, path.join(root, OUTPUT_DIRECTORY));
   assert.deepEqual(Object.keys(snapshot(root)).sort(), expectedFiles(root));
-  for (const name of expectedFiles(root)) assert.deepEqual(fs.readFileSync(path.join(destination, name)), fs.readFileSync(path.join(root, name)));
+  for (const name of expectedFiles(root)) {
+    const actual = fs.readFileSync(path.join(destination, name));
+    const source = fs.readFileSync(path.join(root, name));
+    if (name.endsWith(".html") || name === "scripts.js" || name === "heic-input.js") {
+      const withoutLabels = bytes => bytes.toString("utf8").replace(/\?v=[a-z0-9-]+/gi, "");
+      assert.equal(withoutLabels(actual), withoutLabels(source), `${name}: only cache labels may change`);
+    } else assert.deepEqual(actual, source, `${name}: contents must be copied unchanged`);
+  }
+  assertContentLabels(snapshot(root));
   assert.deepEqual(fs.readdirSync(root).filter((name) => name.startsWith(".public-site-stage-")), []);
+});
+
+test("content labels are deterministic and preparation never edits the source files", (t) => {
+  const root = fixture(t);
+  const originals = Object.fromEntries(PUBLIC_FILES.map(name => [name, fs.readFileSync(path.join(root, name))]));
+  preparePublicSite(root);
+  const first = snapshot(root);
+  assertContentLabels(first);
+  preparePublicSite(root);
+  assert.deepEqual(snapshot(root), first, "an unchanged rebuild must keep every URL and byte stable");
+  for (const [name, bytes] of Object.entries(originals)) {
+    assert.deepEqual(fs.readFileSync(path.join(root, name)), bytes, `${name}: source must remain editable and unchanged`);
+  }
+});
+
+test("the empty static-site marker preserves underscore photo names without publishing other dotfiles", (t) => {
+  const root = fixture(t);
+  const [photo] = writePhotos(root, [{ name: "_DSC2813.JPG", mimeType: "image/jpeg", bytes: jpeg }]);
+  fs.writeFileSync(path.join(root, ".private-notes"), "private");
+  const destination = preparePublicSite(root);
+  assert.equal(fs.statSync(path.join(destination, ".nojekyll")).size, 0);
+  assert.deepEqual(fs.readFileSync(path.join(destination, photo.path)), jpeg);
+  assert.deepEqual(Object.keys(snapshot(root)).sort(), expectedFiles(root));
+  const previous = snapshot(root);
+  fs.writeFileSync(path.join(root, "styles.css"), "");
+  assert.throws(() => preparePublicSite(root), /styles\.css is empty/);
+  assert.deepEqual(snapshot(root), previous, "the empty-marker exception must not admit empty code or replace a valid output");
+});
+
+test("the preceding twenty-file release gains the static-site marker without changing selected photos", (t) => {
+  const root = fixture(t);
+  const destination = preparePublicSite(root);
+  fs.unlinkSync(path.join(destination, ".nojekyll"));
+  const previous = snapshot(root);
+  assert.deepEqual(Object.keys(previous).sort(), expectedFiles(root).filter(name => name !== ".nojekyll"));
+  preparePublicSite(root);
+  const updated = snapshot(root);
+  assert.deepEqual(updated[".nojekyll"], Buffer.alloc(0));
+  assert.deepEqual(Object.keys(updated).sort(), expectedFiles(root));
+  for (const photo of catalogue(root).photos) assert.deepEqual(updated[photo.path], previous[photo.path]);
+});
+
+test("a marked output with missing HEIC files is not mistaken for the older fifteen-file release", (t) => {
+  const root = fixture(t);
+  const destination = preparePublicSite(root);
+  fs.unlinkSync(path.join(destination, "heic-input.js"));
+  fs.rmSync(path.join(destination, "vendor"), { recursive: true });
+  const previous = snapshot(root);
+  assert.throws(() => preparePublicSite(root), /unexpected files|missing required files/);
+  assert.deepEqual(snapshot(root), previous);
 });
 
 for (const previousCount of [7, 9, 10, 13]) {
@@ -95,7 +189,7 @@ for (const previousCount of [7, 9, 10, 13]) {
     const root = fixture(t);
     const destination = preparePublicSite(root);
     const removed = [
-      "heic-input.js", "vendor", "base-assets.js", "assets",
+      ".nojekyll", "heic-input.js", "vendor", "base-assets.js", "assets",
       ...(previousCount < 13 ? ["experiment-1.html", "experiment-2.html", "experiment-3.html"] : []),
       ...(previousCount < 10 ? ["double-exposure.html"] : []),
       ...(previousCount === 7 ? ["artist-import.js", "artist-import.css"] : [])
@@ -112,8 +206,9 @@ test("the preceding fifteen-core-file static release upgrades without losing its
   const destination = preparePublicSite(root);
   fs.unlinkSync(path.join(destination, "heic-input.js"));
   fs.rmSync(path.join(destination, "vendor"), { recursive: true });
+  fs.unlinkSync(path.join(destination, ".nojekyll"));
   const previous = snapshot(root);
-  assert.deepEqual(Object.keys(previous).sort(), expectedFiles(root).filter(name => !heicFiles.includes(name)));
+  assert.deepEqual(Object.keys(previous).sort(), expectedFiles(root).filter(name => name !== ".nojekyll" && !heicFiles.includes(name)));
   preparePublicSite(root);
   assert.deepEqual(Object.keys(snapshot(root)).sort(), expectedFiles(root));
   for (const photo of catalogue(root).photos) assert.deepEqual(fs.readFileSync(path.join(destination, photo.path)), previous[photo.path]);
@@ -157,10 +252,156 @@ test("converter modules and their required license, notice and source bundle are
 test("rebuilding replaces the generated version without retaining stale file contents", (t) => {
   const root = fixture(t);
   preparePublicSite(root);
+  const previous = snapshot(root);
   fs.appendFileSync(path.join(root, "styles.css"), "\n/* publication update */\n");
   preparePublicSite(root);
-  assert.deepEqual(snapshot(root)["styles.css"], fs.readFileSync(path.join(root, "styles.css")));
-  assert.deepEqual(Object.keys(snapshot(root)).sort(), expectedFiles(root));
+  const updated = snapshot(root);
+  assert.deepEqual(updated["styles.css"], fs.readFileSync(path.join(root, "styles.css")));
+  assert.deepEqual(Object.keys(updated).sort(), expectedFiles(root));
+  assertContentLabels(updated);
+  for (const page of PUBLIC_FILES.filter(name => name.endsWith(".html"))) {
+    assert.notEqual(assetReference(updated, page, "styles.css").searchParams.get("v"),
+      assetReference(previous, page, "styles.css").searchParams.get("v"), `${page}: changed CSS must get a fresh URL`);
+  }
+  for (const name of PUBLIC_FILES.filter(name => name.endsWith(".js"))) {
+    assert.deepEqual(updated[name], previous[name], `${name}: a CSS-only update must leave scripts unchanged`);
+  }
+});
+
+test("a JavaScript-only update refreshes its URL without changing the stylesheet label", (t) => {
+  const root = fixture(t);
+  preparePublicSite(root);
+  const previous = snapshot(root);
+  fs.appendFileSync(path.join(root, "project-config.js"), "\n/* configuration revision */\n");
+  preparePublicSite(root);
+  const updated = snapshot(root);
+  assertContentLabels(updated);
+  const page = "double-exposure.html";
+  assert.notEqual(assetReference(updated, page, "project-config.js").href,
+    assetReference(previous, page, "project-config.js").href);
+  assert.equal(assetReference(updated, page, "styles.css").href, assetReference(previous, page, "styles.css").href);
+});
+
+for (const dependency of ["heic-input.js", "vendor/heic-to/heic-to.js"]) {
+  test(`a changed ${dependency} refreshes its lazy parents using their final emitted bytes`, (t) => {
+    const root = fixture(t);
+    preparePublicSite(root);
+    const previous = snapshot(root);
+    fs.appendFileSync(path.join(root, dependency), "\n/* dependency revision */\n");
+    preparePublicSite(root);
+    const updated = snapshot(root);
+    assertContentLabels(updated);
+    assert.notDeepEqual(updated["heic-input.js"], previous["heic-input.js"]);
+    assert.notDeepEqual(updated["scripts.js"], previous["scripts.js"]);
+    assert.notEqual(assetReference(updated, "double-exposure.html", "scripts.js").href,
+      assetReference(previous, "double-exposure.html", "scripts.js").href);
+    assert.deepEqual(updated["styles.css"], previous["styles.css"]);
+    assert.deepEqual(updated["project-config.js"], previous["project-config.js"]);
+    assert.deepEqual(updated["vendor/heic-to/heic-to.js"], fs.readFileSync(path.join(root, "vendor/heic-to/heic-to.js")),
+      "the separate decoder must retain its exact source bytes");
+  });
+}
+
+test("automatic labels replace forgotten or repeated versions and preserve query options, fragments and comments", (t) => {
+  const root = fixture(t);
+  const page = path.join(root, "index.html");
+  const comment = '<!-- <link rel="stylesheet" href="styles.css?v=comment-only"> -->';
+  const originalHtml = fs.readFileSync(page, "utf8");
+  const customHtml = originalHtml.replace(/styles\.css(?:\?[^"']*)?/, "styles.css?theme=dark&amp;v=1&amp;v=1#palette") + comment;
+  fs.writeFileSync(page, customHtml);
+  const helper = path.join(root, "heic-input.js");
+  const originalHelper = fs.readFileSync(helper, "utf8");
+  const customHelper = originalHelper.replace('./vendor/heic-to/heic-to.js', './vendor/heic-to/heic-to.js?mode=fast&v=1&v=1#module');
+  assert.notEqual(customHelper, originalHelper);
+  fs.writeFileSync(helper, customHelper);
+  preparePublicSite(root);
+  const files = snapshot(root);
+  assertContentLabels(files);
+  const style = assetReference(files, "index.html", "styles.css");
+  assert.equal(style.searchParams.get("theme"), "dark");
+  assert.equal(style.hash, "#palette");
+  assert.ok(files["index.html"].toString("utf8").includes(comment), "commented examples must not be rewritten");
+  const imported = files["heic-input.js"].toString("utf8").match(/import\s*\(\s*["']([^"']+)["']\s*\)/);
+  const decoder = new URL(imported[1], "https://site.example/heic-input.js");
+  assert.equal(decoder.searchParams.get("mode"), "fast");
+  assert.equal(decoder.hash, "#module");
+  assert.equal(fs.readFileSync(page, "utf8"), customHtml);
+  assert.equal(fs.readFileSync(helper, "utf8"), customHelper);
+});
+
+test("a missing local lazy dependency fails before replacing the prior prepared site", (t) => {
+  const root = fixture(t);
+  preparePublicSite(root);
+  const previous = snapshot(root);
+  const script = path.join(root, "scripts.js");
+  const original = fs.readFileSync(script, "utf8");
+  const invalid = original.replace('./heic-input.js', './unselected-private-module.js');
+  assert.notEqual(invalid, original);
+  fs.writeFileSync(script, invalid);
+  assert.throws(() => preparePublicSite(root), /import|dependency|unpublished|unselected|not included/i);
+  assert.deepEqual(snapshot(root), previous);
+});
+
+test("import examples stay unchanged while a real import inside a template expression is versioned", (t) => {
+  const root = fixture(t);
+  const script = path.join(root, "scripts.js");
+  const examples = '\n// import("./private-line-comment.js")\n'
+    + '/* import("./private-block-comment.js") */\n'
+    + 'const quotedExample = \'import("./private-string.js")\';\n'
+    + 'const templateExample = `import("./private-template.js")`;\n'
+    + 'const regexExample = /import\\("\\.\\/private-regex\\.js"\\)/;\n';
+  const expression = 'const templateDependency = `${import("./heic-input.js")}`;\n';
+  fs.appendFileSync(script, examples + expression);
+  preparePublicSite(root);
+  const files = snapshot(root);
+  assertContentLabels(files);
+  const emitted = files["scripts.js"].toString("utf8");
+  assert.ok(emitted.includes(examples), "comments, strings, template text and regular expressions must not become dependencies");
+  assert.ok(emitted.includes(expression.replace("./heic-input.js", `./heic-input.js?v=${sha256(files["heic-input.js"])}`)),
+    "a real import within a template expression must use the emitted dependency hash");
+});
+
+test("import.meta stays unchanged while real module dependencies receive content labels", (t) => {
+  const root = fixture(t);
+  const metadata = "\nconst moduleAddress = import.meta.url;\n";
+  fs.appendFileSync(path.join(root, "heic-input.js"), metadata);
+  preparePublicSite(root);
+  const files = snapshot(root);
+  assertContentLabels(files);
+  assert.ok(files["heic-input.js"].toString("utf8").endsWith(metadata), "import.meta is metadata, not an asset reference");
+});
+
+test("static imports and re-exports preserve escaped URL fragments and valid generated module syntax", (t) => {
+  const root = fixture(t);
+  const helper = path.join(root, "heic-input.js");
+  const statements = String.raw`
+import { heicTo as fixtureDecoder } from './vendor/heic-to/heic-to.js#quote\'fragment';
+export { heicTo as fixtureExport } from './vendor/heic-to/heic-to.js#reexport\'fragment';
+`;
+  fs.appendFileSync(helper, statements);
+  const source = fs.readFileSync(helper, "utf8");
+  preparePublicSite(root);
+  const files = snapshot(root);
+  assertContentLabels(files);
+  const emitted = files["heic-input.js"].toString("utf8");
+  for (const fragment of ["#quote'fragment", "#reexport'fragment"]) {
+    const reference = `./vendor/heic-to/heic-to.js?v=${sha256(files["vendor/heic-to/heic-to.js"])}${fragment}`;
+    assert.ok(emitted.includes(`from ${JSON.stringify(reference)};`), "decoded fragments must survive safely quoted URL replacement");
+  }
+  const syntax = spawnSync(process.execPath, ["--input-type=module", "--check"], {
+    input: emitted, encoding: "utf8", timeout: 5000
+  });
+  assert.equal(syntax.status, 0, syntax.error?.message || syntax.stderr);
+  assert.equal(fs.readFileSync(helper, "utf8"), source, "source module quoting must stay unchanged");
+});
+
+test("a circular local import fails before replacing the prior prepared site", (t) => {
+  const root = fixture(t);
+  preparePublicSite(root);
+  const previous = snapshot(root);
+  fs.appendFileSync(path.join(root, "heic-input.js"), '\nfunction circularFixture() { return import("./scripts.js"); }\n');
+  assert.throws(() => preparePublicSite(root), /circular|cycle/i);
+  assert.deepEqual(snapshot(root), previous);
 });
 
 test("changing the selected catalogue replaces old generated assets without publishing unlisted source files", (t) => {

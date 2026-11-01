@@ -1,0 +1,6 @@
+es-module-lexer 3.0.4 by Guy Bedford and contributors
+MIT license retained in LICENSE. Unmodified npm dist/lexer.cjs.
+Build-time import parsing only; excluded from the public website.
+Package: https://registry.npmjs.org/es-module-lexer/-/es-module-lexer-3.0.4.tgz
+Source: https://github.com/guybedford/es-module-lexer
+SHA-256: f2223e2cc5ccc157b209d64697e9b9531471e2cba2348203c7923de4662c43b6

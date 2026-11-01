@@ -2,14 +2,14 @@
 
 The double-exposure tool runs in the browser. The Google program supplies base photographs and saves participant originals, completed JPEGs, consent, and duplicate checks. It runs on Google's infrastructure; you do not rent a server or connect a Google account to an AI assistant.
 
-## Current status — October 31, 2026
+## Current status — November 1, 2026
 
-The dedicated account **aaron.double.exposure.project@gmail.com** holds the private photo archive and source index. Artist image delivery is being moved to the website's selected static files; retained Drive originals still support index and duplicate verification. The [Apps Script project](https://script.google.com/home/projects/1gj7CIChAW6rMFOmP_Pb16TWSAwUKzZQxnOUOvvEUvDFOwQxKo65lYols/edit) uses these configured properties:
+The dedicated account **aaron.double.exposure.project@gmail.com** holds the private photo archive and source index. Artist images are delivered from the website's selected static files; retained Drive originals still support index and duplicate verification. The [Apps Script project](https://script.google.com/home/projects/1gj7CIChAW6rMFOmP_Pb16TWSAwUKzZQxnOUOvvEUvDFOwQxKo65lYols/edit) uses these configured properties:
 
 | Property | Current value |
 | --- | --- |
 | `PROJECT_OWNER_EMAIL` | `aaron.double.exposure.project@gmail.com` |
-| `SITE_URL` | `https://aaronlinguini.github.io/double-exposure-online-project/` |
+| `SITE_URL` | `https://aaronlinguini.github.io/ghost-images/` |
 | `UPLOADS_PAUSED` | `false` — explicitly approved and saved for live testing |
 | `ALLOWED_ORIGINS` | `http://127.0.0.1:5500,http://localhost:5500` |
 
@@ -27,7 +27,7 @@ The actual local asset build validated **113 unique artist files** in `assets/ba
 
 **Current base collection:** the final owner refresh completed at **7:19:48 PM** with **113 eligible artist bases**, **complete: true**, **0 deferred**, **0 skipped**, and no issues. This includes the smaller replacement exports of accidentalselfie.jpeg and balcony.jpg. The bounded scans progressed through 19, 59, 90, and 112 indexed bases before completing all 113. No user image bytes, names, or folders were changed by the scan.
 
-The last published frontend is the visitor black-and-white release `949dc1`, preserved locally at `76d40d3`. The home/tool/experiment drafts stay local. The GitHub repository is **private**, and the former Pages address is offline with **404: no GitHub Pages site**. No repository files or history were deleted. No frontend publication is authorized; publishing the finished website remains a separate manual step with guidance.
+The approved frontend is live at [Ghost Images](https://aaronlinguini.github.io/ghost-images/) and [the double-exposure page](https://aaronlinguini.github.io/ghost-images/double-exposure.html), from public repository [ghost-images](https://github.com/aaronlinguini/ghost-images), commit `4e4ecec`. Pages deployment succeeded November 1. All 21 core files, eight emitted hashed URLs, and a sample photo passed exact-byte delivery checks (30/30). The live tool completed real Google bootstrap with no browser errors. No new upload/archive receipt or physical iPhone check is claimed. SITE_URL was saved and verified after editor reload; Google Version 8, endpoint, account, permissions and IDs were preserved. The old repository remains private and working history was not published. Further pushes need a new instruction.
 
 Historical setup: the user approved the dedicated account's Google permissions, and `setupProject` created its folders and index on October 30 at **2:18:51 PM**. Version 1 deployed at **2:27 PM**; Version 3 added the consent-folder/duplicate handling revision at **3:25 PM**; Version 4 added the Google-served bridge; Version 5 added faster base-photo intake. The old **3:10:49–3:11:01 PM** scan's zero-base result concerned two earlier files only: accidentalselfie.jpeg had an unrecognized content signature and balcony.jpeg exceeded 30 MB. Those files were later replaced, so that result does not describe the current collection. The optional owner page previously showed correct folder links, and a real Incognito check denied owner access while signed out. Do not repeat initial authorization/setup, clear working IDs, or create another initial deployment.
 
@@ -146,13 +146,14 @@ Then set `googleScriptUrl` in `project-config.js` to that new `/exec` URL. Prese
 node scripts/prepare-public-site.cjs
 ```
 
-Preparation is local only. If publication is explicitly requested later, publish only the generated `.public-site/` contents. It contains fifteen core files plus only the artist photos listed in the public manifest—currently 113:
+Preparation is local only. If publication is explicitly requested later, publish only the generated `.public-site/` contents. It contains twenty-one core files plus only the artist photos listed in the public manifest—currently 113:
 
 - `index.html`, `double-exposure.html`, `experiment-1.html`, `experiment-2.html`, `experiment-3.html`
 - `styles.css`, `scripts.js`, `project-config.js`
 - `archive-workflow.js`, `drive-storage.js`, `drive-bridge.js`
 - `artist-import.js`, `artist-import.css`
 - `base-assets.js`, `assets/base-photos.json`
+- `heic-input.js`, `vendor/heic-to/heic-to.js`, its `LICENSE`, `NOTICE.txt`, `SOURCES.tar.gz`, and the empty `.nojekyll` marker
 - The exact `assets/base-photos/<filename>` entries in that manifest.
 
 Do not publish the working repository, its history, `google-apps-script/` including **AssetCatalog.gs**, docs, tests, secrets, local comparisons, or unselected photos. The packager does not sweep in `images/` or experiment photographs; these need a separate explicit selection. The optional owner-page assets contain no credentials. Never publish every project file automatically.
@@ -193,7 +194,7 @@ Retry saving keeps the same submission, assigned base, rendered JPEG, and settin
 
 The public image treatment remains **Saved Current, contrast 12, 0/0 EV**. `forceBlackAndWhite` in `project-config.js` sets the visitor checkbox’s initial value. Visitors choose colour and future-use consent before selecting a photo; each operation freezes those choices for automatic development, saving, and retries. Both colour radios stay available during saving; only local rendering, rotation, or a new pair before its preview disables them. A saved-result colour change uses a new submission ID with authenticated `reuse.sameBase=true`, the same pinned base and original, and inherited consent. It creates a new archived variant without replacing the old recipe or uploading another original. An already-rendered mode reuses its cached result; another random pairing inherits the visible selected mode and requests a different base. Archived originals retain their supplied colour and orientation. Local experimental sliders are separate from the public page.
 
-Later backend edits require saving the Google files and deploying a new version through **Manage deployments → Edit → New version**. Keeping the deployment preserves its `/exec` address. Frontend publication is a separate manual step; none is currently authorized. The public repository is a selected copy, not a mirror of the working repository: GitHub edits do not sync locally, and local saves or commits do not publish. Compare remote and local changes before replacing public files. A local file edit does not update either service automatically.
+Later backend edits require saving the Google files and deploying a new version through **Manage deployments → Edit → New version**. Keeping the deployment preserves its `/exec` address. Frontend publication is separate; the approved November 1 snapshot is live, and later pushes require a new instruction. The public repository is a selected copy, not a mirror of the working repository: GitHub edits do not sync locally, and local saves or commits do not publish. Compare remote and local changes before replacing public files. A local file edit does not update either service automatically.
 
 To undo only the fast-scan revision, preserve current work, restore its affected files from local checkpoint **`89746ec`**, and select the existing Google deployment's **Version 4**. Local Git and the deployed Google version are separate; neither action changes the other environment or the current pause property. Older history also remains: the direct-folder **Version 1** is paired with local checkpoint **`23fad50`**, the import-page implementation with **`6e966b3`**, and **`before-limited-drive-access`** with **`f458bb2`**. Those are broader historical rollbacks. Restoring local files does not republish GitHub Pages or revoke an OAuth grant.
 
