@@ -286,7 +286,7 @@ test("public photo choices are distinct and HTML has no inline code", () => {
   }
 });
 
-test("photo choices, permission and instructions precede the image, with colour controls after it", () => {
+test("photo choices and a shared action toolbar precede the image, with colour controls after it", () => {
   const html = fs.readFileSync(path.join(root, "double-exposure.html"), "utf8");
   const controls = html.indexOf('id="exposure-controls"');
   const stage = html.match(/<div\b[^>]*class="[^"]*\bimage-stage\b[^"]*"/)?.index ?? -1;
@@ -295,6 +295,7 @@ test("photo choices, permission and instructions precede the image, with colour 
   const browse = html.indexOf('id="source-actions"');
   const colour = html.indexOf('id="visitor-monochrome"');
   const consent = html.indexOf('id="allow-reuse"');
+  const toolbar = html.match(/<div\b[^>]*class="image-toolbar"/)?.index ?? -1;
   assert.ok(controls >= 0 && stage >= 0 && options >= 0);
   for (const [name, location] of [["photo choices", browse], ["permission", consent], ["instructions", instructions]]) {
     assert.ok(location >= 0 && location < stage, `${name} must be above the image`);
@@ -305,8 +306,9 @@ test("photo choices, permission and instructions precede the image, with colour 
   assert.doesNotMatch(html.match(/<input\b[^>]*id="allow-reuse"[^>]*>/)[0], /\bchecked(?:\s|=|>)/);
   const repeats = html.match(/<div\b[^>]*id="repeat-actions"[^>]*>([\s\S]*?)<\/div>/);
   assert.ok(repeats && repeats.index < stage, "repeat choices belong above the image");
+  assert.ok(toolbar > controls && toolbar < repeats.index, "result choices share a toolbar above the image");
   const sourceStart = html.lastIndexOf("<div", controls);
-  const sourceDepth = [...html.slice(sourceStart, repeats.index).matchAll(/<\/?div\b[^>]*>/g)]
+  const sourceDepth = [...html.slice(sourceStart, toolbar).matchAll(/<\/?div\b[^>]*>/g)]
     .reduce((depth, [tag]) => depth + (tag.startsWith("</") ? -1 : 1), 0);
   assert.equal(sourceDepth, 0, "repeat choices must remain outside the upload controls that hide after selection");
   assert.deepEqual([...repeats[1].matchAll(/<button\b[^>]*id="([^"]+)"[^>]*>([^<]+)<\/button>/g)]
@@ -315,7 +317,8 @@ test("photo choices, permission and instructions precede the image, with colour 
     ["new-pairing-button", "Create another double exposure using this photo"]
   ]);
   const resultActions = html.match(/<div\b[^>]*id="result-actions"[^>]*>([\s\S]*?)<\/div>/);
-  assert.ok(resultActions && resultActions.index > stage, "download and rotation belong below the image");
+  assert.ok(resultActions && resultActions.index > repeats.index && resultActions.index < stage,
+    "download and rotation follow the repeat choices in the toolbar above the image");
   assert.deepEqual([...resultActions[1].matchAll(/<button\b[^>]*id="([^"]+)"/g)].map(([, id]) => id),
     ["download-button", "rotate-button"]);
 });
