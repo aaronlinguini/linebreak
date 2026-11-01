@@ -452,6 +452,143 @@ test("changing a saved colour mode archives a new result with the same original,
   }
 });
 
+test("a prepared colour variant archives its exact JPEG after authenticated reuse without rendering again", async () => {
+  for (const identity of ["id", "sha256"]) {
+    const { workflow, storage, calls } = modeFixture({ canRePair: false });
+    if (identity === "sha256") {
+      const assign = storage.begin;
+      storage.begin = async request => ({ ...await assign(request), base: previewBase() });
+    }
+    const previous = await workflow.start(file, { allowReuse: true });
+    const result = { blob: new Blob([new Uint8Array([255, 216, 255, 4, 217])], { type: "image/jpeg" }), width: 640, height: 480 };
+    const base = identity === "id" ? { id: previous.begin.base.id } : { ...previewBase() };
+    if (identity === "sha256") delete base.id;
+    const variant = await workflow.changeMonochrome(true, { result, base });
+    assert.notEqual(variant.submissionId, previous.submissionId);
+    assert.equal(calls.filter(([type]) => type === "render").length, 1);
+    const beginRequest = calls.filter(([type]) => type === "begin").at(-1)[1];
+    assert.deepEqual({ ...beginRequest.reuse }, { submissionId: previous.submissionId, token: previous.begin.token, sameBase: true });
+    assert.equal("originalFile" in beginRequest, false);
+    const saving = calls.filter(([type]) => type === "complete").at(-1)[1];
+    assert.strictEqual(saving.resultBlob, result.blob);
+    assert.equal(saving.width, result.width);
+    assert.equal(saving.height, result.height);
+    assert.equal(saving.settings.monochrome, true);
+    assert.equal(Object.isFrozen(saving.settings), true);
+    assert.equal(variant.allowReuse, true);
+    assert.equal(variant.receipt.baseId, previous.receipt.baseId);
+    assert.equal(previous.settings.monochrome, false);
+    assert.strictEqual(previous.result.blob, blob);
+  }
+});
+
+test("invalid prepared JPEGs or mismatched base metadata never replace the saved operation", async () => {
+  const fixture = modeFixture();
+  const assign = fixture.storage.begin;
+  fixture.storage.begin = async request => ({ ...await assign(request), base: previewBase() });
+  const saved = await fixture.workflow.start(file);
+  const result = { blob, width: 1200, height: 800 };
+  const before = fixture.calls.length;
+  for (const invalid of [false, {}, { ...result, blob: null },
+    { ...result, blob: new Blob([], { type: "image/jpeg" }) },
+    { ...result, blob: new Blob(["png"], { type: "image/png" }) },
+    { ...result, width: 0 }, { ...result, width: 1.5 }, { ...result, height: -1 }, { ...result, height: "800" }]) {
+    await assert.rejects(fixture.workflow.changeMonochrome(true, { result: invalid, base: saved.begin.base }), /prepared exposure/);
+    assert.strictEqual(fixture.workflow.operation, saved);
+  }
+  for (const base of [null, {}, { id: "another-base" }, { sha256: "b".repeat(64) },
+    { ...saved.begin.base, id: "another-base" }, { ...saved.begin.base, sha256: "b".repeat(64) },
+    { ...saved.begin.base, mimeType: "image/png" }, { ...saved.begin.base, byteLength: 987 },
+    { ...saved.begin.base, path: "assets/base-photos/another.jpg" }, { ...saved.begin.base, name: "another.jpg" }]) {
+    await assert.rejects(fixture.workflow.changeMonochrome(true, { result, base }), /prepared exposure/);
+    assert.strictEqual(fixture.workflow.operation, saved);
+  }
+  await assert.rejects(fixture.workflow.changeMonochrome(true, { base: saved.begin.base }), /needs a prepared exposure/);
+  assert.equal(fixture.calls.length, before);
+  assert.equal(fixture.idCount, 1);
+  assert.equal(fixture.workflow.pending, false);
+});
+
+test("a prepared JPEG cannot archive under a substituted authenticated base and retries its exact pin", async () => {
+  const { workflow, storage, calls } = modeFixture();
+  const assign = storage.begin;
+  storage.begin = async request => ({ ...await assign(request), base: previewBase() });
+  const saved = await workflow.start(file);
+  const result = { blob, width: 640, height: 480 };
+  storage.begin = async request => ({ ...await assign(request), base: { ...previewBase(), sha256: "b".repeat(64) } });
+  await assert.rejects(workflow.changeMonochrome(true, { result, base: saved.begin.base }), error =>
+    /did not confirm the prepared/.test(error.message) && error.originalSaved && error.resultReady);
+  const pending = workflow.operation;
+  assert.equal(pending.begin, null);
+  assert.strictEqual(pending.result.blob, result.blob);
+  assert.equal(calls.filter(([type]) => type === "complete").length, 1);
+  assert.equal(calls.filter(([type]) => type === "render").length, 1);
+  storage.begin = async request => ({ ...await assign(request), base: previewBase() });
+  await workflow.retry();
+  assert.strictEqual(workflow.operation, pending);
+  assert.equal(calls.filter(([type]) => type === "render").length, 1);
+  assert.strictEqual(calls.filter(([type]) => type === "complete").at(-1)[1].resultBlob, result.blob);
+});
+
+test("a prepared variant snapshots its JPEG/dimensions and preserves them through a failed archive", async () => {
+  const { workflow, storage, calls } = modeFixture();
+  const saved = await workflow.start(file);
+  const assign = storage.begin, complete = storage.complete;
+  const gate = deferred();
+  storage.begin = async request => { await gate.promise; return assign(request); };
+  const attempts = [];
+  storage.complete = async request => { attempts.push(request); throw new Error("response lost"); };
+  const exactBlob = new Blob(["prepared JPEG"], { type: "image/jpeg" });
+  const result = { blob: exactBlob, width: 640, height: 480 };
+  const changing = workflow.changeMonochrome(true, { result, base: { id: saved.begin.base.id } });
+  result.blob = blob; result.width = 1; result.height = 1;
+  gate.resolve();
+  await assert.rejects(changing, error => error.stage === "archive" && error.resultReady);
+  const operation = workflow.operation;
+  storage.complete = async request => { attempts.push(request); return complete(request); };
+  await workflow.retry();
+  assert.strictEqual(workflow.operation, operation);
+  assert.equal(calls.filter(([type]) => type === "begin").length, 2);
+  assert.equal(calls.filter(([type]) => type === "render").length, 1);
+  assert.strictEqual(attempts[0].resultBlob, exactBlob);
+  assert.strictEqual(attempts[1].resultBlob, exactBlob);
+  assert.strictEqual(attempts[0].settings, attempts[1].settings);
+  assert.equal(attempts[0].width, 640);
+  assert.equal(attempts[1].height, 480);
+  assert.equal(attempts[0].submissionId, attempts[1].submissionId);
+});
+
+test("another pairing accepts the visible colour mode while preserving the other settings and consent", async () => {
+  for (const monochrome of [false, true]) {
+    const { workflow, calls } = modeFixture({ monochrome: !monochrome });
+    const previous = await workflow.start(file, { allowReuse: true });
+    const next = await workflow.rePair({ monochrome });
+    assert.deepEqual({ ...next.settings }, { ...previous.settings, monochrome });
+    assert.equal(Object.isFrozen(next.settings), true);
+    assert.equal(previous.settings.monochrome, !monochrome);
+    assert.equal(next.allowReuse, true);
+    const rendering = calls.filter(([type]) => type === "render").at(-1)[1];
+    const saving = calls.filter(([type]) => type === "complete").at(-1)[1];
+    assert.strictEqual(rendering.settings, saving.settings);
+    assert.equal(saving.settings.monochrome, monochrome);
+    const request = calls.filter(([type]) => type === "begin").at(-1)[1];
+    assert.equal("sameBase" in request.reuse, false);
+    assert.equal("originalFile" in request, false);
+  }
+});
+
+test("invalid re-pair colour choices preserve the saved operation without requests or new IDs", async () => {
+  const fixture = modeFixture();
+  const saved = await fixture.workflow.start(file);
+  const before = fixture.calls.length;
+  for (const monochrome of [null, 0, 1, "false", {}, []]) {
+    await assert.rejects(fixture.workflow.rePair({ monochrome }), /black.and.white/);
+    assert.strictEqual(fixture.workflow.operation, saved);
+  }
+  assert.equal(fixture.calls.length, before);
+  assert.equal(fixture.idCount, 1);
+});
+
 test("unchanged and invalid saved colour choices do not create another operation", async () => {
   const fixture = modeFixture();
   await assert.rejects(fixture.workflow.changeMonochrome(true), /save.*exposure/i);

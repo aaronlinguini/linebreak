@@ -29,13 +29,14 @@ class ExposureArchiveWorkflow {
     return this.run();
   }
 
-  async rePair() {
+  async rePair({ monochrome = this.operation?.settings.monochrome } = {}) {
     if (this.busy || this.pending) throw new Error("Finish saving this photograph before trying another pairing.");
     const previous = this.operation;
     if (!previous?.receipt || !previous.begin?.token) throw new Error("Create and save an exposure first.");
+    if (typeof monochrome !== "boolean") throw new Error("The black-and-white choice is invalid.");
     if (previous.receipt.canRePair === false) throw new Error("There is no other photograph available to pair right now.");
     this.operation = { submissionId: this.makeId(), file: previous.file,
-      allowReuse: previous.allowReuse, settings: previous.settings,
+      allowReuse: previous.allowReuse, settings: Object.freeze({ ...previous.settings, monochrome }),
       reuse: { submissionId: previous.submissionId, token: previous.begin.token },
       begin: null, result: null, receipt: null };
     try {
@@ -51,18 +52,36 @@ class ExposureArchiveWorkflow {
     }
   }
 
-  async changeMonochrome(monochrome) {
+  async changeMonochrome(monochrome, { result = null, base = null } = {}) {
     if (typeof monochrome !== "boolean") throw new Error("The black-and-white choice is invalid.");
     if (this.busy || this.pending) throw new Error("Finish saving this photograph before changing its colour mode.");
     const previous = this.operation;
     if (!previous?.receipt || !previous.begin?.token) throw new Error("Save an exposure before changing its colour mode.");
+    if (result !== null && (!this.validResult(result) || !this.matchesBase(previous.begin.base, base))) {
+      throw new Error("The prepared exposure or its photograph pairing is invalid.");
+    }
+    if (result === null && base !== null) throw new Error("A photograph pairing needs a prepared exposure.");
     if (previous.settings.monochrome === monochrome) return previous;
     this.operation = { submissionId: this.makeId(), file: previous.file,
       allowReuse: previous.allowReuse,
       settings: Object.freeze({ ...previous.settings, monochrome }),
       reuse: { submissionId: previous.submissionId, token: previous.begin.token, sameBase: true },
-      begin: null, result: null, receipt: null };
+      resultBase: result !== null ? Object.freeze({ ...previous.begin.base }) : null,
+      begin: null, result: result !== null ? { ...result } : null, receipt: null };
     return this.run();
+  }
+
+  validResult(result) {
+    return result?.blob?.type === "image/jpeg" && Number.isFinite(result.blob.size) && result.blob.size > 0 &&
+      Number.isInteger(result.width) && result.width > 0 && Number.isInteger(result.height) && result.height > 0;
+  }
+
+  matchesBase(expected, actual) {
+    if (!expected || !actual) return false;
+    const sameId = typeof expected.id === "string" && expected.id.length > 0 && actual.id === expected.id;
+    const sameHash = typeof expected.sha256 === "string" && /^[0-9a-f]{64}$/.test(expected.sha256) && actual.sha256 === expected.sha256;
+    return (sameId || sameHash) && !["id", "name", "mimeType", "sha256", "byteLength", "path"].some(key =>
+      expected[key] !== undefined && actual[key] !== undefined && expected[key] !== actual[key]);
   }
 
   async retry() {
@@ -73,9 +92,7 @@ class ExposureArchiveWorkflow {
   async develop(operation, base) {
     const result = await this.render({ file: operation.file, base,
       submissionId: operation.submissionId, settings: operation.settings });
-    if (!result?.blob || result.blob.type !== "image/jpeg" || result.blob.size === 0 ||
-        !Number.isInteger(result.width) || result.width < 1 ||
-        !Number.isInteger(result.height) || result.height < 1) {
+    if (!this.validResult(result)) {
       throw new Error("The exposure could not be developed. Please retry.");
     }
     operation.result = result;
@@ -105,6 +122,9 @@ class ExposureArchiveWorkflow {
           if (operation.previewBase && ["id", "name", "mimeType", "sha256", "byteLength", "path"].some(key =>
             operation.previewBase[key] !== undefined && operation.previewBase[key] !== begin.base[key])) {
             throw new Error("The collection did not confirm the preview photograph. Please retry.");
+          }
+          if (operation.resultBase && !this.matchesBase(operation.resultBase, begin.base)) {
+            throw Object.assign(new Error("The collection did not confirm the prepared photograph pairing. Please retry."), { originalSaved: true });
           }
           operation.begin = begin;
         } catch (error) {
