@@ -1,0 +1,603 @@
+
+/* SITE-WIDE COLOURS AND FONT */
+
+/*below i've created some variabled for the color scheme and font to make it easier to change in the future. In the other css, let's say when i write font-family, i can set the value of that font family to var(--font). When i change this variable, it will change the font for all the other css rules that use that variable as it's value*/
+
+/* IMPORTANT: what this also lets you do is that you OTHER css files can use these variables too. So if you want to change the font for the entire project, you can just change it here and it will change in all the other css files that use this variable. */
+
+:root {
+  color-scheme: dark;
+  --background: black;
+  --foreground: white;
+  --muted: #939393;
+  --font: Consolas, monospace;
+}
+
+/* BROWSER DEFAULTS AND KEYBOARD ACCESS */
+
+/*The asterisk below is a universal selector, just in case you forget. It selects every element on your page. For this one, basically it's telling the browser to apply box-sizing: border-box to every HTML element, including <div>, <p>, <section>, <button>, etc.
+
+box-sizing: border-box changes how CSS calculates an element's dimensions. It makes any padding and borders count inside the specified width and height.
+
+You can also combine * with other selectors, like .home-panel * {....
+^^ this would select every element INSIDE the element--in this case, every element within the .home-panel*/
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  min-width: 280px;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button,
+label,
+a {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+button,
+label {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: .5;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+  outline: 1px solid var(--foreground);
+  outline-offset: 6px;
+}
+
+.skip-link {
+  position: fixed;
+  z-index: 5;
+  top: 15px;
+  left: 20px;
+  padding: 8px 12px;
+  transform: translateY(-200%);
+  background: var(--foreground);
+  color: var(--background);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+/* PAGE WIDTH */
+
+.site-header,
+.workspace,
+.site-footer {
+  width: min(1060px, calc(100% - 96px));
+  margin-inline: auto;
+}
+
+/* HEADER AND NAVIGATION */
+
+.site-header {
+  padding-block: 44px 37px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 400;
+  letter-spacing: .025em;
+}
+
+.page-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  margin: 0 0 12px;
+}
+
+.page-nav a {
+  color: var(--muted);
+  font-size: 12px;
+  text-underline-offset: 5px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+.page-nav a[aria-current="page"] {
+  color: var(--foreground);
+  text-decoration: none;
+}
+
+/* Site title: the clickable “Ghost Images” text */
+.site-header .site-title {
+  color: var(--foreground);
+  font-family: var(--font);
+  font-size: 18px;
+  font-weight: 400;
+  letter-spacing: .025em;
+  text-decoration: none;
+}
+
+.site-header .site-title:hover {
+  text-decoration: underline;
+}
+
+/* HOMEPAGE */
+
+/* Introduction: the paragraph above the two columns */
+.introduction {
+  margin: 0 0 20px;
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+/* Layout: two separate boxes */
+.home-links {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  align-items: stretch;
+}
+
+/* Closed borders and centered content inside each box */
+.home-panel {
+  min-width: 0;
+  padding: 32px;
+  border: 1px solid #444;
+  text-align: center;
+}
+
+.home-panel h2 {
+  margin: 0 0 24px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+/* Homepage links: Experiment 1, Experiment 2, Experiment 3, Create a Double Exposure */
+.home-panel a {
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--foreground);
+  text-underline-offset: 5px;
+  display: inline-block;
+  min-height: 44px;
+  padding-block: 8px;
+  overflow-wrap: anywhere;
+}
+
+.home-links ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Gap between consecutive links in a list */
+.home-links li + li {
+  margin-top: 16px;
+}
+
+/* EXPERIMENT PAGES */
+
+.experiment-page {
+  padding-block: 20px 72px;
+}
+
+.experiment-entries {
+  display: grid;
+  gap: 64px;
+}
+
+.experiment-entry {
+  min-width: 0;
+}
+
+.experiment-entry figure {
+  margin: 0;
+}
+
+.experiment-entry img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.experiment-reflection {
+  max-width: 65ch;
+  margin-top: 24px;
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+.experiment-reflection p {
+  margin: 0 0 16px;
+}
+
+/* DOUBLE EXPOSURE: IMAGE PREVIEW */
+
+.image-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: min(68svh, 780px);
+  min-height: 340px;
+  padding: 20px;
+  overflow: hidden;
+  border: 1px solid #202020;
+}
+
+.empty-state {
+  margin: 0;
+  color: #9a9a9a;
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: -.015em;
+}
+
+.image-stage canvas {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: min(calc(68svh - 42px), 738px);
+  object-fit: contain;
+}
+
+/* DOUBLE EXPOSURE: LOADING SPINNER */
+
+.busy-indicator {
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+  margin: 0;
+  color: var(--foreground);
+  font-size: 14px;
+  text-align: center;
+}
+
+/* ": : before" is a CSS pseudo-element. It lets me create an additional visual element INSIDE an exisitng HTML element, positioned before its actual content. In the one below, it creates a little spinniing loading circle that appears along side my "Developing image..." message. 
+content: ""; creates the pseudo-element with empty content. It's there purely for visual purposes.*/
+
+.busy-indicator::before {
+  content: "";
+  width: 24px;
+  height: 24px;
+  border: 2px solid #444;
+  border-top-color: var(--foreground);
+  border-radius: 50%;
+  animation: developing 1s linear infinite;
+}
+
+/* another note for myself: "to" tells CSS what the element should look like at the end of an animation.*/
+
+/* The @keyframes rule defines the animation sequence for the spinning circle. It specifies that the element should rotate 360 degrees over the course of the animation, creating a continuous spinning effect. */
+
+@keyframes developing {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.busy-indicator.is-finishing {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #050505d9;
+  font-size: 11px;
+}
+
+.busy-indicator.is-finishing::before {
+  width: 12px;
+  height: 12px;
+}
+
+/* DOUBLE EXPOSURE: ACTIONS AND TOOLBAR */
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 17px 28px;
+  padding-top: 27px;
+}
+
+.choice-separator {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.exposure-controls {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 12px 16px;
+  margin-bottom: 24px;
+}
+
+.upload-instructions {
+  grid-column: 1 / -1;
+  margin: 0 0 12px;
+  color: var(--foreground);
+  font-size: 12px;
+}
+
+.exposure-controls .actions {
+  justify-content: flex-start;
+  padding-top: 0;
+}
+
+.image-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0 24px;
+}
+
+.image-toolbar > .actions {
+  min-width: 0;
+  max-width: 100%;
+  padding-top: 0;
+  margin-bottom: 24px;
+}
+
+.image-toolbar .repeat-actions {
+  justify-content: flex-start;
+}
+
+.image-toolbar .result-actions {
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+/* DOUBLE EXPOSURE: OUTPUT OPTIONS */
+
+.output-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin-top: 16px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+}
+
+.checkbox-label input {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--foreground);
+}
+
+.library-option {
+  font-size: 12px;
+}
+
+.library-choice {
+  align-items: flex-start;
+  min-height: 24px;
+}
+
+.library-choice input {
+  margin-top: 2px;
+}
+
+.library-note {
+  margin: 0 0 0 28px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* DOUBLE EXPOSURE: UPLOAD AND SAVE */
+
+.file-picker {
+  position: relative;
+}
+
+.file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.upload-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 9px 19px;
+  border: 1px solid #5b5b5b;
+  color: var(--foreground);
+  font-size: 13px;
+  transition: border-color .15s, background .15s;
+}
+
+.upload-label:hover {
+  border-color: var(--foreground);
+  background: #121212;
+}
+
+.file-input:focus-visible + label {
+  outline: 1px solid var(--foreground);
+  outline-offset: 5px;
+}
+
+.file-input:disabled + label {
+  cursor: wait;
+  opacity: .5;
+}
+
+.save-button {
+  min-height: 44px;
+  padding: 9px 0;
+  border: 0;
+  border-bottom: 1px solid #555;
+  border-radius: 0;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 13px;
+}
+
+.save-button:hover:not(:disabled) {
+  border-color: var(--foreground);
+}
+
+/* STATUS AND ERROR MESSAGES */
+
+.feedback {
+  min-height: 53px;
+  padding-top: 14px;
+  text-align: center;
+}
+
+.status,
+.error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.status {
+  color: var(--muted);
+}
+
+.error {
+  max-width: 550px;
+  margin: 6px auto 0;
+  color: #d8b2b2;
+  overflow-wrap: anywhere;
+}
+
+/* FOOTER */
+
+.site-footer {
+  padding-block: 25px 40px;
+}
+
+.privacy-note {
+  margin: 0 0 30px;
+  color: #858585;
+  font-size: 11px;
+  text-align: center;
+}
+
+/* SMALL SCREENS: 720px AND NARROWER */
+
+@media (max-width: 720px) {
+  .site-header,
+  .workspace,
+  .site-footer {
+    width: calc(100% - 40px);
+  }
+
+  .site-header {
+    padding-block: 29px 27px;
+  }
+
+  .home-links {
+    grid-template-columns: 1fr;
+  }
+
+  .home-panel {
+    padding: 24px;
+  }
+
+  .experiment-page {
+    padding-block: 12px 48px;
+  }
+
+  .experiment-entries {
+    gap: 40px;
+  }
+
+  .image-stage {
+    min-height: 280px;
+    height: 59svh;
+    padding: 12px;
+  }
+
+  .image-stage canvas {
+    max-height: calc(59svh - 26px);
+  }
+
+  .empty-state {
+    font-size: 15px;
+  }
+
+  .actions {
+    padding-top: 23px;
+    gap: 14px 24px;
+  }
+
+  .source-actions {
+    gap: 10px 14px;
+  }
+
+  .exposure-controls {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    margin-bottom: 23px;
+  }
+
+  .feedback {
+    padding-top: 13px;
+  }
+
+  .site-footer {
+    padding-top: 22px;
+  }
+
+  .privacy-note {
+    margin-bottom: 26px;
+  }
+}
+
+/* REDUCED MOTION */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+  }
+
+  .busy-indicator::before {
+    animation: none;
+  }
+}

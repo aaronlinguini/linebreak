@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#050505">
+    <title>Double Exposure</title>
+    <link rel="stylesheet" href="styles.css?v=4037147db845dd5cf48172a24d1400ab5ac979e8715f1859800b6c5396c08cb5">
+    <script src="project-config.js?v=1cae4a83578235faa9473e239dd69621bfc8c1a2346bfd85e87f87e38a2bd7d3" defer></script>
+    <script src="drive-storage.js?v=0c88f14189590d1be1053024d1c8d85686711ea46a75cae443808eeb84149876" defer></script>
+    <script src="base-assets.js?v=a1e32eb7a486a8e1266c62427bbf40d4fcb76da18ea9f904a4f1edae302eca2f" defer></script>
+    <script src="archive-workflow.js?v=c978783cb578a74c261454b1f1f8d1d7a74a410d8676cbc640f0d82325a4e791" defer></script>
+    <script src="scripts.js?v=313bc0dafc320d46f21cfc8a9f8ec0fd7cf3a62a0817a81eab5e40d7c2339a7a" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#workspace">Skip to photograph</a>
+
+    <header class="site-header">
+      <a href="index.html" class="site-title">Ghost Images</a>
+    </header>
+
+    <main id="workspace" class="workspace" aria-busy="false">
+      <div id="exposure-controls" class="exposure-controls">
+        <p id="upload-instructions" class="upload-instructions">Use the buttons below to select a photo from your library or take a photo with your camera. The photo that you provide will be combined with another image to create a double exposure. You may choose whether you want your upload to be added to the library of base photos upon which new double exposures can be made.</p>
+        <div class="exposure-buttons">
+          <div id="source-actions" class="actions source-actions">
+            <div class="file-picker">
+              <input id="participant-input" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="archive-note" disabled>
+              <label id="upload-label" class="upload-label" for="participant-input">Upload a photo</label>
+            </div>
+            <span class="choice-separator">or</span>
+            <div class="file-picker">
+              <input id="participant-camera-input" class="file-input" type="file" accept="image/jpeg" capture="environment" aria-describedby="archive-note" disabled>
+              <label id="camera-label" class="upload-label" for="participant-camera-input">Take a photo</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="library-option">
+          <label class="checkbox-label library-choice" for="allow-reuse">
+            <input id="allow-reuse" type="checkbox" aria-describedby="library-note">
+            <span>Add my uploaded photo to the library of base photos</span>
+          </label>
+          <p id="library-note" class="library-note">Your uploaded photo will only be added to the base-photo library if you check this box.</p>
+        </div>
+      </div>
+
+      <div class="image-toolbar">
+        <div id="repeat-actions" class="actions repeat-actions" hidden>
+          <button id="reset-button" class="save-button" type="button">Upload another photo</button>
+          <button id="new-pairing-button" class="save-button" type="button">Create another double exposure using this photo</button>
+        </div>
+        <div id="result-actions" class="actions result-actions" hidden>
+          <button id="download-button" class="save-button" type="button" disabled>Download image</button>
+          <button id="rotate-button" class="save-button" type="button" aria-label="Rotate the finished image clockwise by 90 degrees" disabled>Rotate 90°</button>
+        </div>
+      </div>
+
+      <div class="image-stage">
+        <p id="result-empty" class="empty-state">Your double exposure will appear here.</p>
+        <canvas id="canvas" width="1" height="1" hidden aria-label="Your double exposure"></canvas>
+        <p id="busy-indicator" class="busy-indicator" role="status" aria-live="polite" hidden>Please wait while your photo is being developed.</p>
+      </div>
+
+      <div id="output-options" class="output-options" role="group" aria-label="Image colour">
+        <label class="checkbox-label" for="visitor-monochrome">
+          <input id="visitor-monochrome" type="radio" name="output-colour" value="monochrome" disabled>
+          Black and white
+        </label>
+        <label class="checkbox-label" for="visitor-colour">
+          <input id="visitor-colour" type="radio" name="output-colour" value="original" disabled>
+          Original colour
+        </label>
+      </div>
+
+      <div class="feedback">
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+        <p id="error" class="error" role="alert" hidden></p>
+        <button id="retry-button" class="save-button" type="button" hidden>Retry</button>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <p id="archive-note" class="privacy-note">The project saves all finished double exposures.</p>
+    </footer>
+  </body>
+</html>
