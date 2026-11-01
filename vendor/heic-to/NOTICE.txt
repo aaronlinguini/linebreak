@@ -1,0 +1,17 @@
+HEIC decoder: heic-to 1.6.7 by Hopper Gee
+License: LGPL-3.0; retained in LICENSE. This separate module is unmodified.
+Package: https://registry.npmjs.org/heic-to/-/heic-to-1.6.7.tgz
+Source: https://github.com/hoppergee/heic-to/tree/v1.6.7
+
+Includes libheif 1.23.7 and libde265 1.0.16 compiled to JavaScript.
+Sources and their copyright/license files are provided in SOURCES.tar.gz.
+https://github.com/strukturag/libheif/tree/v1.23.7
+https://github.com/strukturag/libde265/tree/v1.0.16
+The heic-to README and esbuild.mjs in SOURCES.tar.gz describe its build.
+The module can be replaced independently of the website code.
+
+The decoder and its worker are loaded only for a raw HEIC file when native
+browser decoding is unavailable. JPEG, PNG, WebP and AVIF use the normal path.
+Photos are decoded on the device; the decoder contacts no conversion service.
+
+SHA-256 of unmodified heic-to.js: 891a8087d75c3ca093427a643c677b10fc7f9c4f9181583dcb989bc805e75f6e

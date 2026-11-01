@@ -318,6 +318,13 @@ async function rotateExposureCanvas(canvas, quarterTurns = 1) {
   } finally { prepared.width = prepared.height = 1; }
 }
 
+async function prepareParticipantFile(file, loadHeic = () => import("./heic-input.js")) {
+  if (!/^image\/hei[cf](?:-sequence)?$/i.test(file.type) && !/\.(heic|heif)$/i.test(file.name || "")) return file;
+  if (file.size > 30 * 1024 * 1024) throw new Error("Choose a HEIC photo smaller than 30 MB.");
+  const { normalizeHeic } = await loadHeic();
+  return normalizeHeic(file);
+}
+
 function initializeExposureStudio() {
   const byId = (id) => document.getElementById(id);
   const ui = {
@@ -638,7 +645,11 @@ function initializeExposureStudio() {
     state.queued = true;
     clearResult();
     setWorking(true);
-    try { state.participant = await loadPhoto(file); }
+    try {
+      const uploadFile = await prepareParticipantFile(file);
+      state.selectedFile = uploadFile;
+      state.participant = await loadPhoto(uploadFile);
+    }
     catch (error) {
       clearSelection();
       showError(error);

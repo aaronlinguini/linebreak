@@ -10,6 +10,8 @@ const { PUBLIC_FILES, OUTPUT_DIRECTORY, preparePublicSite } = require("../script
 
 const project = path.resolve(__dirname, "..");
 const catalogueFile = "assets/base-photos.json";
+const heicFiles = ["heic-input.js", "vendor/heic-to/heic-to.js", "vendor/heic-to/LICENSE",
+  "vendor/heic-to/NOTICE.txt", "vendor/heic-to/SOURCES.tar.gz"];
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1]);
 const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 2]);
 
@@ -41,6 +43,7 @@ function fixture(t) {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   for (const name of PUBLIC_FILES) {
     if (name === catalogueFile) continue;
+    fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true });
     fs.copyFileSync(path.join(project, name), path.join(root, name));
   }
   writePhotos(root);
@@ -61,11 +64,13 @@ function snapshot(root) {
   return files;
 }
 
-test("publication contains only the fifteen core files and manifest-listed photographs, byte for byte", (t) => {
+test("publication contains only the twenty core files and manifest-listed photographs, byte for byte", (t) => {
   assert.deepEqual([...PUBLIC_FILES].sort(), [
     "index.html", "double-exposure.html", "styles.css", "scripts.js", "project-config.js",
     "archive-workflow.js", "drive-storage.js", "drive-bridge.js", "artist-import.js", "artist-import.css",
-    "experiment-1.html", "experiment-2.html", "experiment-3.html", "base-assets.js", catalogueFile
+    "experiment-1.html", "experiment-2.html", "experiment-3.html", "base-assets.js", catalogueFile,
+    "heic-input.js", "vendor/heic-to/heic-to.js", "vendor/heic-to/LICENSE",
+    "vendor/heic-to/NOTICE.txt", "vendor/heic-to/SOURCES.tar.gz"
   ].sort());
   const root = fixture(t);
   for (const name of ["private-photo.jpg", "local-test.html", ".env", "README.md", "AGENTS.md", "Code.gs", "Storage.gs", "Artist.html"]) fs.writeFileSync(path.join(root, name), "private");
@@ -77,6 +82,7 @@ test("publication contains only the fifteen core files and manifest-listed photo
   fs.writeFileSync(path.join(root, "images", "experiment-1", "private.jpg"), jpeg);
   fs.writeFileSync(path.join(root, "assets", "base-photos", "unlisted-duplicate.jpg"), jpeg);
   fs.writeFileSync(path.join(root, "assets", "base-photos", "README.md"), "private authoring notes");
+  fs.writeFileSync(path.join(root, "vendor", "heic-to", "unlisted-notes.txt"), "not selected for publication");
   const destination = preparePublicSite(root);
   assert.equal(destination, path.join(root, OUTPUT_DIRECTORY));
   assert.deepEqual(Object.keys(snapshot(root)).sort(), expectedFiles(root));
@@ -89,7 +95,7 @@ for (const previousCount of [7, 9, 10, 13]) {
     const root = fixture(t);
     const destination = preparePublicSite(root);
     const removed = [
-      "base-assets.js", "assets",
+      "heic-input.js", "vendor", "base-assets.js", "assets",
       ...(previousCount < 13 ? ["experiment-1.html", "experiment-2.html", "experiment-3.html"] : []),
       ...(previousCount < 10 ? ["double-exposure.html"] : []),
       ...(previousCount === 7 ? ["artist-import.js", "artist-import.css"] : [])
@@ -100,6 +106,53 @@ for (const previousCount of [7, 9, 10, 13]) {
     assert.deepEqual(Object.keys(snapshot(root)).sort(), expectedFiles(root));
   });
 }
+
+test("the preceding fifteen-core-file static release upgrades without losing its selected photographs", (t) => {
+  const root = fixture(t);
+  const destination = preparePublicSite(root);
+  fs.unlinkSync(path.join(destination, "heic-input.js"));
+  fs.rmSync(path.join(destination, "vendor"), { recursive: true });
+  const previous = snapshot(root);
+  assert.deepEqual(Object.keys(previous).sort(), expectedFiles(root).filter(name => !heicFiles.includes(name)));
+  preparePublicSite(root);
+  assert.deepEqual(Object.keys(snapshot(root)).sort(), expectedFiles(root));
+  for (const photo of catalogue(root).photos) assert.deepEqual(fs.readFileSync(path.join(destination, photo.path)), previous[photo.path]);
+});
+
+test("partial converter or vendor output is never mistaken for an older generated release", (t) => {
+  for (const missing of ["heic-input.js", "vendor/heic-to/LICENSE", "vendor/heic-to/SOURCES.tar.gz"]) {
+    const root = fixture(t);
+    const destination = preparePublicSite(root);
+    fs.unlinkSync(path.join(destination, missing));
+    const previous = snapshot(root);
+    assert.throws(() => preparePublicSite(root), /unexpected files|missing required files/);
+    assert.deepEqual(snapshot(root), previous);
+  }
+});
+
+test("converter modules and their required license, notice and source bundle are explicit lazy assets", (t) => {
+  const root = fixture(t);
+  preparePublicSite(root);
+  const previous = snapshot(root);
+  for (const name of heicFiles) assert.ok(previous[name].length > 0, `${name} must be included`);
+  for (const name of PUBLIC_FILES.filter(name => name.endsWith(".html"))) {
+    assert.doesNotMatch(fs.readFileSync(path.join(root, name), "utf8"), /(?:src|href)\s*=\s*["'][^"']*(?:heic-input\.js|vendor\/heic-to\/heic-to\.js)/i);
+  }
+  fs.writeFileSync(path.join(root, "heic-input.js"), 'export async function convert() { return import("./vendor/heic-to/heic-to.js"); }');
+  fs.writeFileSync(path.join(root, "vendor", "heic-to", "heic-to.js"), 'export default function decoder() { return "fixture"; }');
+  preparePublicSite(root);
+  const modules = snapshot(root);
+  fs.writeFileSync(path.join(root, "vendor", "heic-to", "heic-to.js"), "export default function (");
+  assert.throws(() => preparePublicSite(root), error => error instanceof SyntaxError && error.message.includes("heic-to.js"));
+  assert.deepEqual(snapshot(root), modules);
+  fs.writeFileSync(path.join(root, "vendor", "heic-to", "heic-to.js"), 'export default function decoder() { return "fixture"; }');
+  for (const name of heicFiles.slice(2)) {
+    fs.writeFileSync(path.join(root, name), "");
+    assert.throws(() => preparePublicSite(root), error => error.message.includes(name) && /empty/.test(error.message));
+    assert.deepEqual(snapshot(root), modules);
+    fs.writeFileSync(path.join(root, name), previous[name]);
+  }
+});
 
 test("rebuilding replaces the generated version without retaining stale file contents", (t) => {
   const root = fixture(t);

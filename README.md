@@ -10,7 +10,7 @@ The local home page in `index.html` has **Experiments** on the left, linking to 
 
 To test without Google, right-click `local-test.html` in VS Code and choose **Open with Live Server**. Choose your base photo and a second photo. The left preview keeps the saved **Current** treatment at zero EV and contrast 12. The right starts with **Reduced overlap (trial)** at the same settings, with **Haze reduction 20%**, matching the approved screenshot preset. All five optional tone controls start at zero. Increasing Haze reduction reduces overlapping light across shadows, midtones, and highlights. Dark areas leave the brighter photograph clearer; two dark areas stay closer to their original darkness. Move Haze reduction to 0% to reproduce the saved Current treatment. Current + contrast, Revised smooth, Saved smooth exposure, and the earlier film curve remain available. Adjust each photograph's exposure separately and compare black and white with colour. Use the visible **Tone adjustments** sliders for optional Shadows, Highlights, Mids, Whites, and Blacks finishing controls; **Reset tones** clears only those five controls. Both results use the same full-frame preparation and JPEG export. Download the results and settings to keep a record; nothing is uploaded or automatically archived there. See [FILM-EXPERIMENT.md](FILM-EXPERIMENT.md) for comparisons and how to return to the saved version.
 
-There is no frontend dependency installation. The Google archive runs as **Version 7** in the dedicated project account, deployed at **11:43 PM on October 30** on the same endpoint with unchanged account, Anyone access, scopes, and archive IDs. The current local revision passes **375/375 checks**. The user approved activating the existing service, and `UPLOADS_PAUSED=false` is verified. Google serves the visitor bridge itself, so local testing does not need GitHub Pages. Independent archive-folder, consent, duplicate, colour-variant, and device checks remain pending.
+There is no frontend dependency installation. The Google archive runs as **Version 8** in the dedicated project account, deployed at **12:42 PM on October 31** on the same endpoint with unchanged account, Anyone access, scopes, and archive IDs. The current local revision passes **429/429 checks**. The user approved activating the existing service, and `UPLOADS_PAUSED=false` is verified. Google serves the visitor bridge itself, so local testing does not need GitHub Pages. Independent archive-folder, consent, duplicate, colour-variant, and device checks remain pending.
 
 The saved-result colour toggle and earlier rendered preview are implemented locally, and their backend changes are installed in **Google Version 6**. `Code.gs` and `Storage.gs` were verified byte-for-byte after reloading the Google editor. Browser checks use the real image processor with simulated storage; both colour directions, pending-preview locks, and the unlocked checkbox after a receipt were verified. These checks do not establish a live archived colour variant. A fresh Version 6 Chrome/Live Server connection completed bootstrap after **Retry**; its initial handshake timed out without an established cause. These changes preserve the exposure calculation, original files, consent, scopes, and archive IDs.
 
@@ -22,7 +22,9 @@ The website itself remains local and unpublished. The last published frontend wa
 
 The same pages adapt to phones, tablets, and desktop screens. Participants can choose an existing photograph or use **Take a photo**, which asks a supported mobile browser to open the device's camera, preferring the rear camera. The local comparison page offers camera capture for either source. On desktop browsers, a camera control may open an ordinary file chooser instead. No camera stream starts when the page loads.
 
-Camera inputs request JPEG. Library inputs request JPEG, PNG, WebP, or AVIF so the device can supply a supported image. Some Apple photo pickers convert HEIC to JPEG; raw HEIC/HEIF and RAW files are not supported by this project's processor or archive. The original archive keeps the exact file delivered by the picker, including any conversion performed by the device before selection.
+Camera inputs request JPEG. Library inputs still request JPEG, PNG, WebP, or AVIF, preserving the phone Photo Library's normal JPEG-export path. If the public tool receives a file with a HEIC/HEIF MIME type or filename, `prepareParticipantFile` loads `heic-input.js` on demand. The helper first tries native browser decoding; only if that fails does it load the bundled, same-site **heic-to 1.6.7** decoder. Conversion happens on the device, without a conversion service. RAW files still need to be exported first; the local comparison page also still needs HEIC exported as JPEG.
+
+Normal JPEG, PNG, WebP, and AVIF uploads keep the same File and exact picker-delivered bytes. For HEIC, both rendering and archiving use the same normalized JPEG File instead of the raw HEIC. The raw input and converted JPEG must each stay within 30 MiB, and decoded images must stay within 80 megapixels. The helper retains two recent conversions and shares an in-progress conversion for the same raw-file SHA-256. Server duplicate checks use the resulting JPEG bytes: repeat conversions in different browsers or after the cache is gone can produce different bytes, so the same raw HEIC is not guaranteed to deduplicate across those conversions.
 
 To test the local layout on a real phone or tablet, use Live Server's reachable local-network address while both devices are on the same network. `127.0.0.1` or `localhost` on the phone refers to the phone itself, not the computer. An archive connection also needs that exact origin to be allowed by the Google project; the current allowed local origins use port 5500 on the computer. A future published HTTPS address can be tested after publication is explicitly requested.
 
@@ -69,6 +71,8 @@ python3 -m http.server 5500 --bind 127.0.0.1
 - `drive-storage.js`: website-side Google connection.
 - `drive-bridge.js`: canonical visitor bridge source, generated into Google's private `Client.gs` so the bridge can be served by Google.
 - `base-assets.js`: same-site artist-file loading, exact size/SHA checks, and a two-asset cache.
+- `heic-input.js`: on-demand HEIC-to-JPEG preparation for participant uploads; native decoding first, then the bundled fallback.
+- `vendor/heic-to/`: the separate heic-to 1.6.7 decoder, its LGPL-3.0 license and notices, and the bundled corresponding sources in `SOURCES.tar.gz`.
 - `assets/base-photos/` and `assets/base-photos.json`: selected artist image files and their generated public manifest.
 - `artist-import.js` and `artist-import.css`: external assets for the owner-only import page; they contain no Google access credentials.
 - `google-apps-script/`: private Code.gs workflow, Drive/Sheets adapters in Storage.gs, generated Client.gs and AssetCatalog.gs, Bridge.html, optional owner-only Artist.html, and the dedicated-account manifest.
@@ -76,7 +80,7 @@ python3 -m http.server 5500 --bind 127.0.0.1
 - `scripts/build-base-assets.cjs`: validates selected photo files and regenerates the public manifest and private Google catalog without changing the images.
 - `tests/`: numerical, archive workflow, backend persistence, and transport checks.
 
-There are no inline styles, executable script bodies, or inline event handlers in the HTML. All authored scripts and styles are separate files. No third-party frontend packages, remote fonts, or tracking are used. The deployed archive uses Google's HTML-service runtime.
+There are no inline styles, executable script bodies, or inline event handlers in the HTML. All authored scripts and styles are separate files. The only bundled third-party frontend package is the lazily loaded HEIC decoder, kept separate with its license, notices, and sources. No remote fonts or tracking are used. The deployed archive uses Google's HTML-service runtime.
 
 ## Artist base files
 
@@ -107,9 +111,9 @@ The later inverse-Reinhard response was removed after review of the artist's ana
 
 A rendered JPEG does not retain its original scene exposure or a measured film/development/scan response. See [EXPOSURE-NOTES.md](EXPOSURE-NOTES.md) for the current model and limitations.
 
-Portrait photographs are rotated 90 degrees clockwise into landscape orientation before processing, for both the base and participant image. Each full photograph is fitted into the base frame without cropping or stretching; different proportions leave black padding, which contributes no exposure. Results use up to 2,400 pixels on the longest edge, and are smaller if either source would otherwise be enlarged. Before any user rotation, the archive and optional download contain the same JPEG bytes. Rotation and resizing affect working images and results; the participant original is uploaded unchanged.
+Portrait photographs are rotated 90 degrees clockwise into landscape orientation before processing, for both the base and participant image. Each full photograph is fitted into the base frame without cropping or stretching; different proportions leave black padding, which contributes no exposure. Results use up to 2,400 pixels on the longest edge, and are smaller if either source would otherwise be enlarged. Before any user rotation, the archive and optional download contain the same JPEG bytes. Rotation and resizing affect working images and results; supported participant files are uploaded unchanged, while HEIC uploads use the normalized JPEG described above.
 
-JPEG, PNG, WebP, and AVIF are accepted, up to 30 MB per file. HEIC and RAW need to be exported to a supported format first. Transparent image regions contribute black (no light).
+JPEG, PNG, WebP, and AVIF are accepted, up to 30 MiB per file. The public tool automatically prepares HEIC/HEIF as JPEG when one is delivered by the picker; RAW files need to be exported to a supported format first. Transparent image regions contribute black (no light).
 
 ## Optional local tone adjustments
 
@@ -140,9 +144,9 @@ Each operation freezes its mode for rendering, archiving, and retries; an uncert
 
 ## Result controls
 
-After an image appears, **Upload another photo** and **Create another double exposure using this photo** occupy the original upload-button area above it. The first returns to the photo/camera choices; the second keeps the submitted original and requests a different random base. During **Finishing…**, the second button can queue one pairing, which starts automatically only after the current image receives its save confirmation. A failed save keeps that request queued for Retry saving.
+After an image appears, **Upload another photo** and **Create another double exposure using this photo** sit on the left of the toolbar above it; **Download image** and **Rotate 90°** sit on the right. The toolbar wraps on smaller screens. The first returns to the photo/camera choices; the second keeps the submitted original and requests a different random base. During **Finishing…**, the second button can queue one pairing, which starts automatically only after the current image receives its save confirmation. A failed save keeps that request queued for Retry saving.
 
-Below the image, **Black and white** and **Original colour** are mutually exclusive radio choices. The existing `forceBlackAndWhite` setting still determines their starting selection, and changing a saved result still uses the same archived-variant workflow. Download and rotation remain below the image. Download uses the currently visible JPEG immediately, even during **Finishing…**. The two colour previews are cached; switching back does not render or upload the same mode again. Each generated unsaved mode is archived in order before a queued pairing begins. Rotation and a new upload wait until those saves are confirmed.
+Below the image, **Black and white** and **Original colour** are mutually exclusive radio choices. The existing `forceBlackAndWhite` setting still determines their starting selection, and changing a saved result still uses the same archived-variant workflow. Download uses the currently visible JPEG immediately, even during **Finishing…**. The two colour previews are cached; switching back does not render or upload the same mode again. Each generated unsaved mode is archived in order before a queued pairing begins. Rotation and a new upload wait until those saves are confirmed.
 
 ## Development and saving
 
@@ -161,11 +165,13 @@ node scripts/build-base-assets.cjs --check
 node --test tests/*.test.cjs
 ```
 
-The current revision passes **414/414 checks**, including local base selection, concurrent rendering and original saving, exact source identity, colour variants, retries, consent and batched sheet reads. Google **Version 8** is deployed on the existing URL. A foreground Live Server test with a synthetic 2400 × 1600 participant image and an actual artist asset displayed the result at **0.92 seconds**, before Google connected at 5.89 seconds; the matching real archive receipt arrived at 18.84 seconds. These are individual test timings, not a guarantee for every photo or device. Physical-device camera and consent-folder checks remain separate.
+The current revision passes **429/429 checks**, including local base selection, concurrent rendering and original saving, exact source identity, colour variants, retries, consent, batched sheet reads, HEIC preparation, and publication packaging. Google **Version 8** is deployed on the existing URL. A foreground Live Server test with a synthetic 2400 × 1600 participant image and an actual artist asset displayed the result at **0.92 seconds**, before Google connected at 5.89 seconds; the matching real archive receipt arrived at 18.84 seconds. A real libheif HEIC sample converted through the Chrome fallback in **3.32 seconds**, from 718,114 bytes to a 675,803-byte JPEG at 1280 × 854; a repeated conversion returned identical JPEG bytes. These are individual test timings, not a guarantee for every photo or device. Physical-device camera, iPhone HEIC, and consent-folder checks remain separate.
 
 The checks cover exposure maths, exact original bytes, consent, another pairing, duplicate and self-pairing rules, result eligibility timing, interrupted archive writes, stable retries, limited-access API boundaries, owner imports, iframe-message validation, and the separation of HTML, CSS, and JavaScript. Google services are simulated in those tests; live account authorization and deployment require the setup guide's smoke test.
 
 ## Version history
+
+Checkpoint **`5ea2a0f`** preserves the version before automatic HEIC preparation and the toolbar with download and rotation above the image. The toolbar is saved separately in **`b823323`**, before HEIC support, so the two changes can be undone independently. No Google backend change is needed for this update.
 
 Checkpoint **`34c6379`** preserves the controls that waited for saving before download or colour changes. This frontend update uses the existing Google Version 8 API and does not need a backend deployment.
 
@@ -214,9 +220,34 @@ Open `index.html` with Live Server to work on the home page and follow its links
 3. In `experiment-1.html`, remove the `<!--` and `-->` around the example `<section class="experiment-entry">` to display it. Set the image's `src` to the real filename and replace its `alt` description. Use the corresponding paths in the other two pages.
 4. Put your reflection in the empty `<p></p>`. Repeat the complete `experiment-entry` section for another photo/reflection pair. Keep layout changes in `styles.css`; no inline CSS or JavaScript is needed.
 
-Photo files referenced by active experiment HTML load in the local preview, but are **not automatically selected for publication**. The packager includes fifteen core files and only the artist image files explicitly listed in `assets/base-photos.json`—currently 113. It does not sweep in `images/` or experiment photographs. Those need a separate deliberate asset selection before a later manual publication. Never include `AssetCatalog.gs`, backend sources, docs, or private photos automatically.
+Photo files referenced by active experiment HTML load in the local preview, but are **not automatically selected for publication**. The packager includes twenty core files and only the artist image files explicitly listed in `assets/base-photos.json`—currently 113. It does not sweep in `images/` or experiment photographs. Those need a separate deliberate asset selection before a later manual publication. Never include `AssetCatalog.gs`, backend sources, docs, or private photos automatically.
 
-Run `node scripts/prepare-public-site.cjs` to build `.public-site/` from the fifteen core files and listed artist assets. This only prepares a local copy; it does not publish. If publication is requested later, only that generated copy belongs on the host. README, instructions, tests, local comparisons, backend source including AssetCatalog.gs, secrets, unselected photos, and Git history stay out. Rebuild the asset catalog after changing artist files, then rebuild the package. The packager validates included HTML, JavaScript, photo sizes/hashes, paths, and existing output contents before replacement. Unapproved experiment image links stop packaging instead of silently publishing broken or private images.
+The twenty core paths are:
+
+```text
+index.html
+double-exposure.html
+experiment-1.html
+experiment-2.html
+experiment-3.html
+styles.css
+scripts.js
+project-config.js
+archive-workflow.js
+drive-storage.js
+drive-bridge.js
+artist-import.js
+artist-import.css
+base-assets.js
+assets/base-photos.json
+heic-input.js
+vendor/heic-to/heic-to.js
+vendor/heic-to/LICENSE
+vendor/heic-to/NOTICE.txt
+vendor/heic-to/SOURCES.tar.gz
+```
+
+Run `node scripts/prepare-public-site.cjs` to build `.public-site/` from these twenty core files and listed artist assets, including the separate decoder's license, notices, and corresponding sources. This only prepares a local copy; it does not publish. If publication is requested later, only that generated copy belongs on the host. README, instructions, tests, local comparisons, backend source including AssetCatalog.gs, secrets, unselected photos, and Git history stay out. Rebuild the asset catalog after changing artist files, then rebuild the package. The packager validates included HTML, JavaScript, photo sizes/hashes, paths, and existing output contents before replacement. Unapproved experiment image links stop packaging instead of silently publishing broken or private images.
 
 To add a further experiment page, create an ordinary `.html` file and add it to the home page's Experiments list and the relevant navigation. Add the page explicitly to `PUBLIC_FILES` in `scripts/prepare-public-site.cjs`, adjust publication checks, and rebuild when it is intended for release. The page's photos, text, layout, and label are yours to choose. Keep Google's `SITE_URL` at the repository root; these static pages need no Apps Script change.
 

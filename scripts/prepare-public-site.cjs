@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const { createHash } = require("node:crypto");
+const { spawnSync } = require("node:child_process");
 
 const ORIGINAL_PUBLIC_FILES = Object.freeze([
   "index.html", "styles.css", "scripts.js", "project-config.js",
@@ -17,7 +18,13 @@ const EXPERIMENT_PUBLIC_FILES = Object.freeze([
 const CATALOGUE_FILE = "assets/base-photos.json";
 const PHOTO_DIRECTORY = "assets/base-photos";
 const MAX_PHOTO_BYTES = 30 * 1024 * 1024;
-const PUBLIC_FILES = Object.freeze([...EXPERIMENT_PUBLIC_FILES, "base-assets.js", CATALOGUE_FILE]);
+const STATIC_PUBLIC_FILES = Object.freeze([...EXPERIMENT_PUBLIC_FILES, "base-assets.js", CATALOGUE_FILE]);
+const HEIC_PUBLIC_FILES = Object.freeze([
+  "heic-input.js", "vendor/heic-to/heic-to.js", "vendor/heic-to/LICENSE",
+  "vendor/heic-to/NOTICE.txt", "vendor/heic-to/SOURCES.tar.gz"
+]);
+const PUBLIC_FILES = Object.freeze([...STATIC_PUBLIC_FILES, ...HEIC_PUBLIC_FILES]);
+const MODULE_FILES = new Set(["heic-input.js", "vendor/heic-to/heic-to.js"]);
 const OUTPUT_DIRECTORY = ".public-site";
 
 function validateHtml(source, page, publicFiles) {
@@ -103,6 +110,20 @@ function validatePhoto(bytes, photo) {
   if (!signatureMatches[photo.mimeType]()) throw new Error(`${photo.path} has an unrecognized image signature.`);
 }
 
+function validateJavaScript(bytes, filename) {
+  if (!MODULE_FILES.has(filename)) {
+    new vm.Script(bytes.toString("utf8"), { filename });
+    return;
+  }
+  const result = spawnSync(process.execPath, ["--input-type=module", "--check"], {
+    input: bytes, encoding: "utf8", timeout: 10000, maxBuffer: 8 * 1024 * 1024
+  });
+  if (result.error || result.status !== 0) {
+    const detail = String(result.error?.message || result.stderr || "Syntax check failed").slice(0, 1000);
+    throw new SyntaxError(`${filename} contains invalid JavaScript module syntax. ${detail}`);
+  }
+}
+
 function validatePreviousOutput(destination) {
   let stat;
   try { stat = fs.lstatSync(destination); } catch (error) { if (error.code === "ENOENT") return; throw error; }
@@ -122,7 +143,9 @@ function validatePreviousOutput(destination) {
   let photos;
   try { photos = readCatalogue(readRegularFile(destination, CATALOGUE_FILE, true)); }
   catch (error) { throw new Error(`${OUTPUT_DIRECTORY} contains unexpected files or an invalid catalogue; nothing was replaced. ${error.message}`); }
-  const expectedFiles = new Set([...PUBLIC_FILES, ...photos.map((photo) => photo.path)]);
+  // A complete prior static release has neither the converter nor its vendor directory.
+  const coreFiles = entries.includes("heic-input.js") || entries.includes("vendor") ? PUBLIC_FILES : STATIC_PUBLIC_FILES;
+  const expectedFiles = new Set([...coreFiles, ...photos.map((photo) => photo.path)]);
   const expectedDirectories = new Set();
   for (const filename of expectedFiles) {
     const parts = filename.split("/");
@@ -152,7 +175,7 @@ function preparePublicSite(root = path.resolve(__dirname, "..")) {
   const contents = new Map(PUBLIC_FILES.map((name) => {
     const bytes = readRegularFile(root, name);
     if (!bytes.length) throw new Error(`${name} is empty; nothing was published.`);
-    if (name.endsWith(".js")) new vm.Script(bytes.toString("utf8"), { filename: name });
+    if (name.endsWith(".js")) validateJavaScript(bytes, name);
     return [name, bytes];
   }));
   for (const photo of readCatalogue(contents.get(CATALOGUE_FILE))) {
