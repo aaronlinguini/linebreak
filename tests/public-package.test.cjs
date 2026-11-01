@@ -11,6 +11,9 @@ const { PUBLIC_FILES, OUTPUT_DIRECTORY, preparePublicSite } = require("../script
 
 const project = path.resolve(__dirname, "..");
 const catalogueFile = "assets/base-photos.json";
+const galleryCatalogueFile = "assets/gallery-photos.json";
+const galleryFiles = ["experiment-carousel.css", "experiment-carousel.js"];
+const memoryPartFiles = ["experiment-2-part-1.html", "experiment-2-part-2.html"];
 const heicFiles = ["heic-input.js", "vendor/heic-to/heic-to.js", "vendor/heic-to/LICENSE",
   "vendor/heic-to/NOTICE.txt", "vendor/heic-to/SOURCES.tar.gz"];
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1]);
@@ -35,8 +38,42 @@ function catalogue(root) {
   return JSON.parse(fs.readFileSync(path.join(root, catalogueFile), "utf8"));
 }
 
+function galleryPhotos(root) {
+  const files = new Set();
+  for (const page of PUBLIC_FILES.filter(name => name.endsWith(".html"))) {
+    const html = fs.readFileSync(path.join(root, page), "utf8").replace(/<!--[\s\S]*?-->/g, "");
+    for (const [, reference] of html.matchAll(/\b(?:src|href)="(images\/[^"?#]+)"/g)) {
+      files.add(decodeURIComponent(reference));
+    }
+  }
+  return [...files].sort();
+}
+
 function expectedFiles(root) {
-  return [...PUBLIC_FILES, ...catalogue(root).photos.map((photo) => photo.path)].sort();
+  return [...PUBLIC_FILES, galleryCatalogueFile, ...galleryPhotos(root), ...catalogue(root).photos.map((photo) => photo.path)].sort();
+}
+
+function restoreSingleMemoryPage(destination) {
+  fs.renameSync(path.join(destination, memoryPartFiles[0]), path.join(destination, "experiment-2.html"));
+  fs.unlinkSync(path.join(destination, memoryPartFiles[1]));
+  const filename = path.join(destination, galleryCatalogueFile);
+  if (fs.existsSync(filename)) {
+    const manifest = JSON.parse(fs.readFileSync(filename));
+    manifest.pages = [...manifest.pages.filter(name => !memoryPartFiles.includes(name)), "experiment-2.html"];
+    fs.writeFileSync(filename, JSON.stringify(manifest));
+  }
+}
+
+function removeGalleryOutput(destination) {
+  for (const name of [...galleryFiles, galleryCatalogueFile, "images"]) {
+    fs.rmSync(path.join(destination, name), { recursive: true, force: true });
+  }
+  restoreSingleMemoryPage(destination);
+}
+
+function oldExpectedFiles(root) {
+  return [...expectedFiles(root).filter(name => !galleryFiles.includes(name) && !memoryPartFiles.includes(name)
+    && name !== galleryCatalogueFile && !name.startsWith("images/")), "experiment-2.html"].sort();
 }
 
 function fixture(t) {
@@ -46,6 +83,15 @@ function fixture(t) {
     if (name === catalogueFile) continue;
     fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true });
     fs.copyFileSync(path.join(project, name), path.join(root, name));
+  }
+  // Keep the current page's real paths, but use small synthetic photo bytes.
+  for (const name of PUBLIC_FILES.filter(name => name.endsWith(".html"))) {
+    const html = fs.readFileSync(path.join(root, name), "utf8").replace(/<!--[\s\S]*?-->/g, "");
+    for (const [, reference] of html.matchAll(/\bsrc="(images\/[^"?#]+)"/g)) {
+      const filename = path.join(root, decodeURIComponent(reference));
+      fs.mkdirSync(path.dirname(filename), { recursive: true });
+      fs.writeFileSync(filename, jpeg);
+    }
   }
   writePhotos(root);
   return root;
@@ -98,24 +144,26 @@ function assertContentLabels(files) {
   }
 }
 
-test("publication contains only the twenty-one core files and selected photos, preserving bytes apart from generated cache labels", (t) => {
+test("publication contains site code, selected artist photos and referenced gallery images while excluding private support files", (t) => {
   assert.deepEqual([...PUBLIC_FILES].sort(), [
-    "index.html", "double-exposure.html", "styles.css", "scripts.js", "project-config.js",
+    "styles.css", "scripts.js", "project-config.js",
     "archive-workflow.js", "drive-storage.js", "drive-bridge.js", "artist-import.js", "artist-import.css",
-    "experiment-1.html", "experiment-2.html", "experiment-3.html", "base-assets.js", catalogueFile,
+    ...fs.readdirSync(project).filter(name => !name.startsWith(".") && /\.html$/i.test(name) && name !== "local-test.html"),
+    "base-assets.js", catalogueFile,
     "heic-input.js", "vendor/heic-to/heic-to.js", "vendor/heic-to/LICENSE",
-    "vendor/heic-to/NOTICE.txt", "vendor/heic-to/SOURCES.tar.gz", ".nojekyll"
+    "vendor/heic-to/NOTICE.txt", "vendor/heic-to/SOURCES.tar.gz", ".nojekyll", ...galleryFiles
   ].sort());
   const root = fixture(t);
-  for (const name of ["private-photo.jpg", "local-test.html", ".env", "README.md", "AGENTS.md", "Code.gs", "Storage.gs", "Artist.html"]) fs.writeFileSync(path.join(root, name), "private");
+  for (const name of ["private-photo.jpg", "local-test.html", ".env", "README.md", "AGENTS.md", "Code.gs", "Storage.gs"]) fs.writeFileSync(path.join(root, name), "private");
   fs.mkdirSync(path.join(root, "google-apps-script"));
   fs.writeFileSync(path.join(root, "google-apps-script", "Code.gs"), "private backend");
+  fs.writeFileSync(path.join(root, "google-apps-script", "Artist.html"), "private backend page");
   fs.mkdirSync(path.join(root, "scripts", "vendor", "es-module-lexer"), { recursive: true });
   fs.writeFileSync(path.join(root, "scripts", "vendor", "es-module-lexer", "lexer.cjs"), "private preparation tool");
   fs.mkdirSync(path.join(root, ".git"));
   fs.writeFileSync(path.join(root, ".git", "config"), "private history");
   fs.mkdirSync(path.join(root, "images", "experiment-1"), { recursive: true });
-  fs.writeFileSync(path.join(root, "images", "experiment-1", "private.jpg"), jpeg);
+  fs.writeFileSync(path.join(root, "images", "experiment-1", "additional-gallery.jpg"), jpeg);
   fs.writeFileSync(path.join(root, "assets", "base-photos", "unlisted-duplicate.jpg"), jpeg);
   fs.writeFileSync(path.join(root, "assets", "base-photos", "README.md"), "private authoring notes");
   fs.writeFileSync(path.join(root, "vendor", "heic-to", "unlisted-notes.txt"), "not selected for publication");
@@ -124,12 +172,14 @@ test("publication contains only the twenty-one core files and selected photos, p
   assert.deepEqual(Object.keys(snapshot(root)).sort(), expectedFiles(root));
   for (const name of expectedFiles(root)) {
     const actual = fs.readFileSync(path.join(destination, name));
+    if (name === galleryCatalogueFile) continue;
     const source = fs.readFileSync(path.join(root, name));
     if (name.endsWith(".html") || name === "scripts.js" || name === "heic-input.js") {
       const withoutLabels = bytes => bytes.toString("utf8").replace(/\?v=[a-z0-9-]+/gi, "");
       assert.equal(withoutLabels(actual), withoutLabels(source), `${name}: only cache labels may change`);
     } else assert.deepEqual(actual, source, `${name}: contents must be copied unchanged`);
   }
+  assert.equal(fs.existsSync(path.join(destination, "images", "experiment-1", "additional-gallery.jpg")), false);
   assertContentLabels(snapshot(root));
   assert.deepEqual(fs.readdirSync(root).filter((name) => name.startsWith(".public-site-stage-")), []);
 });
@@ -164,14 +214,109 @@ test("the empty static-site marker preserves underscore photo names without publ
 test("the preceding twenty-file release gains the static-site marker without changing selected photos", (t) => {
   const root = fixture(t);
   const destination = preparePublicSite(root);
+  removeGalleryOutput(destination);
   fs.unlinkSync(path.join(destination, ".nojekyll"));
   const previous = snapshot(root);
-  assert.deepEqual(Object.keys(previous).sort(), expectedFiles(root).filter(name => name !== ".nojekyll"));
+  assert.deepEqual(Object.keys(previous).sort(), oldExpectedFiles(root).filter(name => name !== ".nojekyll"));
   preparePublicSite(root);
   const updated = snapshot(root);
   assert.deepEqual(updated[".nojekyll"], Buffer.alloc(0));
   assert.deepEqual(Object.keys(updated).sort(), expectedFiles(root));
   for (const photo of catalogue(root).photos) assert.deepEqual(updated[photo.path], previous[photo.path]);
+});
+
+test("a complete previous marked release upgrades to gallery publishing", (t) => {
+  const root = fixture(t);
+  const destination = preparePublicSite(root);
+  removeGalleryOutput(destination);
+  assert.deepEqual(Object.keys(snapshot(root)).sort(), oldExpectedFiles(root));
+  preparePublicSite(root);
+  assert.deepEqual(Object.keys(snapshot(root)).sort(), expectedFiles(root));
+});
+
+test("a complete single-page Memory gallery upgrades to two parts without changing photos", (t) => {
+  const root = fixture(t);
+  const destination = preparePublicSite(root);
+  restoreSingleMemoryPage(destination);
+  const previous = snapshot(root);
+  preparePublicSite(root);
+  const updated = snapshot(root);
+  assert.deepEqual(Object.keys(updated).sort(), expectedFiles(root));
+  assert.equal(fs.existsSync(path.join(destination, "experiment-2.html")), false);
+  for (const name of [...galleryPhotos(root), ...catalogue(root).photos.map(photo => photo.path)]) {
+    assert.deepEqual(updated[name], previous[name]);
+  }
+});
+
+test("new root pages and renamed pages are discovered without changing the publication list", (t) => {
+  const root = fixture(t);
+  const destination = preparePublicSite(root);
+  const oldPage = "another-experiment.html";
+  const nextPage = "renamed-experiment.html";
+  const home = path.join(root, "index.html");
+  fs.writeFileSync(path.join(root, oldPage), '<!doctype html><title>Another experiment</title><a href="index.html">Home</a>');
+  const originalHome = fs.readFileSync(home, "utf8");
+  fs.writeFileSync(home, originalHome + `<a href="${oldPage}">Another experiment</a>`);
+  preparePublicSite(root);
+  assert.equal(fs.existsSync(path.join(destination, oldPage)), true);
+  fs.renameSync(path.join(root, oldPage), path.join(root, nextPage));
+  fs.writeFileSync(home, originalHome + `<a href="${nextPage}">Another experiment</a>`);
+  preparePublicSite(root);
+  assert.equal(fs.existsSync(path.join(destination, oldPage)), false);
+  assert.equal(fs.existsSync(path.join(destination, nextPage)), true);
+  assert.equal(fs.existsSync(path.join(destination, "local-test.html")), false);
+});
+
+test("gallery changes preserve exact bytes and replace only validated previous gallery output", (t) => {
+  const root = fixture(t);
+  const filename = "images/experiment-2/space # and % image.JPG";
+  fs.mkdirSync(path.dirname(path.join(root, filename)), { recursive: true });
+  fs.writeFileSync(path.join(root, filename), jpeg);
+  const page = path.join(root, "experiment-2-part-1.html");
+  const originalHtml = fs.readFileSync(page, "utf8");
+  fs.appendFileSync(page, `<img src="${filename.split("/").map(encodeURIComponent).join("/")}" alt="">`);
+  fs.writeFileSync(path.join(root, "images", ".DS_Store"), "metadata");
+  fs.writeFileSync(path.join(root, "images", "notes.txt"), "not a photograph");
+  const destination = preparePublicSite(root);
+  const manifest = JSON.parse(fs.readFileSync(path.join(destination, galleryCatalogueFile), "utf8"));
+  const entry = manifest.photos.find(photo => photo.path === filename);
+  assert.equal(entry.sha256, sha256(jpeg));
+  assert.deepEqual(fs.readFileSync(path.join(destination, filename)), jpeg);
+  assert.equal(fs.existsSync(path.join(destination, "images", ".DS_Store")), false);
+  assert.equal(fs.existsSync(path.join(destination, "images", "notes.txt")), false);
+  fs.writeFileSync(page, originalHtml);
+  fs.unlinkSync(path.join(root, filename));
+  preparePublicSite(root);
+  assert.equal(fs.existsSync(path.join(destination, filename)), false);
+  const first = galleryPhotos(root)[0];
+  fs.writeFileSync(path.join(destination, first), "manually edited gallery output");
+  const previous = snapshot(root);
+  assert.throws(() => preparePublicSite(root), /size or SHA-256/);
+  assert.deepEqual(snapshot(root), previous);
+});
+
+test("gallery symlinks, unlisted output files and missing manifests preserve the old site", (t) => {
+  for (const kind of ["source-directory", "source-file", "output-extra", "output-manifest", "manifest-path"]) {
+    const root = fixture(t);
+    const destination = preparePublicSite(root);
+    if (kind === "source-directory" || kind === "source-file") {
+      const relative = kind === "source-directory" ? "images" : galleryPhotos(root)[0];
+      const filename = path.join(root, relative);
+      const target = path.join(root, "private-source");
+      fs.renameSync(filename, target);
+      fs.symlinkSync(target, filename);
+    } else if (kind === "output-extra") fs.writeFileSync(path.join(destination, "images", "extra.jpg"), jpeg);
+    else if (kind === "output-manifest") fs.unlinkSync(path.join(destination, galleryCatalogueFile));
+    else {
+      const filename = path.join(destination, galleryCatalogueFile);
+      const manifest = JSON.parse(fs.readFileSync(filename));
+      manifest.photos[0].path = "images/../private.jpg";
+      fs.writeFileSync(filename, JSON.stringify(manifest));
+    }
+    const previous = snapshot(root);
+    assert.throws(() => preparePublicSite(root), /symlink|unexpected|catalogue|unsafe/);
+    assert.deepEqual(snapshot(root), previous);
+  }
 });
 
 test("a marked output with missing HEIC files is not mistaken for the older fifteen-file release", (t) => {
@@ -188,6 +333,7 @@ for (const previousCount of [7, 9, 10, 13]) {
   test(`the preceding ${previousCount}-file release upgrades to the manifest-listed publication`, (t) => {
     const root = fixture(t);
     const destination = preparePublicSite(root);
+    removeGalleryOutput(destination);
     const removed = [
       ".nojekyll", "heic-input.js", "vendor", "base-assets.js", "assets",
       ...(previousCount < 13 ? ["experiment-1.html", "experiment-2.html", "experiment-3.html"] : []),
@@ -204,11 +350,12 @@ for (const previousCount of [7, 9, 10, 13]) {
 test("the preceding fifteen-core-file static release upgrades without losing its selected photographs", (t) => {
   const root = fixture(t);
   const destination = preparePublicSite(root);
+  removeGalleryOutput(destination);
   fs.unlinkSync(path.join(destination, "heic-input.js"));
   fs.rmSync(path.join(destination, "vendor"), { recursive: true });
   fs.unlinkSync(path.join(destination, ".nojekyll"));
   const previous = snapshot(root);
-  assert.deepEqual(Object.keys(previous).sort(), expectedFiles(root).filter(name => name !== ".nojekyll" && !heicFiles.includes(name)));
+  assert.deepEqual(Object.keys(previous).sort(), oldExpectedFiles(root).filter(name => name !== ".nojekyll" && !heicFiles.includes(name)));
   preparePublicSite(root);
   assert.deepEqual(Object.keys(snapshot(root)).sort(), expectedFiles(root));
   for (const photo of catalogue(root).photos) assert.deepEqual(fs.readFileSync(path.join(destination, photo.path)), previous[photo.path]);
@@ -566,7 +713,7 @@ test("unexpected destination files and symlinks are never removed", (t) => {
 test("a partial experiment-page output is not mistaken for a known prior release", (t) => {
   const root = fixture(t);
   const destination = preparePublicSite(root);
-  fs.unlinkSync(path.join(destination, "experiment-2.html"));
+  fs.unlinkSync(path.join(destination, "experiment-2-part-2.html"));
   const previous = snapshot(root);
   assert.throws(() => preparePublicSite(root), /unexpected files/);
   assert.deepEqual(snapshot(root), previous);
@@ -601,7 +748,7 @@ test("inline code, unpublished references and invalid JavaScript fail before rep
   const root = fixture(t);
   preparePublicSite(root);
   const previous = snapshot(root);
-  for (const page of ["index.html", "double-exposure.html", "experiment-1.html", "experiment-2.html", "experiment-3.html"]) {
+  for (const page of PUBLIC_FILES.filter(name => name.endsWith(".html"))) {
     const original = fs.readFileSync(path.join(root, page), "utf8");
     for (const addition of ["<script>alert(1)</script>", "<style>body{}</style>", '<p style="color:red">text</p>', '<button onclick="run()">run</button>', '<script src="local-test.js"></script>', '<a href="GOOGLE-SETUP.md">private notes</a>']) {
       fs.writeFileSync(path.join(root, page), original + addition);

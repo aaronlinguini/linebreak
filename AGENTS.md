@@ -1,5 +1,14 @@
 # Project instructions
 
+## Current GitHub workflow — November 1, 2026
+
+- The user explicitly changed the publication requirement: publish this working repository and its existing history normally to public `aaronlinguini/ghost-images`. They accept public history while waiting for Pro and intend to make the repository private later. This supersedes the older selected-copy/history-private publication rules below.
+- Work in this existing folder on `main`, with `origin` set to `https://github.com/aaronlinguini/ghost-images.git`. The old local main is preserved as `main-before-normal-publishing`. Preserve the existing public commits by merging their history; do not force-push or discard either history.
+- The user explicitly authorized committing and pushing the current setup and current website edits. Future commits and pushes still require the user's instruction; their own Commit & Push is the normal workflow.
+- GitHub Actions runs checks, builds `.public-site` with automatic content labels, then deploys Pages on pushes to `main`. Root HTML pages except `local-test.html` are public pages; gallery images are selected from active HTML image references. The repository can contain source, tests and documentation, while the deployed artifact excludes those non-website files.
+- Keep credentials, secrets, incoming participant files, temporary backup copies and generated output ignored. No Google setup, account, scope, service or renderer change is part of normal Git publishing. Existing Google `SITE_URL` remains the same website base.
+
+
 - Keep HTML structure, CSS, and JavaScript in separate files. Do not add inline styles, script bodies, or event handlers to HTML.
 - Inspect `git status` before making changes and preserve unrelated work.
 - The user wants to make commits themselves. Leave changes uncommitted unless they explicitly request a commit. Before a substantial change, identify the existing commit that preserves the affected implementation and preserve any uncommitted user work. If a new Git checkpoint is needed, clearly call it a Git commit, explain its contents, and ask before creating it. Never treat a local commit as publication or push.

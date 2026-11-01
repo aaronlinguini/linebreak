@@ -25,7 +25,17 @@ const HEIC_PUBLIC_FILES = Object.freeze([
   "vendor/heic-to/NOTICE.txt", "vendor/heic-to/SOURCES.tar.gz"
 ]);
 const PREBUILT_PUBLIC_FILES = Object.freeze([...STATIC_PUBLIC_FILES, ...HEIC_PUBLIC_FILES]);
-const PUBLIC_FILES = Object.freeze([...PREBUILT_PUBLIC_FILES, ".nojekyll"]);
+const MARKED_PUBLIC_FILES = Object.freeze([...PREBUILT_PUBLIC_FILES, ".nojekyll"]);
+const GALLERY_FILES = Object.freeze(["experiment-carousel.css", "experiment-carousel.js"]);
+const NON_HTML_PUBLIC_FILES = Object.freeze([...MARKED_PUBLIC_FILES.filter(name => !name.endsWith(".html")), ...GALLERY_FILES]);
+function publicSourceFiles(root) {
+  const pages = fs.readdirSync(root).filter(name => !name.startsWith(".") && /\.html$/i.test(name) && name !== "local-test.html").sort();
+  if (!pages.includes("index.html")) throw new Error("The public website needs index.html.");
+  return [...NON_HTML_PUBLIC_FILES, ...pages];
+}
+const PUBLIC_FILES = Object.freeze(publicSourceFiles(path.resolve(__dirname, "..")));
+const GALLERY_DIRECTORY = "images";
+const GALLERY_CATALOGUE_FILE = "assets/gallery-photos.json";
 const MODULE_FILES = new Set(["heic-input.js", "vendor/heic-to/heic-to.js"]);
 const OUTPUT_DIRECTORY = ".public-site";
 
@@ -68,29 +78,33 @@ function readRegularFile(root, name, generated = false, maxBytes = Infinity) {
   return fs.readFileSync(filename);
 }
 
-function readCatalogue(bytes) {
+function readCatalogue(bytes, gallery = false) {
+  const label = gallery ? GALLERY_CATALOGUE_FILE : CATALOGUE_FILE;
   let catalogue;
   try { catalogue = JSON.parse(bytes.toString("utf8")); }
-  catch { throw new Error(`${CATALOGUE_FILE} must contain valid JSON.`); }
+  catch { throw new Error(`${label} must contain valid JSON.`); }
   if (catalogue?.version !== 1 || !Array.isArray(catalogue.photos)) {
-    throw new Error(`${CATALOGUE_FILE} must contain a version 1 photo catalogue.`);
+    throw new Error(`${label} must contain a version 1 photo catalogue.`);
   }
   const names = new Set();
   const hashes = new Set();
   for (const photo of catalogue.photos) {
+    const parts = typeof photo?.path === "string" ? photo.path.split("/") : [];
+    const safeGalleryPath = parts.length > 1 && parts[0] === GALLERY_DIRECTORY
+      && parts.every(part => part && !part.startsWith(".") && !/[\\\p{Cc}]/u.test(part));
     if (!photo || typeof photo.name !== "string" || !photo.name || photo.name === "." || photo.name === ".."
       || /[\/\\\p{Cc}]/u.test(photo.name) || !/\.(?:jpe?g|png|webp|avif)$/i.test(photo.name)
-      || photo.path !== `${PHOTO_DIRECTORY}/${photo.name}`) {
-      throw new Error(`${CATALOGUE_FILE} contains an unsafe or unsupported photo path.`);
+      || (gallery ? !safeGalleryPath || parts.at(-1) !== photo.name : photo.path !== `${PHOTO_DIRECTORY}/${photo.name}`)) {
+      throw new Error(`${label} contains an unsafe or unsupported photo path.`);
     }
     if (!/^[a-f0-9]{64}$/i.test(photo.sha256) || !Number.isSafeInteger(photo.byteLength)
-      || photo.byteLength < 1 || photo.byteLength > MAX_PHOTO_BYTES
+      || photo.byteLength < 1 || (!gallery && photo.byteLength > MAX_PHOTO_BYTES)
       || !["image/jpeg", "image/png", "image/webp", "image/avif"].includes(photo.mimeType)) {
-      throw new Error(`${CATALOGUE_FILE} contains invalid photo metadata.`);
+      throw new Error(`${label} contains invalid photo metadata.`);
     }
     const hash = photo.sha256.toLowerCase();
-    if (names.has(photo.path) || hashes.has(hash)) {
-      throw new Error(`${CATALOGUE_FILE} contains a duplicate photo path or SHA-256 hash.`);
+    if (names.has(photo.path) || (!gallery && hashes.has(hash))) {
+      throw new Error(`${label} contains a duplicate photo path or SHA-256 hash.`);
     }
     names.add(photo.path);
     hashes.add(hash);
@@ -110,6 +124,40 @@ function validatePhoto(bytes, photo) {
       && ["avif", "avis"].some((brand) => bytes.subarray(8, Math.min(bytes.length, 64)).includes(Buffer.from(brand)))
   };
   if (!signatureMatches[photo.mimeType]()) throw new Error(`${photo.path} has an unrecognized image signature.`);
+}
+
+function readGallery(root, sourceFiles) {
+  const selected = new Set();
+  const files = new Map();
+  const photos = [];
+  for (const page of sourceFiles.filter(name => name.endsWith(".html"))) {
+    const html = readRegularFile(root, page).toString("utf8").replace(/<!--[\s\S]*?-->/g, "");
+    for (const match of html.matchAll(/\b(?:src|href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
+      const reference = match[1] ?? match[2] ?? match[3];
+      let filename;
+      try { filename = decodeURIComponent(reference.split(/[?#]/)[0].replace(/^\.\//, "")); } catch { continue; }
+      if (!filename.startsWith(`${GALLERY_DIRECTORY}/`)) continue;
+      const parts = filename.split("/");
+      if (parts.some(part => !part || part.startsWith(".") || /[\\\p{Cc}]/u.test(part))) {
+        throw new Error(`${page} references an unsafe gallery path: ${reference}`);
+      }
+      selected.add(filename);
+    }
+  }
+  for (const filename of [...selected].sort()) {
+    const name = path.posix.basename(filename);
+    const extension = path.extname(name).toLowerCase();
+    const mimeType = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+      ".webp": "image/webp", ".avif": "image/avif" }[extension];
+    if (!mimeType) throw new Error(`${filename} is not a supported gallery image.`);
+    const bytes = readRegularFile(root, filename);
+    const photo = { path: filename, name, mimeType, byteLength: bytes.length,
+      sha256: createHash("sha256").update(bytes).digest("hex") };
+    validatePhoto(bytes, photo);
+    photos.push(photo);
+    files.set(filename, bytes);
+  }
+  return { photos, files };
 }
 
 function validateJavaScript(bytes, filename) {
@@ -209,10 +257,23 @@ function validatePreviousOutput(destination) {
   let photos;
   try { photos = readCatalogue(readRegularFile(destination, CATALOGUE_FILE, true)); }
   catch (error) { throw new Error(`${OUTPUT_DIRECTORY} contains unexpected files or an invalid catalogue; nothing was replaced. ${error.message}`); }
-  // Accept complete earlier releases before the static-site marker or HEIC support.
-  const coreFiles = entries.includes(".nojekyll") ? PUBLIC_FILES
+  const hasGallery = fs.existsSync(path.join(destination, GALLERY_CATALOGUE_FILE));
+  const galleryBytes = hasGallery ? readRegularFile(destination, GALLERY_CATALOGUE_FILE, true) : null;
+  const gallery = hasGallery ? readCatalogue(galleryBytes, true) : [];
+  const pages = hasGallery ? JSON.parse(galleryBytes).pages : [];
+  if (hasGallery && (!Array.isArray(pages) || !pages.includes("index.html") || new Set(pages).size !== pages.length
+    || pages.some(name => typeof name !== "string" || name.startsWith(".") || /[\/\\\p{Cc}]/u.test(name)
+      || !/\.html$/i.test(name) || name === "local-test.html"))) {
+    throw new Error(`${OUTPUT_DIRECTORY} contains an invalid gallery page catalogue; nothing was replaced.`);
+  }
+  if (!hasGallery && GALLERY_FILES.some(name => entries.includes(name))) {
+    throw new Error(`${OUTPUT_DIRECTORY} is missing its gallery catalogue; nothing was replaced.`);
+  }
+  // Complete earlier releases have neither carousel files nor a gallery catalogue.
+  const coreFiles = hasGallery ? [...NON_HTML_PUBLIC_FILES, ...pages] : entries.includes(".nojekyll") ? MARKED_PUBLIC_FILES
     : entries.includes("heic-input.js") || entries.includes("vendor") ? PREBUILT_PUBLIC_FILES : STATIC_PUBLIC_FILES;
-  const expectedFiles = new Set([...coreFiles, ...photos.map((photo) => photo.path)]);
+  const expectedFiles = new Set([...coreFiles, ...photos.map((photo) => photo.path),
+    ...(hasGallery ? [GALLERY_CATALOGUE_FILE, ...gallery.map(photo => photo.path)] : [])]);
   const expectedDirectories = new Set();
   for (const filename of expectedFiles) {
     const parts = filename.split("/");
@@ -233,13 +294,15 @@ function validatePreviousOutput(destination) {
   visit();
   if (expectedFiles.size) throw new Error(`${OUTPUT_DIRECTORY} contains unexpected files or is missing required files; nothing was replaced.`);
   for (const photo of photos) validatePhoto(readRegularFile(destination, photo.path, true, MAX_PHOTO_BYTES), photo);
+  for (const photo of gallery) validatePhoto(readRegularFile(destination, photo.path, true), photo);
 }
 
 function preparePublicSite(root = path.resolve(__dirname, "..")) {
   root = path.resolve(root);
   const destination = path.join(root, OUTPUT_DIRECTORY);
   // Read and validate everything before touching the previous publication.
-  const contents = new Map(PUBLIC_FILES.map((name) => {
+  const sourceFiles = publicSourceFiles(root);
+  const contents = new Map(sourceFiles.map((name) => {
     const bytes = readRegularFile(root, name);
     if (!bytes.length && name !== ".nojekyll") throw new Error(`${name} is empty; nothing was published.`);
     if (name.endsWith(".js")) validateJavaScript(bytes, name);
@@ -250,6 +313,9 @@ function preparePublicSite(root = path.resolve(__dirname, "..")) {
     validatePhoto(bytes, photo);
     contents.set(photo.path, bytes);
   }
+  const gallery = readGallery(root, sourceFiles);
+  for (const [filename, bytes] of gallery.files) contents.set(filename, bytes);
+  contents.set(GALLERY_CATALOGUE_FILE, Buffer.from(JSON.stringify({ version: 1, pages: sourceFiles.filter(name => name.endsWith(".html")), photos: gallery.photos }, null, 2) + "\n"));
   const publicFiles = new Set(contents.keys());
   for (const [name, bytes] of contents) {
     if (name.endsWith(".html")) validateHtml(bytes.toString("utf8"), name, publicFiles);

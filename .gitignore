@@ -8,6 +8,7 @@
 # Local dependencies and logs
 node_modules/
 *.log
+.local-backups/
 
 # Local secrets and Google account/deployment configuration
 .env

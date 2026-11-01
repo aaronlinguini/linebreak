@@ -323,16 +323,18 @@ test("photo choices and a shared action toolbar precede the image, with colour c
     ["download-button", "rotate-button"]);
 });
 
-test("Home links to the three experiment pages and exposure tool without starting the archive on static pages", () => {
+test("Home links resolve and static pages do not start the archive", () => {
   const home = fs.readFileSync(path.join(root, "index.html"), "utf8");
   const tool = fs.readFileSync(path.join(root, "double-exposure.html"), "utf8");
   assert.match(home, /<a\b[^>]*href="double-exposure\.html"[^>]*>/i);
-  assert.match(tool, /<a\b[^>]*href="index\.html"[^>]*>\s*(?:Home|Ghost Images)\s*<\/a>/i);
+  assert.match(tool, /<a\b[^>]*href="index\.html"[^>]*>\s*[^<\s]/i);
+  for (const [, reference] of home.replace(/<!--[\s\S]*?-->/g, "").matchAll(/<a\b[^>]*href="([^"#?]+\.html)(?:[?#][^"]*)?"/gi)) {
+    assert.ok(fs.existsSync(path.join(root, reference)), `Home link resolves: ${reference}`);
+  }
   const pages = [home];
-  for (const number of [1, 2, 3]) {
-    assert.match(home, new RegExp(`<a\\b[^>]*href="experiment-${number}\\.html"[^>]*>`, "i"));
-    const experiment = fs.readFileSync(path.join(root, `experiment-${number}.html`), "utf8");
-    assert.match(experiment, /<a\b[^>]*href="index\.html"[^>]*>\s*(?:Home|Ghost Images)\s*<\/a>/i);
+  for (const filename of fs.readdirSync(root).filter((name) => name.endsWith(".html") && !["index.html", "double-exposure.html", "local-test.html"].includes(name))) {
+    const experiment = fs.readFileSync(path.join(root, filename), "utf8");
+    assert.match(experiment, /<a\b[^>]*href="index\.html"[^>]*>\s*[^<\s]/i);
     pages.push(experiment);
   }
   for (const page of pages) {

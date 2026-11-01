@@ -167,6 +167,13 @@ h1 {
   text-align: center;
 }
 
+.home-panel > nav {
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
+  text-align: left;
+}
+
 .home-panel h2 {
   margin: 0 0 24px;
   color: var(--muted);
@@ -195,6 +202,28 @@ h1 {
 /* Gap between consecutive links in a list */
 .home-links li + li {
   margin-top: 16px;
+}
+
+.home-experiment-label {
+  display: block;
+  padding-top: 8px;
+  font-size: 12px;
+}
+
+.home-links .home-experiment-parts {
+  margin-top: 4px;
+  padding-left: 1.5em;
+  list-style: disc;
+  font-size: 12px;
+}
+
+.home-experiment-parts li + li {
+  margin-top: 0;
+}
+
+.part-nav {
+  margin-top: 12px;
+  margin-bottom: 0;
 }
 
 /* EXPERIMENT PAGES */
