@@ -225,6 +225,7 @@ test("editing the one shared header updates static page headers, current navigat
     const html = files[page].toString("utf8");
     assert.match(html, /data-site-header-rendered/, `${page}: header must exist before JavaScript runs`);
     assert.ok(html.includes(`data-site-name>${name}</a>`), `${page}: shared brand name`);
+    assert.match(html, /<a\b[^>]*href="\.\/"[^>]*\bdata-site-name/, `${page}: clean homepage address`);
     assert.match(html, /class="site-divider" data-divider-note="changed"/, `${page}: shared divider markup`);
     const main = source.match(/<main\b[\s\S]*?<\/main>/)?.[0];
     if (main) assert.ok(html.includes(main), `${page}: page content must remain unchanged`);

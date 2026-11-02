@@ -56,7 +56,7 @@ function validateHtml(source, page, publicFiles) {
     const reference = match[1] ?? match[2] ?? match[3];
     if (reference.startsWith("#")) continue;
     let filename;
-    try { filename = decodeURIComponent(reference.split(/[?#]/)[0].replace(/^\.\//, "")); } catch {}
+    try { filename = reference === "./" ? "index.html" : decodeURIComponent(reference.split(/[?#]/)[0].replace(/^\.\//, "")); } catch {}
     if (!publicFiles.has(filename)) {
       throw new Error(`${page} references an unpublished file: ${reference}`);
     }

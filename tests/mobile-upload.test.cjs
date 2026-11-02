@@ -822,7 +822,12 @@ test("Home links resolve and static pages do not start the archive", () => {
   const tool = fs.readFileSync(path.join(root, "double-exposure.html"), "utf8");
   const header = fs.readFileSync(path.join(root, "includes", "site-header.html"), "utf8");
   assert.match(home, /<a\b[^>]*href="double-exposure\.html"[^>]*>/i);
-  assert.match(header, /<a\b[^>]*href="index\.html"[^>]*>\s*[^<\s]/i);
+  assert.match(header, /<a\b[^>]*href="\.\/"[^>]*>\s*[^<\s]/i);
+  for (const page of ["", "index.html", "double-exposure.html", "experiment-1.html", "experiment-2-part-1.html", "experiment-2-part-2.html", "experiment-3.html"]) {
+    const homeLink = header.match(/<a\b[^>]*href="([^"]+)"[^>]*\bdata-site-name/)[1];
+    assert.equal(new URL(homeLink, `https://aaronlinguini.github.io/br/${page}`).href,
+      "https://aaronlinguini.github.io/br/");
+  }
   assert.match(tool, /<div\b[^>]*\bdata-site-header(?:\s|=|>)/i);
   assert.match(tool, /<script\b[^>]*src="site-header\.js"[^>]*defer/i);
   for (const [, reference] of (home + header).replace(/<!--[\s\S]*?-->/g, "").matchAll(/<a\b[^>]*href="([^"#?]+\.html)(?:[?#][^"]*)?"/gi)) {

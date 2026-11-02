@@ -2,14 +2,14 @@
 
 ## Publishing website changes
 
-Requested website changes are validated, committed, and pushed on `main` by default, without another publication confirmation. Preserve unrelated work and stage only the intended changes. You can also use **Commit & Push** in VS Code whenever you edit the site yourself. This folder is connected directly to [aaronlinguini/apparitions](https://github.com/aaronlinguini/apparitions). GitHub Actions runs the checks, prepares `.public-site`, and publishes the result to [the website](https://aaronlinguini.github.io/apparitions/). Check that the **Publish website** run succeeds before reporting the update live. A failed run keeps the previous deployed site.
+Requested website changes are validated, committed, and pushed on `main` by default, without another publication confirmation. Preserve unrelated work and stage only the intended changes. You can also use **Commit & Push** in VS Code whenever you edit the site yourself. This folder is connected to [aaronlinguini/br](https://github.com/aaronlinguini/br); the rename preserved the existing repository and history. GitHub Actions runs the checks, prepares `.public-site`, and publishes the result to [the website](https://aaronlinguini.github.io/br/). Check that the **Publish website** run succeeds before reporting the update live. A failed run keeps the previous deployed site.
 
 CSS and JavaScript cache labels are generated automatically during that build. Ordinary root HTML files are website pages; `local-test.html` stays a local comparison. Photos under `images/` are included in the website build when an active page references them. Keep editing source files rather than `.public-site`. Credentials, incoming uploads, temporary backups and generated copies remain ignored. Source code, tests, documentation and Git history are now in the normal GitHub repository; the deployed website contains only its prepared pages and assets.
 
 The separate selected-copy publication records below describe the earlier setup. Normal pushes from this folder replace that workflow.
 
 
-Live site: [&lt;br&gt;](https://aaronlinguini.github.io/apparitions/) · [Double-exposure tool](https://aaronlinguini.github.io/apparitions/double-exposure.html) · [Public repository](https://github.com/aaronlinguini/apparitions).
+Configured addresses: [&lt;br&gt;](https://aaronlinguini.github.io/br/) · [Double-exposure tool](https://aaronlinguini.github.io/br/double-exposure.html) · [Public repository](https://github.com/aaronlinguini/br). The visible site name remains literal &lt;br&gt;.
 
 Initial selected-copy publication (historical), November 1, 2026: one `Publish website` commit (`4e4ecec`) containing 21 site/support files and 113 selected photos. Development history and this README were excluded. Pages deployment succeeded; 30 delivery checks passed, and the live tool completed Google bootstrap. A new live upload/save and physical iPhone HEIC/camera tests are still separate checks. That selected-copy workflow has been superseded by the normal commit, push, and Actions deployment workflow above.
 
@@ -53,7 +53,7 @@ Before public use, check both library selection and native camera capture on an 
 
 The tool page stays minimal and black, with no exposure sliders or collection-management panel. A private Google Sheet records consent, source IDs, and each result. The required **Yes / No** choice has no default and controls entry into the shared base-photo pool; both answers retain the private original archive. Server-computed SHA-256 checks reuse identical original files across artist and participant records and identical results across repeated tests or pairings. An existing artist photo is reused without renaming or moving it. No image pairs with identical bytes, and pending saves keep their assigned base. Renaming a file does not bypass this check. Edited, resized, or re-exported files can have different bytes and are not guaranteed to match. Copies manually dragged into Drive are detected and indexed once, but the program does not silently delete those externally created files.
 
-The older [double-exposure-online-project repository](https://github.com/aaronlinguini/double-exposure-online-project) is a historical selected publication; its private visibility and the old website’s 404 response were verified. The current [apparitions repository](https://github.com/aaronlinguini/apparitions) contains this working repository and its history. Editing a file on GitHub does not automatically update the local copy, so compare remote and local work before pushing. The Google deployment is separate; a frontend publication does not replace its code or settings.
+The older [double-exposure-online-project repository](https://github.com/aaronlinguini/double-exposure-online-project) is a historical selected publication; its private visibility and the old website’s 404 response were verified. The [br repository](https://github.com/aaronlinguini/br) retains this working repository and its history; its rename and local origin were verified. Editing a file on GitHub does not automatically update the local copy, so compare remote and local work before pushing. The Google deployment is separate; a frontend publication does not replace its code or settings.
 
 The [Photo archive Apps Script project](https://script.google.com/home/projects/1gj7CIChAW6rMFOmP_Pb16TWSAwUKzZQxnOUOvvEUvDFOwQxKo65lYols/edit) runs in **aaron.double.exposure.project@gmail.com**. Version 4 deployed the Google-hosted visitor bridge on October 30, 2026, at **6:10 PM**. Version 5 deployed faster source scanning at **6:44 PM**. Version 6 added same-base colour variants and one batched read for the three existing archive tabs at **10:00 PM**, keeping the same `/exec` URL, account, Anyone access, OAuth scopes, and archive folders. The user explicitly approved activating the existing photo service; **`UPLOADS_PAUSED=false`** was saved and verified. No personal-folder sharing or new authorization/setup is needed, and working archive IDs must be preserved.
 
@@ -71,7 +71,7 @@ python3 -m http.server 5500 --bind 127.0.0.1
 
 ## Files
 
-- `index.html`: home page with separate Experiments and Interactive link lists.
+- `index.html`: the physical homepage entry file, with separate Experiments and Interactive link lists; the shared Home link uses `./` to open the clean repository root.
 - `includes/site-header.html`: the shared site name, divider, and experiment navigation.
 - `site-header.js`: loads the shared header in local previews and supplies the same rendering functions to the publication builder.
 - `experiment-1.html`: the Sketch photo gallery and reflection.
@@ -239,7 +239,7 @@ To undo a later committed change, ask to revert that change; Git can create an u
 
 Edit the name once in `includes/site-header.html` to change **&lt;br&gt;** across the website. Write the visible tag as `&lt;br&gt;` so it appears as text. The same template contains the grey `<hr class="site-divider">` and the four experiment links. Change the line's colour, thickness, and spacing in the `.site-divider` rule in `styles.css`.
 
-Each website page loads `site-header.js` and contains a `<div data-site-header></div>` placeholder. Experiment pages use `<div data-site-header="experiments"></div>` to show the experiment navigation. Keep page-specific headings and content outside that placeholder.
+Each website page loads `site-header.js` and contains a `<div data-site-header></div>` placeholder. Experiment pages use `<div data-site-header="experiments"></div>` to show the experiment navigation. Keep page-specific headings and content outside that placeholder. Keep `index.html` as the physical homepage file; the shared title/Home link uses `href="./"` so navigation opens the clean repository root, rather than `/home` or an explicit `index.html` URL. A local title-link click from Experiment 1 verified the root address and literal &lt;br&gt; browser title.
 
 Save the template and refresh each Live Server page to see the changes. During publication preparation, the builder embeds the header into every page and updates the marked home/tool titles and tool link-preview metadata. Published pages therefore contain the complete header without JavaScript or a runtime template request. Saving a local file alone does not update the live website; validated requested changes are committed and pushed through the normal Actions workflow above.
 
