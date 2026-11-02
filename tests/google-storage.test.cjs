@@ -680,6 +680,8 @@ test("malformed or incomplete batch responses fail before any index tab enters t
 
 test("the real backend archives through the limited adapters with consent, original deduplication and unique usage reservations", () => {
   const h = backendHarness();
+  h.properties.set("SUBMISSIONS_PER_DAY", "1");
+  h.properties.set("UPLOAD_BYTES_PER_DAY", "invalid obsolete setting");
   const links = h.sandbox.setupProject();
   const setupIds = [...h.properties.entries()].filter(([key]) => key.startsWith("EXPOSURE_") && key.endsWith("_ID"));
   const initialFiles = h.files.size;

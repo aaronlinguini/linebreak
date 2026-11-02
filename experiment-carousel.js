@@ -6,14 +6,19 @@ if (gallery) {
   const counter = gallery.querySelector('.carousel-counter');
   let current = 0;
 
+  function updateGalleryLayout() {
+    const image = slides[current].querySelector(':scope > figure img');
+    gallery.closest('.experiment-layout')?.classList.toggle(
+      'single-portrait-active', Boolean(image && image.naturalWidth > 0 && image.naturalWidth < image.naturalHeight)
+    );
+  }
+
   function showSlide(index, reveal = false) {
     current = (index + slides.length) % slides.length;
     slides.forEach((slide, position) => {
       slide.hidden = position !== current;
     });
-    gallery.closest('.experiment-layout')?.classList.toggle(
-      'comparison-active', Boolean(slides[current].querySelector('.experiment-comparison'))
-    );
+    updateGalleryLayout();
     counter.textContent = `${current + 1} / ${slides.length}`;
     if (reveal && gallery.closest('.experiment-memory-two') && gallery.getBoundingClientRect().top < 0) {
       gallery.scrollIntoView({ block: 'start' });
@@ -21,6 +26,7 @@ if (gallery) {
   }
 
   if (slides.length && controls && counter) {
+    gallery.addEventListener('load', updateGalleryLayout, true);
     gallery.querySelector('[data-previous]').addEventListener('click', () => showSlide(current - 1, true));
     gallery.querySelector('[data-next]').addEventListener('click', () => showSlide(current + 1, true));
     gallery.addEventListener('keydown', (event) => {

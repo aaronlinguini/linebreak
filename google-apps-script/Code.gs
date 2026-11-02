@@ -16,8 +16,8 @@
  * INCLUDE_PARTICIPANT_PHOTOS: "false" disables all participant bases. Otherwise
  *                           only completed, individually opted-in originals join.
  * UPLOADS_PAUSED: "true" temporarily closes the visitor API; absent/"false" opens it.
- * REQUESTS_PER_MINUTE / SUBMISSIONS_PER_DAY / UPLOAD_BYTES_PER_DAY: optional
- * positive integer limits, shared by all visitors (defaults 120 / 200 / 1 GiB).
+ * REQUESTS_PER_MINUTE: optional positive integer request limit, shared by all
+ * visitors (default 120). There are no custom daily intake limits.
  * EXPOSURE_REQUEST_WINDOW is internal request accounting. The private Usage
  * sheet reserves each submission and new file once; do not edit its records.
  * EXPOSURE_*_ID properties are populated by setupProject_.
@@ -939,9 +939,7 @@ function archiveLimits_() {
     throw apiError_("LIMIT_CONFIGURATION", "The archive limits need the artist's attention.");
   }
   return { paused: String(paused).trim().toLowerCase() === "true",
-    requests: positive("REQUESTS_PER_MINUTE", 120),
-    submissions: positive("SUBMISSIONS_PER_DAY", 200),
-    bytes: positive("UPLOAD_BYTES_PER_DAY", 1024 * 1024 * 1024) };
+    requests: positive("REQUESTS_PER_MINUTE", 120) };
 }
 
 // Called under the script lock before reading or decoding visitor data. The
@@ -969,8 +967,6 @@ function guardVisitorRequest_() {
 function reserveUsage_(project, key, kind, bytes) {
   var records = readRecords_(project.usage, EXPOSURE_CONFIG_.usageHeaders);
   var today = now_().slice(0, 10);
-  var usedBytes = 0;
-  var usedSubmissions = 0;
   var existing = null;
   var seen = {};
   records.forEach(function (record) {
@@ -983,26 +979,13 @@ function reserveUsage_(project, key, kind, bytes) {
     }
     seen[record.key] = true;
     if (record.key === key) existing = record;
-    if (record.day === today) {
-      usedBytes += record.bytes;
-      if (record.kind === "submission") usedSubmissions++;
-    }
   });
-  if (!Number.isSafeInteger(usedBytes)) throw apiError_("LIMIT_CONFIGURATION", "The archive usage records need the artist's attention.");
   if (existing) {
     if (existing.kind !== kind || existing.bytes !== bytes) throw apiError_("LIMIT_CONFIGURATION", "The archive usage records need the artist's attention.");
-    if (existing.day === today) return;
-  }
-  var limits = archiveLimits_();
-  if ((kind === "submission" && usedSubmissions >= limits.submissions) || bytes > limits.bytes - usedBytes) {
-    throw apiError_("DAILY_LIMIT_REACHED", "Today's archive intake limit has been reached. Please try again tomorrow.");
+    return;
   }
   // Keep ISO day labels as text instead of letting Sheets infer a local date.
-  var reservation = existing || { key: key, kind: kind, bytes: bytes };
-  // This helper runs only before a new submission/file write. A recovered
-  // existing file bypasses it. Move an unused older reservation to today so
-  // delayed attempts cannot spend several days' allowances in one day.
-  reservation.day = today;
+  var reservation = { key: key, kind: kind, bytes: bytes, day: today };
   project.usage.getRange(reservation._row || project.usage.getLastRow() + 1, 2).setNumberFormat("@");
   writeRecord_(project.usage, EXPOSURE_CONFIG_.usageHeaders, reservation);
   // Persist this reservation before a Drive write or a later index operation.

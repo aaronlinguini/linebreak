@@ -1089,7 +1089,6 @@ test("Google authorization permits artist reads while keeping writes limited to 
 test("owner imports preserve original bytes, index immediately and deduplicate renamed copies", () => {
   const backend = makeBackend(); backend.setup();
   backend.properties.set("UPLOADS_PAUSED", "true");
-  backend.properties.set("UPLOAD_BYTES_PER_DAY", "1");
   const rpc = (action, payload) => clone(backend.sandbox.artistApi({ action, payload }));
   assert.equal(rpc("status").data.artistCount, 0);
   const first = rpc("import", { image: original(7, "first.jpg") });
@@ -1251,48 +1250,63 @@ test("the pause switch blocks visitor writes while owner setup and import remain
   assert.equal(backend.folder("Double exposure").files.length, 0);
 });
 
-test("daily submission caps count another pairing but never charge a stable retry twice", () => {
+test("more than 200 submissions, new pairings and colour variants have no daily cap or duplicate reservations", () => {
   const backend = makeBackend(); backend.setup(); backend.seed(1); backend.seed(2); backend.refresh();
   backend.properties.set("SUBMISSIONS_PER_DAY", "1");
-  const first = backend.begin(1, 22);
-  assert.deepEqual(backend.begin(1, 22), first);
+  backend.properties.set("UPLOAD_BYTES_PER_DAY", "1");
+  const limits = backend.data("bootstrap");
+  assert.equal(limits.maxOriginalBytes, 30 * 1024 * 1024);
+  assert.equal(limits.maxResultBytes, 12 * 1024 * 1024);
+  const first = backend.begin(1, 22, false);
+  assert.deepEqual(backend.begin(1, 22, false), first);
   backend.data("complete", backend.completePayload(first));
-  const request = { submissionId: submissionId(2), reuse: { submissionId: first.submissionId, token: first.token } };
-  assert.equal(backend.api("begin", request).error.code, "DAILY_LIMIT_REACHED");
-  assert.equal(backend.folder("Participant").files.length, 1);
-  assert.equal(backend.usage().filter((row) => row[2] === "submission").length, 1);
-  backend.advance(86400000);
-  const second = backend.data("begin", request);
-  assert.equal(second.originalId, first.originalId);
-  assert.notEqual(second.base.id, first.base.id);
-  assert.equal(backend.folder("Participant").files.length, 1);
-  assert.equal(backend.usage().filter((row) => row[2] === "submission").length, 2);
+  for (let number = 2; number <= 205; number++) {
+    if (number % 20 === 0) backend.advance(60000);
+    const sameBase = number % 2 === 0;
+    const request = { submissionId: submissionId(number), reuse: { submissionId: first.submissionId, token: first.token, sameBase } };
+    const next = backend.data("begin", request);
+    assert.deepEqual(backend.data("begin", request), next);
+    assert.equal(next.originalId, first.originalId);
+    assert.equal(next.base.id === first.base.id, sameBase);
+    const result = backend.completePayload(next, sameBase ? 91 : 90);
+    result.settings.monochrome = sameBase;
+    backend.data("complete", result);
+  }
+  assert.equal(backend.records("Submissions").length, 205);
+  const reservations = backend.usage();
+  assert.equal(reservations.filter((row) => row[2] === "submission").length, 205);
+  assert.equal(new Set(reservations.map(row => row[0])).size, reservations.length);
+  assert.ok(reservations.every(row => row[1] === "2026-10-29"));
+  assert.equal(backend.folder("Participant").files.length, 0);
+  assert.equal(backend.folder("Double exposure").files.length, 2);
 });
 
-test("daily byte caps count only newly stored files and reset without deleting archive files", () => {
+test("more than 1 GiB of cumulative reservations never blocks new files or matching retries", () => {
   const backend = makeBackend(); backend.setup(); backend.seed(); backend.refresh();
   const bytes = jpeg(22).length;
-  backend.properties.set("UPLOAD_BYTES_PER_DAY", String(bytes * 2));
+  backend.properties.set("UPLOAD_BYTES_PER_DAY", "1");
+  const usageSheet = [...backend.books.values()][0].getSheetByName("Usage");
+  for (let number = 0; number < 40; number++) usageSheet.rows.push([`file:earlier-${number}`, "2026-10-29", "file", 30 * 1024 * 1024]);
+  const initialBytes = backend.usage().reduce((sum, row) => sum + row[3], 0);
+  assert.ok(initialBytes > 1024 * 1024 * 1024);
   const first = backend.begin(1, 22);
   const firstRequest = backend.completePayload(first);
   backend.data("complete", firstRequest);
   backend.data("complete", firstRequest);
   const second = backend.begin(2, 22);
-  assert.equal(second.originalId, first.originalId, "an identical new submission reuses its original at the byte limit");
-  const failed = backend.api("complete", backend.completePayload(second, 91));
-  assert.equal(failed.error.code, "DAILY_LIMIT_REACHED");
-  assert.equal(failed.error.originalSaved, true);
+  assert.equal(second.originalId, first.originalId, "an identical new submission reuses its original");
+  backend.data("complete", backend.completePayload(second, 91));
   assert.equal(backend.folder("Participant").files.length, 1);
-  assert.equal(backend.folder("Double exposure").files.length, 1);
-  assert.equal(backend.usage().reduce((sum, row) => sum + row[3], 0), bytes * 2);
+  assert.equal(backend.folder("Double exposure").files.length, 2);
+  assert.equal(backend.usage().reduce((sum, row) => sum + row[3], 0), initialBytes + bytes * 3);
   backend.advance(86400000);
   backend.data("complete", backend.completePayload(second, 91));
   assert.equal(backend.folder("Double exposure").files.length, 2);
-  assert.equal(backend.usage().reduce((sum, row) => sum + row[3], 0), bytes * 3);
-  assert.equal(backend.usage().filter((row) => row[1] === "2026-10-30").reduce((sum, row) => sum + row[3], 0), bytes);
+  assert.equal(backend.usage().reduce((sum, row) => sum + row[3], 0), initialBytes + bytes * 3);
+  assert.equal(backend.usage().filter((row) => row[1] === "2026-10-30").length, 0, "midnight never re-reserves an existing file");
 });
 
-test("failed Drive creation retains one reservation that a retry can reuse at the byte cap", () => {
+test("failed Drive creation retains one reservation that a retry reuses", () => {
   const backend = makeBackend(); backend.setup(); backend.seed(); backend.refresh();
   backend.properties.set("UPLOAD_BYTES_PER_DAY", String(jpeg(22).length));
   backend.failures.fileCreate = true;
@@ -1305,7 +1319,7 @@ test("failed Drive creation retains one reservation that a retry can reuse at th
   assert.equal(backend.folder("Participant").files.length, 1);
 });
 
-test("a failed quota reservation never proceeds to a Drive write", () => {
+test("a failed usage reservation never proceeds to a Drive write", () => {
   const backend = makeBackend(); backend.setup(); backend.seed(); backend.refresh();
   backend.failures.sheetWrite = (sheet, values) => sheet.name === "Usage" && values.some((row) => row.includes("file"));
   assert.equal(backend.api("begin", { submissionId: submissionId(1), original: original(22), allowReuse: true }).ok, false);
@@ -1316,7 +1330,19 @@ test("a failed quota reservation never proceeds to a Drive write", () => {
   assert.equal(backend.usage().length, 2);
 });
 
-test("an unused reservation from yesterday must fit today's limit before creating its file", () => {
+test("a conflicting saved file reservation still blocks duplicate or mismatched archive writes", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(); backend.refresh();
+  backend.failures.fileCreate = true;
+  const request = { submissionId: submissionId(1), original: original(22), allowReuse: true };
+  assert.equal(backend.api("begin", request).ok, false);
+  const usageSheet = [...backend.books.values()][0].getSheetByName("Usage");
+  const reservedFile = usageSheet.rows.find(row => row[2] === "file");
+  reservedFile[3]++;
+  assert.equal(backend.api("begin", request).error.code, "LIMIT_CONFIGURATION");
+  assert.equal(backend.folder("Participant").files.length, 0);
+});
+
+test("an unused reservation is reused after midnight without a daily allowance or another charge", () => {
   const backend = makeBackend(); backend.setup(); backend.seed(); backend.refresh();
   const bytes = jpeg(22).length;
   backend.properties.set("UPLOAD_BYTES_PER_DAY", String(bytes));
@@ -1325,19 +1351,27 @@ test("an unused reservation from yesterday must fit today's limit before creatin
   assert.equal(backend.api("begin", delayed).ok, false);
   backend.advance(86400000);
   backend.begin(2, 23);
-  assert.equal(backend.api("begin", delayed).error.code, "DAILY_LIMIT_REACHED");
-  assert.equal(backend.folder("Participant").files.length, 1);
-  backend.properties.set("UPLOAD_BYTES_PER_DAY", String(bytes * 2));
   backend.data("begin", delayed);
   assert.equal(backend.folder("Participant").files.length, 2);
-  assert.equal(backend.usage().filter((row) => row[2] === "file").length, 2, "move the old reservation rather than add another charge");
-  assert.equal(backend.usage().filter((row) => row[1] === "2026-10-30").reduce((sum, row) => sum + row[3], 0), bytes * 2);
+  assert.equal(backend.usage().filter((row) => row[2] === "file").length, 2, "reuse the old reservation rather than add another charge");
+  assert.equal(backend.usage().filter((row) => row[1] === "2026-10-29").reduce((sum, row) => sum + row[3], 0), bytes);
+  assert.equal(backend.usage().filter((row) => row[1] === "2026-10-30").reduce((sum, row) => sum + row[3], 0), bytes);
+});
+
+test("obsolete daily-limit properties are ignored even when empty or malformed", () => {
+  for (const value of ["0", "-1", "", "1.5", "not a limit", "9007199254740992"]) {
+    const backend = makeBackend(); backend.setup(); backend.seed(); backend.refresh();
+    backend.properties.set("SUBMISSIONS_PER_DAY", value);
+    backend.properties.set("UPLOAD_BYTES_PER_DAY", value);
+    const begun = backend.begin(1, 22);
+    assert.equal(backend.data("complete", backend.completePayload(begun)).saved, true);
+    assert.equal(backend.folder("Participant").files.length, 1);
+  }
 });
 
 test("malformed limit settings or persisted request state fail closed", () => {
   for (const [key, value] of [
-    ["REQUESTS_PER_MINUTE", "0"], ["SUBMISSIONS_PER_DAY", "-1"], ["UPLOAD_BYTES_PER_DAY", ""],
-    ["UPLOAD_BYTES_PER_DAY", "1.5"], ["REQUESTS_PER_MINUTE", "9007199254740992"], ["UPLOADS_PAUSED", "maybe"],
+    ["REQUESTS_PER_MINUTE", "0"], ["REQUESTS_PER_MINUTE", "9007199254740992"], ["UPLOADS_PAUSED", "maybe"],
     ["EXPOSURE_REQUEST_WINDOW", "bad json"], ["EXPOSURE_REQUEST_WINDOW", '{"minute":0,"count":-1}'],
     ["EXPOSURE_REQUEST_WINDOW", '{"minute":9007199254740991,"count":0}']
   ]) {
@@ -1349,7 +1383,7 @@ test("malformed limit settings or persisted request state fail closed", () => {
   }
 });
 
-test("malformed usage records cannot turn into a fresh daily allowance", () => {
+test("malformed usage records still fail before a new archive write", () => {
   for (const record of [
     ["file:old", "2026-10-29", "file", -1], ["file:old", "2026-02-31", "file", 1],
     ["file:old", "2026-10-30", "file", 1], ["submission:old", "2026-10-29", "submission", 1],

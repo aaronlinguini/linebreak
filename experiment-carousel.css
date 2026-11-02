@@ -54,6 +54,7 @@
 
 .experiment-memory-two {
   --comparison-gap: 16px;
+  --photo-note-inset: 8px;
 }
 
 .experiment-layout {
@@ -76,8 +77,31 @@
   margin: 0;
 }
 
-.experiment-memory-two .comparison-active .experiment-gallery {
-  flex-basis: 100%;
+.experiment-memory-two .experiment-layout {
+  --gallery-width: var(--carousel-width);
+  width: min(
+    calc(var(--gallery-width) + var(--column-gap) + var(--text-preferred-width)),
+    calc(100% - var(--page-gutter) * 2)
+  );
+}
+
+.experiment-memory-two .experiment-layout .experiment-gallery {
+  flex-basis: min(100%, var(--gallery-width));
+}
+
+.experiment-memory-two .single-portrait-active {
+  --gallery-width: calc(var(--carousel-height) * 0.72);
+}
+
+.experiment-memory-two .experiment-layout:has(.experiment-entry:not([hidden]) > .experiment-comparison:not(.experiment-comparison-landscape)) {
+  --gallery-width: calc(var(--carousel-height) * 1.4 + var(--comparison-gap));
+}
+
+.experiment-memory-two .experiment-layout:has(.experiment-entry:not([hidden]) > .experiment-comparison-landscape) {
+  --gallery-width: min(
+    calc(var(--carousel-height) * 3.044 + var(--comparison-gap)),
+    calc(var(--carousel-width) + var(--column-gap) + var(--text-preferred-width))
+  );
 }
 
 @media (max-width: 720px) {
@@ -157,6 +181,11 @@
   color: var(--muted);
   font-size: 14px;
   line-height: 1.7;
+}
+
+.experiment-memory-two .experiment-photo-note {
+  width: calc(100% - var(--photo-note-inset) * 2);
+  max-width: none;
 }
 
 .experiment-photo-note p {
