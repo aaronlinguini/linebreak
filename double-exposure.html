@@ -4,10 +4,11 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#050505">
-    <title>Ghost Images</title>
-    <meta property="og:title" content="Ghost Images">
-    <meta property="og:site_name" content="Ghost Images">
+    <title data-site-name></title>
+    <meta property="og:title" content="" data-site-name>
+    <meta property="og:site_name" content="" data-site-name>
     <link rel="stylesheet" href="styles.css">
+    <script src="site-header.js" defer></script>
     <script src="project-config.js" defer></script>
     <script src="drive-storage.js" defer></script>
     <script src="base-assets.js" defer></script>
@@ -18,20 +19,20 @@
     <a class="skip-link" href="#workspace">Skip to photograph</a>
 
     <header class="site-header">
-      <a href="index.html" class="site-title">Ghost Images</a>
+      <div data-site-header></div>
     </header>
 
     <main id="workspace" class="workspace" aria-busy="false">
       <div id="exposure-controls" class="exposure-controls">
-        <p id="upload-instructions" class="upload-instructions">Use the buttons below to select a photo from your library or take a photo with your camera. The photo that you provide will be combined with another image to create a double exposure. You may choose whether you want your upload to be added to the library of base photos upon which new double exposures can be made.</p>
+        <p id="upload-instructions" class="upload-instructions">Use the <span id="picker-singular">button</span><span id="picker-plural" hidden>buttons</span> below to select a photo from your library<span id="camera-instructions" hidden> or take a photo with your camera</span>. The photo that you provide will be combined with another image to create a double exposure. You may choose whether you want your upload to be added to the library of base photos upon which new double exposures can be made.</p>
         <div class="exposure-buttons">
           <div id="source-actions" class="actions source-actions">
             <div class="file-picker">
               <input id="participant-input" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="archive-note" disabled>
               <label id="upload-label" class="upload-label" for="participant-input">Upload a photo</label>
             </div>
-            <span class="choice-separator">or</span>
-            <div class="file-picker">
+            <span id="camera-separator" class="choice-separator" hidden>or</span>
+            <div id="camera-picker" class="file-picker" hidden>
               <input id="participant-camera-input" class="file-input" type="file" accept="image/jpeg" capture="environment" aria-describedby="archive-note" disabled>
               <label id="camera-label" class="upload-label" for="participant-camera-input">Take a photo</label>
             </div>

@@ -6,6 +6,7 @@ const vm = require("node:vm");
 const { createHash } = require("node:crypto");
 const { spawnSync } = require("node:child_process");
 const { parse } = require("./vendor/es-module-lexer/lexer.cjs");
+const { renderSiteHeader, siteNameFromTemplate } = require("../site-header.js");
 
 const ORIGINAL_PUBLIC_FILES = Object.freeze([
   "index.html", "styles.css", "scripts.js", "project-config.js",
@@ -27,7 +28,9 @@ const HEIC_PUBLIC_FILES = Object.freeze([
 const PREBUILT_PUBLIC_FILES = Object.freeze([...STATIC_PUBLIC_FILES, ...HEIC_PUBLIC_FILES]);
 const MARKED_PUBLIC_FILES = Object.freeze([...PREBUILT_PUBLIC_FILES, ".nojekyll"]);
 const GALLERY_FILES = Object.freeze(["experiment-carousel.css", "experiment-carousel.js"]);
-const NON_HTML_PUBLIC_FILES = Object.freeze([...MARKED_PUBLIC_FILES.filter(name => !name.endsWith(".html")), ...GALLERY_FILES]);
+const HEADER_TEMPLATE = "includes/site-header.html";
+const HEADER_SCRIPT = "site-header.js";
+const NON_HTML_PUBLIC_FILES = Object.freeze([...MARKED_PUBLIC_FILES.filter(name => !name.endsWith(".html")), ...GALLERY_FILES, HEADER_SCRIPT]);
 function publicSourceFiles(root) {
   const pages = fs.readdirSync(root).filter(name => !name.startsWith(".") && /\.html$/i.test(name) && name !== "local-test.html").sort();
   if (!pages.includes("index.html")) throw new Error("The public website needs index.html.");
@@ -270,7 +273,13 @@ function validatePreviousOutput(destination) {
     throw new Error(`${OUTPUT_DIRECTORY} is missing its gallery catalogue; nothing was replaced.`);
   }
   // Complete earlier releases have neither carousel files nor a gallery catalogue.
-  const coreFiles = hasGallery ? [...NON_HTML_PUBLIC_FILES, ...pages] : entries.includes(".nojekyll") ? MARKED_PUBLIC_FILES
+  const expectsHeaderScript = hasGallery && pages.some(page => {
+    if (!fs.existsSync(path.join(destination, page))) return false;
+    const html = readRegularFile(destination, page, true).toString("utf8").replace(/<!--[\s\S]*?-->/g, "");
+    return /\bdata-site-header-rendered\b|<script\b[^>]*\bsrc=["']site-header\.js(?:[?"'])/i.test(html);
+  });
+  const galleryCoreFiles = NON_HTML_PUBLIC_FILES.filter(name => name !== HEADER_SCRIPT || expectsHeaderScript || entries.includes(HEADER_SCRIPT));
+  const coreFiles = hasGallery ? [...galleryCoreFiles, ...pages] : entries.includes(".nojekyll") ? MARKED_PUBLIC_FILES
     : entries.includes("heic-input.js") || entries.includes("vendor") ? PREBUILT_PUBLIC_FILES : STATIC_PUBLIC_FILES;
   const expectedFiles = new Set([...coreFiles, ...photos.map((photo) => photo.path),
     ...(hasGallery ? [GALLERY_CATALOGUE_FILE, ...gallery.map(photo => photo.path)] : [])]);
@@ -297,6 +306,38 @@ function validatePreviousOutput(destination) {
   for (const photo of gallery) validatePhoto(readRegularFile(destination, photo.path, true), photo);
 }
 
+function headerAttribute(attributes, name) {
+  const match = attributes.match(new RegExp(`\\b${name}(?=[\\s=>]|$)(?:\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+)))?`, "i"));
+  return match ? match[1] ?? match[2] ?? match[3] ?? "" : null;
+}
+
+function embedSiteHeader(source, page, template) {
+  const name = siteNameFromTemplate(template);
+  const attributeName = name.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  const html = source.replace(/<!--[\s\S]*?-->|<div\b([^>]*\bdata-site-header(?=[\s=>])[^>]*)>\s*<\/div>|<title\b([^>]*)>[\s\S]*?<\/title>|<meta\b([^>]*)>/gi,
+    (match, headerAttributes, titleAttributes, metaAttributes) => {
+      if (match.startsWith("<!--")) return match;
+      if (headerAttributes !== undefined) {
+        const header = renderSiteHeader(template, { page, showExperiments: headerAttribute(headerAttributes, "data-site-header") === "experiments" });
+        return `<div${headerAttributes} data-site-header-rendered>${header}</div>`;
+      }
+      if (titleAttributes !== undefined && headerAttribute(titleAttributes, "data-site-name") !== null) {
+        return `<title${titleAttributes}>${name}</title>`;
+      }
+      if (metaAttributes !== undefined && headerAttribute(metaAttributes, "data-site-name") !== null) {
+        const attribute = /\bcontent\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/i;
+        if (!attribute.test(metaAttributes)) throw new Error(`${page} needs a content attribute on its shared site-name metadata.`);
+        return `<meta${metaAttributes.replace(attribute, () => `content="${attributeName}"`)}>`;
+      }
+      return match;
+    });
+  const active = html.replace(/<!--[\s\S]*?-->/g, "");
+  if (/<div\b(?=[^>]*\bdata-site-header(?=[\s=>]))(?![^>]*\bdata-site-header-rendered\b)[^>]*>/i.test(active)) {
+    throw new Error(`${page}: the shared-header slot must be empty so the prepared page can include its complete header.`);
+  }
+  return html;
+}
+
 function preparePublicSite(root = path.resolve(__dirname, "..")) {
   root = path.resolve(root);
   const destination = path.join(root, OUTPUT_DIRECTORY);
@@ -317,6 +358,11 @@ function preparePublicSite(root = path.resolve(__dirname, "..")) {
   for (const [filename, bytes] of gallery.files) contents.set(filename, bytes);
   contents.set(GALLERY_CATALOGUE_FILE, Buffer.from(JSON.stringify({ version: 1, pages: sourceFiles.filter(name => name.endsWith(".html")), photos: gallery.photos }, null, 2) + "\n"));
   const publicFiles = new Set(contents.keys());
+  const template = readRegularFile(root, HEADER_TEMPLATE).toString("utf8");
+  validateHtml(template, HEADER_TEMPLATE, publicFiles);
+  for (const [name, bytes] of contents) {
+    if (name.endsWith(".html")) contents.set(name, Buffer.from(embedSiteHeader(bytes.toString("utf8"), name, template)));
+  }
   for (const [name, bytes] of contents) {
     if (name.endsWith(".html")) validateHtml(bytes.toString("utf8"), name, publicFiles);
   }

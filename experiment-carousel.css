@@ -1,5 +1,7 @@
-.experiment-one {
-  /* Space above Ghost Images, then between the links and headings. */
+.experiment-one,
+.experiment-memory,
+.experiment-three {
+  /* Space above the site name, then between the links and headings. */
   --header-top-space: 28px;
   --site-title-links-gap: 12px;
   --links-title-gap: 18px;
@@ -25,17 +27,33 @@
 }
 
 .experiment-one .site-header,
-.experiment-one .experiment-layout {
+.experiment-one .experiment-layout,
+.experiment-memory .site-header,
+.experiment-memory .experiment-layout,
+.experiment-three .site-header,
+.experiment-three .experiment-layout {
   width: var(--experiment-width);
 }
 
-.experiment-one .site-header {
+.experiment-one .site-header,
+.experiment-memory .site-header,
+.experiment-three .site-header {
   padding-block: var(--header-top-space) 0;
 }
 
-.experiment-one .page-nav {
+.experiment-one .page-nav,
+.experiment-memory .page-nav,
+.experiment-three .page-nav {
   margin-top: var(--site-title-links-gap);
   margin-bottom: var(--links-title-gap);
+}
+
+.experiment-memory-one {
+  --carousel-width: calc(var(--carousel-height) * 0.70);
+}
+
+.experiment-memory-two {
+  --comparison-gap: 16px;
 }
 
 .experiment-layout {
@@ -58,8 +76,14 @@
   margin: 0;
 }
 
+.experiment-memory-two .comparison-active .experiment-gallery {
+  flex-basis: 100%;
+}
+
 @media (max-width: 720px) {
-  .experiment-one {
+  .experiment-one,
+  .experiment-memory,
+  .experiment-three {
     --page-gutter: 20px;
   }
 }
@@ -79,6 +103,68 @@
   height: 100%;
   min-height: 0;
   object-fit: contain;
+}
+
+.experiment-memory-two .experiment-comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  gap: var(--comparison-gap);
+  max-width: calc(var(--carousel-height) * 1.4 + var(--comparison-gap));
+  margin-inline: auto;
+}
+
+.experiment-memory-two .experiment-comparison-landscape {
+  max-width: calc(var(--carousel-height) * 3.044 + var(--comparison-gap));
+}
+
+.experiment-memory-two .experiment-classroom-group {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+
+.experiment-memory-two .experiment-classroom-group .experiment-comparison {
+  width: 100%;
+}
+
+.experiment-memory-two .experiment-comparison figure {
+  display: block;
+  height: auto;
+}
+
+.experiment-memory-two .experiment-comparison img {
+  height: auto;
+  max-height: var(--carousel-height);
+}
+
+.experiment-memory-two .experiment-classroom-group .experiment-classroom-single {
+  display: block;
+  width: 100%;
+  max-width: var(--carousel-width);
+  height: auto;
+  margin-inline: auto;
+}
+
+.experiment-memory-two .experiment-classroom-single img {
+  height: auto;
+  max-height: var(--carousel-height);
+}
+
+.experiment-photo-note {
+  max-width: 75ch;
+  margin: 24px auto 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.experiment-photo-note p {
+  margin: 0 0 16px;
+}
+
+.experiment-photo-note p:last-child {
+  margin-bottom: 0;
 }
 
 .carousel-controls {

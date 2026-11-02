@@ -14,6 +14,8 @@ const catalogueFile = "assets/base-photos.json";
 const galleryCatalogueFile = "assets/gallery-photos.json";
 const galleryFiles = ["experiment-carousel.css", "experiment-carousel.js"];
 const memoryPartFiles = ["experiment-2-part-1.html", "experiment-2-part-2.html"];
+const headerTemplate = "includes/site-header.html";
+const headerScript = "site-header.js";
 const heicFiles = ["heic-input.js", "vendor/heic-to/heic-to.js", "vendor/heic-to/LICENSE",
   "vendor/heic-to/NOTICE.txt", "vendor/heic-to/SOURCES.tar.gz"];
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1]);
@@ -65,7 +67,7 @@ function restoreSingleMemoryPage(destination) {
 }
 
 function removeGalleryOutput(destination) {
-  for (const name of [...galleryFiles, galleryCatalogueFile, "images"]) {
+  for (const name of [...galleryFiles, galleryCatalogueFile, headerScript, "images"]) {
     fs.rmSync(path.join(destination, name), { recursive: true, force: true });
   }
   restoreSingleMemoryPage(destination);
@@ -73,7 +75,7 @@ function removeGalleryOutput(destination) {
 
 function oldExpectedFiles(root) {
   return [...expectedFiles(root).filter(name => !galleryFiles.includes(name) && !memoryPartFiles.includes(name)
-    && name !== galleryCatalogueFile && !name.startsWith("images/")), "experiment-2.html"].sort();
+    && name !== galleryCatalogueFile && name !== headerScript && !name.startsWith("images/")), "experiment-2.html"].sort();
 }
 
 function fixture(t) {
@@ -84,13 +86,15 @@ function fixture(t) {
     fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true });
     fs.copyFileSync(path.join(project, name), path.join(root, name));
   }
+  fs.mkdirSync(path.join(root, "includes"));
+  fs.copyFileSync(path.join(project, headerTemplate), path.join(root, headerTemplate));
   // Keep the current page's real paths, but use small synthetic photo bytes.
   for (const name of PUBLIC_FILES.filter(name => name.endsWith(".html"))) {
     const html = fs.readFileSync(path.join(root, name), "utf8").replace(/<!--[\s\S]*?-->/g, "");
     for (const [, reference] of html.matchAll(/\bsrc="(images\/[^"?#]+)"/g)) {
       const filename = path.join(root, decodeURIComponent(reference));
       fs.mkdirSync(path.dirname(filename), { recursive: true });
-      fs.writeFileSync(filename, jpeg);
+      fs.writeFileSync(filename, path.extname(filename).toLowerCase() === ".png" ? png : jpeg);
     }
   }
   writePhotos(root);
@@ -144,9 +148,18 @@ function assertContentLabels(files) {
   }
 }
 
+function withoutGeneratedHeader(bytes) {
+  return bytes.toString("utf8").replace(/\?v=[a-z0-9-]+/gi, "")
+    .replace(/<div\b([^>]*\bdata-site-header(?=[\s=>])[^>]*)>[\s\S]*?<\/div>/gi,
+      (_, attributes) => `<div${attributes.replace(/\sdata-site-header-rendered\b/g, "")}></div>`)
+    .replace(/<title\b([^>]*\bdata-site-name\b[^>]*)>[\s\S]*?<\/title>/gi, "<title$1></title>")
+    .replace(/<meta\b([^>]*\bdata-site-name\b[^>]*)>/gi,
+      (_, attributes) => `<meta${attributes.replace(/\bcontent\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/i, 'content=""')}>`);
+}
+
 test("publication contains site code, selected artist photos and referenced gallery images while excluding private support files", (t) => {
   assert.deepEqual([...PUBLIC_FILES].sort(), [
-    "styles.css", "scripts.js", "project-config.js",
+    "styles.css", "scripts.js", "project-config.js", headerScript,
     "archive-workflow.js", "drive-storage.js", "drive-bridge.js", "artist-import.js", "artist-import.css",
     ...fs.readdirSync(project).filter(name => !name.startsWith(".") && /\.html$/i.test(name) && name !== "local-test.html"),
     "base-assets.js", catalogueFile,
@@ -175,8 +188,7 @@ test("publication contains site code, selected artist photos and referenced gall
     if (name === galleryCatalogueFile) continue;
     const source = fs.readFileSync(path.join(root, name));
     if (name.endsWith(".html") || name === "scripts.js" || name === "heic-input.js") {
-      const withoutLabels = bytes => bytes.toString("utf8").replace(/\?v=[a-z0-9-]+/gi, "");
-      assert.equal(withoutLabels(actual), withoutLabels(source), `${name}: only cache labels may change`);
+      assert.equal(withoutGeneratedHeader(actual), withoutGeneratedHeader(source), `${name}: only shared headers, metadata, and cache labels may change`);
     } else assert.deepEqual(actual, source, `${name}: contents must be copied unchanged`);
   }
   assert.equal(fs.existsSync(path.join(destination, "images", "experiment-1", "additional-gallery.jpg")), false);
@@ -186,7 +198,7 @@ test("publication contains site code, selected artist photos and referenced gall
 
 test("content labels are deterministic and preparation never edits the source files", (t) => {
   const root = fixture(t);
-  const originals = Object.fromEntries(PUBLIC_FILES.map(name => [name, fs.readFileSync(path.join(root, name))]));
+  const originals = Object.fromEntries([...PUBLIC_FILES, headerTemplate].map(name => [name, fs.readFileSync(path.join(root, name))]));
   preparePublicSite(root);
   const first = snapshot(root);
   assertContentLabels(first);
@@ -195,6 +207,114 @@ test("content labels are deterministic and preparation never edits the source fi
   for (const [name, bytes] of Object.entries(originals)) {
     assert.deepEqual(fs.readFileSync(path.join(root, name)), bytes, `${name}: source must remain editable and unchanged`);
   }
+});
+
+test("editing the one shared header updates static page headers, current navigation, and marked metadata", (t) => {
+  const root = fixture(t);
+  const filename = path.join(root, headerTemplate);
+  const original = fs.readFileSync(filename, "utf8");
+  const name = 'Memory &amp; "Light" $&';
+  fs.writeFileSync(filename, original
+    .replace(/(\bdata-site-name[^>]*>)[^<]*(<\/a>)/, (_, before, after) => `${before}${name}${after}`)
+    .replace('class="site-divider"', 'class="site-divider" data-divider-note="changed"'));
+  const destination = preparePublicSite(root);
+  const files = snapshot(root);
+  assert.equal(fs.existsSync(path.join(destination, headerTemplate)), false, "the editable template stays out of the static publication");
+  for (const page of PUBLIC_FILES.filter(name => name.endsWith(".html"))) {
+    const source = fs.readFileSync(path.join(root, page), "utf8");
+    const html = files[page].toString("utf8");
+    assert.match(html, /data-site-header-rendered/, `${page}: header must exist before JavaScript runs`);
+    assert.ok(html.includes(`data-site-name>${name}</a>`), `${page}: shared brand name`);
+    assert.match(html, /class="site-divider" data-divider-note="changed"/, `${page}: shared divider markup`);
+    const main = source.match(/<main\b[\s\S]*?<\/main>/)?.[0];
+    if (main) assert.ok(html.includes(main), `${page}: page content must remain unchanged`);
+    const navigation = html.match(/<nav\b[^>]*\bdata-experiment-navigation\b[^>]*>[\s\S]*?<\/nav>/)?.[0];
+    if (source.includes('data-site-header="experiments"')) {
+      assert.ok(navigation, `${page}: experiment links`);
+      const current = [...navigation.matchAll(/<a\b[^>]*\baria-current="page"[^>]*>/g)];
+      assert.equal(current.length, 1, `${page}: exactly one current-page link`);
+      assert.ok(current[0][0].includes(`href="${page}"`));
+    } else assert.equal(navigation, undefined, `${page}: keep the home/tool navigation behavior`);
+    if (source.includes("<title data-site-name>")) assert.ok(html.includes(`<title data-site-name>${name}</title>`));
+    if (source.includes('property="og:title"')) {
+      assert.ok(html.includes('property="og:title" content="Memory &amp; &quot;Light&quot; $&" data-site-name'));
+      assert.ok(html.includes('property="og:site_name" content="Memory &amp; &quot;Light&quot; $&" data-site-name'));
+    }
+    const heading = source.match(/<h1\b[^>]*>[\s\S]*?<\/h1>/)?.[0];
+    if (heading) assert.ok(html.includes(heading), `${page}: page heading stays intact`);
+  }
+  assertContentLabels(files);
+});
+
+test("literal markup in the shared title remains escaped text in headers and metadata", (t) => {
+  const root = fixture(t);
+  const name = "Ghost Image &lt;br&gt; Apparitions";
+  const filename = path.join(root, headerTemplate);
+  const template = fs.readFileSync(filename, "utf8");
+  fs.writeFileSync(filename, template.replace(/(\bdata-site-name[^>]*>)[^<]*(<\/a>)/,
+    (_, before, after) => `${before}${name}${after}`));
+  preparePublicSite(root);
+  const files = snapshot(root);
+  for (const page of PUBLIC_FILES.filter(name => name.endsWith(".html"))) {
+    const source = fs.readFileSync(path.join(root, page), "utf8");
+    const html = files[page].toString("utf8");
+    const header = html.match(/<div\b[^>]*\bdata-site-header-rendered\b[^>]*>[\s\S]*?<\/div>/)?.[0];
+    assert.ok(header?.includes(`data-site-name>${name}</a>`), `${page}: visible literal tag`);
+    assert.doesNotMatch(header, /<br\b/i, `${page}: the title must not create a line-break element`);
+    assert.doesNotMatch(header, /&amp;(?:lt|gt);/, `${page}: title references must not be double escaped`);
+    if (source.includes("<title data-site-name>")) {
+      assert.ok(html.includes(`<title data-site-name>${name}</title>`), `${page}: literal browser title`);
+    }
+    if (source.includes('property="og:title"')) {
+      assert.ok(html.includes(`property="og:title" content="${name}" data-site-name`));
+      assert.ok(html.includes(`property="og:site_name" content="${name}" data-site-name`));
+    }
+  }
+});
+
+test("unsafe shared header changes fail before replacing the prior publication", (t) => {
+  const root = fixture(t);
+  preparePublicSite(root);
+  const previous = snapshot(root);
+  const filename = path.join(root, headerTemplate);
+  const source = fs.readFileSync(filename, "utf8");
+  for (const addition of ['<script>alert(1)</script>', '<p style="color:red">text</p>', '<a href="README.md">private notes</a>']) {
+    fs.writeFileSync(filename, source + addition);
+    assert.throws(() => preparePublicSite(root), /external files|unpublished file/);
+    assert.deepEqual(snapshot(root), previous);
+  }
+  fs.writeFileSync(filename, source.replace(/\bdata-site-name\b/, "data-other-name"));
+  assert.throws(() => preparePublicSite(root), /shared header.*site name/);
+  assert.deepEqual(snapshot(root), previous);
+});
+
+test("nonempty shared header slots cannot leave a prepared page dependent on its private template", (t) => {
+  const root = fixture(t);
+  preparePublicSite(root);
+  const previous = snapshot(root);
+  const filename = path.join(root, memoryPartFiles[0]);
+  const source = fs.readFileSync(filename, "utf8");
+  fs.writeFileSync(filename, source.replace('<div data-site-header="experiments"></div>', '<div data-site-header="experiments">stale header</div>'));
+  assert.throws(() => preparePublicSite(root), /shared-header slot must be empty/);
+  assert.deepEqual(snapshot(root), previous);
+});
+
+test("a complete earlier gallery without shared headers upgrades while missing current header scripts are rejected", (t) => {
+  const root = fixture(t);
+  const destination = preparePublicSite(root);
+  fs.unlinkSync(path.join(destination, headerScript));
+  const incomplete = snapshot(root);
+  assert.throws(() => preparePublicSite(root), /missing required files|unexpected files/);
+  assert.deepEqual(snapshot(root), incomplete);
+  for (const page of PUBLIC_FILES.filter(name => name.endsWith(".html"))) {
+    const filename = path.join(destination, page);
+    const html = fs.readFileSync(filename, "utf8")
+      .replace(/\sdata-site-header-rendered\b/g, "")
+      .replace(/<script\b[^>]*\bsrc="site-header\.js[^"\s]*"[^>]*><\/script>\s*/g, "");
+    fs.writeFileSync(filename, html);
+  }
+  preparePublicSite(root);
+  assert.deepEqual(Object.keys(snapshot(root)).sort(), expectedFiles(root));
 });
 
 test("the empty static-site marker preserves underscore photo names without publishing other dotfiles", (t) => {

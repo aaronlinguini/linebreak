@@ -9,9 +9,13 @@ The dedicated account **aaron.double.exposure.project@gmail.com** holds the priv
 | Property | Current value |
 | --- | --- |
 | `PROJECT_OWNER_EMAIL` | `aaron.double.exposure.project@gmail.com` |
-| `SITE_URL` | `https://aaronlinguini.github.io/ghost-images/` |
+| `SITE_URL` | `https://aaronlinguini.github.io/apparitions/` |
 | `UPLOADS_PAUSED` | `false` — explicitly approved and saved for live testing |
 | `ALLOWED_ORIGINS` | `http://127.0.0.1:5500,http://localhost:5500` |
+
+The website and repository were renamed November 1 to [apparitions](https://aaronlinguini.github.io/apparitions/) and [aaronlinguini/apparitions](https://github.com/aaronlinguini/apparitions). The existing Google project's `SITE_URL` was saved and verified after reloading; every other script property stayed unchanged. No backend deployment, account, permission, scope, folder ID or renderer changed. Earlier release records below retain their historical addresses.
+
+The tool opened at its new public path and completed Google connection after **Retry**. Its first handshake timed out; this check does not establish why, or verify a new upload/archive receipt.
 
 **Google Version 8 deployed October 31 at 12:42 PM.** Updated `Code.gs` matched local bytes after reloading the editor; the generated catalog and bridge are unchanged. The [Google web app](https://script.google.com/macros/s/AKfycbyzIdwIui57NUjmTMm_XyNMvWNHZixo4UyMedoRtz7Qod4COqvjAbcwGDQounUvsCPv/exec) keeps the same `/exec` URL, dedicated account, **Anyone** access, OAuth scopes, properties, and archive IDs. The current local revision passes **414/414** checks. `UPLOADS_PAUSED=false` remains explicitly approved for testing. This does not authorize frontend publication.
 

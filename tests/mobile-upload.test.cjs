@@ -21,12 +21,13 @@ const deferred = () => {
 };
 const developingMessage = toolHtml.match(/<p\b[^>]*id="busy-indicator"[^>]*>([^<]+)<\/p>/)[1].trim();
 
-function harness({ configured = true, canRePair = true, forceBlackAndWhite = false, assets,
+function harness({ configured = true, canRePair = true, forceBlackAndWhite = false, supportsCapture = false, assets,
   connect = async () => ({ totalEligible: 2 }) } = {}) {
   const ids = ["workspace", "canvas", "result-empty", "source-actions", "result-actions", "repeat-actions", "allow-reuse",
     "new-pairing-button", "reset-button", "participant-input", "participant-camera-input",
     "upload-label", "camera-label", "download-button", "rotate-button", "retry-button", "status", "error",
-    "busy-indicator", "exposure-controls", "upload-instructions", "output-options", "visitor-monochrome", "visitor-colour"];
+    "busy-indicator", "exposure-controls", "upload-instructions", "output-options", "visitor-monochrome", "visitor-colour",
+    "camera-picker", "camera-separator", "camera-instructions", "picker-singular", "picker-plural"];
   const handlers = new Map();
   const windowHandlers = new Map();
   const elements = new Map(ids.map((id) => [id, {
@@ -38,6 +39,7 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
   }]));
   const calls = { start: [], connect: 0, rePair: 0, rePairRequests: [], retry: 0, changeMonochrome: [], modeRequests: [],
     load: [], develop: [], assetLoads: [], rotate: 0, downloads: [], revoked: [], draws: [] };
+  if (supportsCapture) elements.get("participant-camera-input").capture = "environment";
   elements.get("busy-indicator").textContent = developingMessage;
   elements.get("new-pairing-button").textContent = toolHtml.match(/<button\b[^>]*id="new-pairing-button"[^>]*>([^<]+)<\/button>/)[1].trim();
   elements.get("canvas").getContext = () => ({ drawImage(canvas) { calls.draws.push(canvas); } });
@@ -266,7 +268,9 @@ test("public photo choices are distinct and HTML has no inline code", () => {
   const html = fs.readFileSync(path.join(root, "double-exposure.html"), "utf8");
   assert.match(html, /id="participant-input"[^>]*>/);
   assert.match(html, /id="participant-camera-input"[^>]*capture="environment"/);
-  assert.match(html, /class="choice-separator">or<\/span>/);
+  assert.match(html, /id="camera-separator"[^>]*\bhidden>or<\/span>/);
+  assert.match(html, /id="camera-picker"[^>]*\bhidden>/);
+  assert.match(html, /id="camera-instructions"[^>]*\bhidden>/);
   assert.match(html, /id="allow-reuse" type="checkbox"/);
   for (const [id, label] of [["visitor-monochrome", "Black and white"], ["visitor-colour", "Original colour"]]) {
     const radio = html.match(new RegExp(`<input\\b[^>]*id="${id}"[^>]*>`))?.[0];
@@ -283,6 +287,23 @@ test("public photo choices are distinct and HTML has no inline code", () => {
   for (const [, attrs, body] of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
     assert.match(attrs, /\bsrc="/);
     assert.equal(body.trim(), "");
+  }
+});
+
+test("native camera controls and instructions appear only when the browser supports capture", async () => {
+  for (const supportsCapture of [false, true]) {
+    const h = harness({ supportsCapture });
+    await flush();
+    for (const id of ["camera-picker", "camera-separator", "camera-instructions", "picker-plural"]) {
+      assert.equal(h.elements.get(id).hidden, !supportsCapture, id);
+    }
+    assert.equal(h.elements.get("picker-singular").hidden, supportsCapture);
+    assert.equal(h.elements.get("participant-input").disabled, false);
+    assert.equal(h.elements.get("allow-reuse").checked, false);
+    await h.select("participant-input", makeFile());
+    h.click("reset-button");
+    assert.equal(h.elements.get("camera-picker").hidden, !supportsCapture);
+    assert.equal(h.elements.get("camera-separator").hidden, !supportsCapture);
   }
 });
 
@@ -326,15 +347,19 @@ test("photo choices and a shared action toolbar precede the image, with colour c
 test("Home links resolve and static pages do not start the archive", () => {
   const home = fs.readFileSync(path.join(root, "index.html"), "utf8");
   const tool = fs.readFileSync(path.join(root, "double-exposure.html"), "utf8");
+  const header = fs.readFileSync(path.join(root, "includes", "site-header.html"), "utf8");
   assert.match(home, /<a\b[^>]*href="double-exposure\.html"[^>]*>/i);
-  assert.match(tool, /<a\b[^>]*href="index\.html"[^>]*>\s*[^<\s]/i);
-  for (const [, reference] of home.replace(/<!--[\s\S]*?-->/g, "").matchAll(/<a\b[^>]*href="([^"#?]+\.html)(?:[?#][^"]*)?"/gi)) {
+  assert.match(header, /<a\b[^>]*href="index\.html"[^>]*>\s*[^<\s]/i);
+  assert.match(tool, /<div\b[^>]*\bdata-site-header(?:\s|=|>)/i);
+  assert.match(tool, /<script\b[^>]*src="site-header\.js"[^>]*defer/i);
+  for (const [, reference] of (home + header).replace(/<!--[\s\S]*?-->/g, "").matchAll(/<a\b[^>]*href="([^"#?]+\.html)(?:[?#][^"]*)?"/gi)) {
     assert.ok(fs.existsSync(path.join(root, reference)), `Home link resolves: ${reference}`);
   }
   const pages = [home];
   for (const filename of fs.readdirSync(root).filter((name) => name.endsWith(".html") && !["index.html", "double-exposure.html", "local-test.html"].includes(name))) {
     const experiment = fs.readFileSync(path.join(root, filename), "utf8");
-    assert.match(experiment, /<a\b[^>]*href="index\.html"[^>]*>\s*[^<\s]/i);
+    assert.match(experiment, /<div\b[^>]*\bdata-site-header(?:\s|=|>)/i);
+    assert.match(experiment, /<script\b[^>]*src="site-header\.js"[^>]*defer/i);
     pages.push(experiment);
   }
   for (const page of pages) {
@@ -441,7 +466,7 @@ test("consent can be chosen before either picker, and cancelling the picker does
 
 test("library and camera selection submit once and show the developed image while its archive finishes", async () => {
   for (const id of ["participant-input", "participant-camera-input"]) {
-    const h = harness();
+    const h = harness({ supportsCapture: id === "participant-camera-input" });
     await flush();
     const saving = deferred();
     h.blockStart(saving.promise);

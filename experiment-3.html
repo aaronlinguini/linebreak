@@ -4,36 +4,87 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#050505">
-    <title>Experiment 3</title>
+    <title>Experiment 3 - Dis/appearance</title>
     <link rel="stylesheet" href="styles.css">
+    <script src="site-header.js" defer></script>
+    <!-- Remove the next two references to return to the scrolling layout. -->
+    <link rel="stylesheet" href="experiment-carousel.css">
+    <script src="experiment-carousel.js" defer></script>
   </head>
-  <body>
+  <body class="experiment-three">
     <header class="site-header">
-      <a href="index.html" class="site-title">Ghost Images</a>
-
-      <nav class="page-nav" aria-label="Experiments">
-        <a href="experiment-1.html">Experiment 1</a>
-        <a href="experiment-2-part-1.html">Experiment 2</a>
-        <a href="experiment-3.html" aria-current="page">Experiment 3</a>
-      </nav>
+      <div data-site-header="experiments"></div>
 
       <h1>Experiment 3</h1>
     </header>
 
-    <main class="workspace experiment-page">
-      <div class="experiment-entries">
-        <!-- One section per photo/reflection pair. -->
-        <!--
-        <section class="experiment-entry">
-          <figure>
-            <img src="images/experiment-3/photo-1.jpg" alt="Description of the photograph" loading="lazy">
-          </figure>
-          <div class="experiment-reflection">
-            <p></p>
-          </div>
-        </section>
-        -->
+    <main class="workspace experiment-page experiment-layout">
+      <div class="experiment-gallery" data-carousel aria-label="Experiment 3 photographs">
+        <div class="experiment-entries" id="experiment-photos">
+          <section class="experiment-entry">
+            <figure>
+              <img src="images/experiment-3/web/please%20leave%20%3C3.png" alt="Skeleton model overlapping signs reading Please Leave">
+            </figure>
+          </section>
+          <section class="experiment-entry">
+            <figure>
+              <img src="images/experiment-3/web/ghost%20of%20me%20painting%20a%20ghost%20of%20me%204.png" alt="Overlapping views of a person painting at an easel" loading="lazy">
+            </figure>
+          </section>
+          <section class="experiment-entry">
+            <figure>
+              <img src="images/experiment-3/web/ghost%20on%20the%20steps.png" alt="Overlapping views of outdoor stairs and railings" loading="lazy">
+            </figure>
+          </section>
+          <section class="experiment-entry">
+            <figure>
+              <img src="images/experiment-3/me-in-mirror-please-leave.jpg" alt="Camera held in front of a face, overlapping Please Leave signs" loading="lazy">
+            </figure>
+          </section>
+          <section class="experiment-entry">
+            <figure>
+              <img src="images/experiment-3/web/skull%20face.png" alt="A skull overlapping a person’s face beside a skeleton model" loading="lazy">
+            </figure>
+          </section>
+          <section class="experiment-entry">
+            <figure>
+              <img src="images/experiment-3/web/tree%20hallway.png" alt="Trees layered across an indoor hallway and bright window" loading="lazy">
+            </figure>
+          </section>
+          <section class="experiment-entry">
+            <figure>
+              <img src="images/experiment-3/web/outside.png" alt="Trees and a building exterior layered together" loading="lazy">
+            </figure>
+          </section>
+          <section class="experiment-entry">
+            <figure>
+              <img src="images/experiment-3/web/%20companion.png" alt="Cat on patterned fabric, with another view of the room layered over it" loading="lazy">
+            </figure>
+          </section>
+          <section class="experiment-entry">
+            <figure>
+              <img src="images/experiment-3/web/ghost%20me.png" alt="Faint portrait overlapping a skeleton model and room interior" loading="lazy">
+            </figure>
+          </section>
+          <section class="experiment-entry">
+            <figure>
+              <img src="images/experiment-3/skull%20film%20burn.jpeg" alt="Skull overlapping a faint face and room interior" loading="lazy">
+            </figure>
+          </section>
+        </div>
+        <div class="carousel-controls" hidden>
+          <button type="button" data-previous aria-controls="experiment-photos">Previous</button>
+          <span class="carousel-counter" aria-live="polite" aria-atomic="true"></span>
+          <button type="button" data-next aria-controls="experiment-photos">Next</button>
+        </div>
       </div>
+
+      <section class="experiment-reflection experiment-introduction" aria-labelledby="disappearance-heading">
+        <h2 id="disappearance-heading">Dis/appearance</h2>
+        <p>I made these double and multiple exposures on black and white film, without Photoshop or editing. I wanted to get the results straight from my camera, directly in the film, by physically placing/displacing myself from the scene or moving from one thing to the other—bringing things together by going to them, or like… taking them to each other. Seeing what sort of dis/appears from the work.</p>
+        <p>I feel like there is so much more that I can do and say by layering the photos… something that neither image alone could let me get at, but that comes from what happens when you bring things together.</p>
+        <p>I don’t necessarily have to know ahead of time what the photo might become. I still get to sort of discover what it will be through the process of making it, of exploring, of experimenting.</p>
+      </section>
     </main>
   </body>
 </html>

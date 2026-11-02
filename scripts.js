@@ -336,9 +336,18 @@ function initializeExposureStudio() {
     resultActions: byId("result-actions"), allowReuse: byId("allow-reuse"),
     newPairing: byId("new-pairing-button"), reset: byId("reset-button"),
     participantInput: byId("participant-input"), cameraInput: byId("participant-camera-input"),
+    cameraPicker: byId("camera-picker"), cameraSeparator: byId("camera-separator"),
+    cameraInstructions: byId("camera-instructions"), pickerSingular: byId("picker-singular"),
+    pickerPlural: byId("picker-plural"),
     download: byId("download-button"), rotate: byId("rotate-button"), retry: byId("retry-button"),
     status: byId("status"), error: byId("error"), busy: byId("busy-indicator")
   };
+  const supportsCapture = "capture" in ui.cameraInput;
+  ui.cameraPicker.hidden = !supportsCapture;
+  ui.cameraSeparator.hidden = !supportsCapture;
+  ui.cameraInstructions.hidden = !supportsCapture;
+  ui.pickerSingular.hidden = supportsCapture;
+  ui.pickerPlural.hidden = !supportsCapture;
   const developingMessage = ui.busy.textContent;
   const newPairingLabel = ui.newPairing.textContent;
   const state = { working: false, connecting: false, ready: false, hasResult: false, participant: null,

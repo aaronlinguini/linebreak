@@ -6,28 +6,34 @@ if (gallery) {
   const counter = gallery.querySelector('.carousel-counter');
   let current = 0;
 
-  function showSlide(index) {
+  function showSlide(index, reveal = false) {
     current = (index + slides.length) % slides.length;
     slides.forEach((slide, position) => {
       slide.hidden = position !== current;
     });
+    gallery.closest('.experiment-layout')?.classList.toggle(
+      'comparison-active', Boolean(slides[current].querySelector('.experiment-comparison'))
+    );
     counter.textContent = `${current + 1} / ${slides.length}`;
+    if (reveal && gallery.closest('.experiment-memory-two') && gallery.getBoundingClientRect().top < 0) {
+      gallery.scrollIntoView({ block: 'start' });
+    }
   }
 
   if (slides.length && controls && counter) {
-    gallery.querySelector('[data-previous]').addEventListener('click', () => showSlide(current - 1));
-    gallery.querySelector('[data-next]').addEventListener('click', () => showSlide(current + 1));
+    gallery.querySelector('[data-previous]').addEventListener('click', () => showSlide(current - 1, true));
+    gallery.querySelector('[data-next]').addEventListener('click', () => showSlide(current + 1, true));
     gallery.addEventListener('keydown', (event) => {
       if (event.target.closest('input, textarea, select, [contenteditable]')) return;
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
       event.preventDefault();
-      showSlide(current + (event.key === 'ArrowRight' ? 1 : -1));
+      showSlide(current + (event.key === 'ArrowRight' ? 1 : -1), true);
     });
 
     gallery.setAttribute('role', 'region');
     gallery.setAttribute('aria-roledescription', 'carousel');
-    gallery.setAttribute('aria-label', 'Experiment 1 photographs');
+    gallery.setAttribute('aria-label', gallery.getAttribute('aria-label') || 'Experiment 1 photographs');
     gallery.tabIndex = 0;
     slides.forEach((slide, position) => {
       slide.setAttribute('role', 'group');

@@ -1,21 +1,21 @@
-# Ghost Images
+# Ghost Image &lt;br&gt; Apparitions
 
 ## Publishing from VS Code
 
-Save the edited files, stage the intended changes, and choose **Commit & Push** on `main`. This folder is connected directly to [aaronlinguini/ghost-images](https://github.com/aaronlinguini/ghost-images). GitHub Actions runs the checks, prepares `.public-site`, and publishes the result to [the website](https://aaronlinguini.github.io/ghost-images/). Wait for the **Publish website** run to finish before checking the live update. A failed run keeps the previous deployed site.
+Save the edited files, stage the intended changes, and choose **Commit & Push** on `main`. This folder is connected directly to [aaronlinguini/apparitions](https://github.com/aaronlinguini/apparitions). GitHub Actions runs the checks, prepares `.public-site`, and publishes the result to [the website](https://aaronlinguini.github.io/apparitions/). Wait for the **Publish website** run to finish before checking the live update. A failed run keeps the previous deployed site.
 
 CSS and JavaScript cache labels are generated automatically during that build. Ordinary root HTML files are website pages; `local-test.html` stays a local comparison. Photos under `images/` are included in the website build when an active page references them. Keep editing source files rather than `.public-site`. Credentials, incoming uploads, temporary backups and generated copies remain ignored. Source code, tests, documentation and Git history are now in the normal GitHub repository; the deployed website contains only its prepared pages and assets.
 
 The separate selected-copy publication records below describe the earlier setup. Normal pushes from this folder replace that workflow.
 
 
-Live site: [Ghost Images](https://aaronlinguini.github.io/ghost-images/) · [Double-exposure tool](https://aaronlinguini.github.io/ghost-images/double-exposure.html) · [Public repository](https://github.com/aaronlinguini/ghost-images).
+Live site: [Ghost Image &lt;br&gt; Apparitions](https://aaronlinguini.github.io/apparitions/) · [Double-exposure tool](https://aaronlinguini.github.io/apparitions/double-exposure.html) · [Public repository](https://github.com/aaronlinguini/apparitions).
 
 Published November 1, 2026, with explicit approval: one `Publish website` commit (`4e4ecec`) containing 21 site/support files and 113 selected photos. Development history and this README were excluded. Pages deployment succeeded; 30 delivery checks passed, and the live tool completed Google bootstrap. A new live upload/save and physical iPhone HEIC/camera tests are still separate checks. Later local edits are not published automatically.
 
 Participants add a photograph to create a double exposure. The Google connection archives original uploads and finished JPEGs. The revised folder workflow places an explicitly opted-in original in `My_photos` only after its result is saved, with a stable name such as `participant_photo_1.jpg`. It moves that original instead of saving a second copy. Pending and nonconsenting originals remain privately archived in `participant_uploads`, and finished exposures stay in `Completed_double_exposures`.
 
-This tool is one part of a larger interactive artwork. The website is named Ghost Images; the artist leads the wording, photo selections, page counts, and layouts, with ordinary HTML/CSS kept easy to edit.
+This tool is one part of a larger interactive artwork. The website is named Ghost Image &lt;br&gt; Apparitions; the artist leads the wording, photo selections, page counts, and layouts, with ordinary HTML/CSS kept easy to edit.
 
 The local home page in `index.html` has **Experiments** on the left, linking to three editable experiment pages, and **Interactive** on the right, linking to `double-exposure.html`. These columns stack in the same order on smaller screens. The experiment pages contain no selected photographs or written reflections yet. The approved November 1 snapshot includes this home/tool structure and three empty experiment templates; later edits remain local until separately published.
 
@@ -72,6 +72,8 @@ python3 -m http.server 5500 --bind 127.0.0.1
 ## Files
 
 - `index.html`: home page with separate Experiments and Interactive link lists.
+- `includes/site-header.html`: the shared site name, divider, and experiment navigation.
+- `site-header.js`: loads the shared header in local previews and supplies the same rendering functions to the publication builder.
 - `experiment-1.html`: the Sketch photo gallery and reflection.
 - `experiment-2-part-1.html` and `experiment-2-part-2.html`: the separate Memory pages, with links to both parts at the top.
 - `experiment-3.html`: an editable photo/reflection page template with a commented-out entry example.
@@ -229,11 +231,21 @@ To undo a later committed change, ask to revert that change; Git can create an u
 
 ## Next stages
 
+### Editing the shared header
+
+Edit the name once in `includes/site-header.html` to change **Ghost Image &lt;br&gt; Apparitions** across the website. Write the visible tag as `&lt;br&gt;` so it appears as text. The same template contains the grey `<hr class="site-divider">` and the four experiment links. Change the line's colour, thickness, and spacing in the `.site-divider` rule in `styles.css`.
+
+Each website page loads `site-header.js` and contains a `<div data-site-header></div>` placeholder. Experiment pages use `<div data-site-header="experiments"></div>` to show the experiment navigation. Keep page-specific headings and content outside that placeholder.
+
+Save the template and refresh each Live Server page to see the changes. During publication preparation, the builder embeds the header into every page and updates the marked home/tool titles and tool link-preview metadata. Published pages therefore contain the complete header without JavaScript or a runtime template request. Saving a local file does not update the live website; use the normal manual **Commit & Push** workflow above when ready to publish.
+
+### Editing experiment content
+
 Open `index.html` with Live Server to work on the home page and follow its links to the experiment pages. To fill an experiment page:
 
 Memory has separate Part 1 and Part 2 links under its home-page label. Edit each part in its matching HTML file; both use photographs from `images/experiment-2/`. The local parts replace `experiment-2.html`; earlier publication records below retain that release's filename.
 
-1. Edit its `<title>` and `<h1>` to change the browser-tab title and visible heading. Change its link text in `index.html` and the experiment-page navigation separately; keep each `href` unchanged unless the file itself is renamed.
+1. Edit its `<title>` and `<h1>` to change the browser-tab title and visible heading. Change its home-page link text in `index.html` and its shared navigation text in `includes/site-header.html`; keep each `href` unchanged unless the file itself is renamed.
 2. Put photographs in `images/experiment-1/`, `images/experiment-2/`, or `images/experiment-3/` to match the corresponding page. These folders are ready locally.
 3. In `experiment-1.html`, remove the `<!--` and `-->` around the example `<section class="experiment-entry">` to display it. Set the image's `src` to the real filename and replace its `alt` description. Use the corresponding paths in the other two pages.
 4. Put your reflection in the empty `<p></p>`. Repeat the complete `experiment-entry` section for another photo/reflection pair. Keep layout changes in `styles.css`; no inline CSS or JavaScript is needed.

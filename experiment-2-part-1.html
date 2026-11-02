@@ -6,39 +6,55 @@
     <meta name="theme-color" content="#050505">
     <title>Experiment 2 — Memory — Part 1</title>
     <link rel="stylesheet" href="styles.css">
+    <script src="site-header.js" defer></script>
+    <!-- Remove the next two references to return to the scrolling layout. -->
+    <link rel="stylesheet" href="experiment-carousel.css">
+    <script src="experiment-carousel.js" defer></script>
   </head>
-  <body>
+  <body class="experiment-memory experiment-memory-one">
     <header class="site-header">
-      <a href="index.html" class="site-title">Ghost Images</a>
+      <div data-site-header="experiments"></div>
 
-      <nav class="page-nav" aria-label="Experiments">
-        <a href="experiment-1.html">Experiment 1</a>
-        <a href="experiment-2-part-1.html" aria-current="page">Experiment 2</a>
-        <a href="experiment-3.html">Experiment 3</a>
-      </nav>
-
-      <h1>Experiment 2 — Memory</h1>
-
-      <nav class="page-nav part-nav" aria-label="Memory parts">
-        <a href="experiment-2-part-1.html" aria-current="page">Part 1</a>
-        <a href="experiment-2-part-2.html">Part 2</a>
-      </nav>
+      <h1>Experiment 2 — Part 1</h1>
     </header>
 
-    <main class="workspace experiment-page">
-      <div class="experiment-entries">
-        <!-- One section per photo/reflection pair. -->
-        <!--
-        <section class="experiment-entry">
-          <figure>
-            <img src="images/experiment-2/photo-1.jpg" alt="Description of the photograph" loading="lazy">
-          </figure>
-          <div class="experiment-reflection">
-            <p></p>
-          </div>
-        </section>
-        -->
+    <main class="workspace experiment-page experiment-layout">
+      <div class="experiment-gallery" data-carousel aria-label="Experiment 2, Part 1: Roll 1 photographs">
+        <div class="experiment-entries" id="experiment-photos">
+          <section class="experiment-entry">
+            <figure>
+              <img src="images/experiment-2/roll1/excellence.jpg" alt="Brick storefront with signs and windows">
+            </figure>
+          </section>
+          <section class="experiment-entry">
+            <figure>
+              <img src="images/experiment-2/roll1/fronthousewindow.jpg" alt="Window in the brick wall of a house" loading="lazy">
+            </figure>
+          </section>
+          <section class="experiment-entry">
+            <figure>
+              <img src="images/experiment-2/roll1/laundry.jpg" alt="Laundry rack and chairs outside a brick house" loading="lazy">
+            </figure>
+          </section>
+          <section class="experiment-entry">
+            <figure>
+              <img src="images/experiment-2/roll1/streetpuddleclose2.jpg" alt="Closer view of a utility pole and wires reflected in a puddle" loading="lazy">
+            </figure>
+          </section>
+        </div>
+        <div class="carousel-controls" hidden>
+          <button type="button" data-previous aria-controls="experiment-photos">Previous</button>
+          <span class="carousel-counter" aria-live="polite" aria-atomic="true"></span>
+          <button type="button" data-next aria-controls="experiment-photos">Next</button>
+        </div>
       </div>
+
+      <section class="experiment-reflection experiment-introduction" aria-labelledby="memory-heading">
+        <h2 id="memory-heading">Before processing the photos</h2>
+        <p>I can’t remember where I started. Oh wait yes I do. I started with a whole roll of film, and then I moved on to a few pictures on the same roll each day. The interval I chose was not temporal. Or maybe it was. A different form of temporality.</p>
+        <p>I decided to take photos each day at the time of day where I felt inspired to. The time to take a photo would be a moment where something catches my attention. Where I see a cloud or a puddle or a sign or a light beam…</p>
+        <p>Photography… the practice itself leaves a trace—it is traces, light… assembled by traces, formed by them…</p>
+      </section>
     </main>
   </body>
 </html>
