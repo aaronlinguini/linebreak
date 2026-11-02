@@ -291,6 +291,143 @@ function assertResultControlsLocked(h, locked) {
   }
 }
 
+test("initial transient archive connections retry with capped backoff without defaulting the sharing answer", async () => {
+  let attempts = 0;
+  const h = harness({ connect: async () => {
+    if (++attempts < 6) throw Object.assign(new Error("The archive did not connect."), { code: "CONNECTION_TIMEOUT" });
+    return { totalEligible: 113 };
+  } });
+  await flush();
+  assert.equal(h.elements.get("allow-reuse").checked, false);
+  assert.equal(h.elements.get("decline-reuse").checked, false);
+  assert.equal(h.elements.get("participant-input").disabled, true);
+  for (const delay of [2000, 5000, 15000, 30000, 30000]) {
+    assert.deepEqual([...h.timers.values()].map(timer => timer.delay), [delay]);
+    assert.equal(h.elements.get("status").textContent, "Reconnecting automatically…");
+    assert.equal(h.elements.get("retry-button").hidden, true);
+    await h.advanceTime(delay);
+  }
+  assert.equal(h.calls.connect, 6);
+  assert.equal(h.calls.start.length, 0);
+  assert.equal(h.timers.size, 0);
+  assert.equal(h.elements.get("status").textContent, "");
+  assert.equal(h.elements.get("retry-button").hidden, true);
+  assert.equal(h.elements.get("allow-reuse").checked, false);
+  assert.equal(h.elements.get("decline-reuse").checked, false);
+});
+
+test("connection retries wait for photo preparation and then start the queued original with its frozen answer", async () => {
+  let attempts = 0;
+  const h = harness({ connect: async () => {
+    if (++attempts === 1) throw Object.assign(new Error("Connection timed out."), { code: "CONNECTION_TIMEOUT" });
+    return { totalEligible: 113 };
+  } });
+  await flush();
+  const preparing = deferred();
+  const saving = deferred();
+  h.blockPhoto(preparing.promise);
+  h.blockStart(saving.promise);
+  h.chooseSharing(false);
+  const file = makeFile();
+  const selecting = h.select("participant-input", file);
+  await h.advanceTime(2000);
+  assert.equal(h.calls.connect, 1, "a connection retry must not overlap active local preparation");
+  assert.equal(h.calls.start.length, 0);
+  assert.deepEqual([...h.timers.values()].map(timer => timer.delay), [5000]);
+  preparing.resolve();
+  await selecting;
+  assert.equal(h.elements.get("busy-indicator").hidden, false, "queued connection feedback continues through backoff");
+  assert.equal(h.elements.get("retry-button").hidden, true);
+  await h.advanceTime(5000);
+  await h.startReady;
+  assert.equal(h.calls.connect, 2);
+  assert.equal(h.calls.load.length, 1);
+  assert.equal(h.calls.start.length, 1);
+  assert.strictEqual(h.calls.start[0].file, file);
+  assert.equal(h.calls.start[0].choice.allowReuse, false);
+  assert.equal(h.elements.get("decline-reuse").checked, true);
+  assertResultControlsLocked(h, true);
+  saving.resolve();
+  await flush();
+  assertResultControlsLocked(h, false);
+});
+
+test("choosing a local preview during connection backoff hands retries to the same frozen archive operation", async () => {
+  let connections = 0;
+  let begins = 0;
+  const h = realArchiveHarness({ connect(base) {
+    if (++connections === 1) throw Object.assign(new Error("Connection timed out."), { code: "CONNECTION_TIMEOUT" });
+    return { totalEligible: 113, previewBase: base };
+  }, onBegin() {
+    if (++begins === 1) throw Object.assign(new Error("The archive is not connected."), { code: "NOT_CONNECTED" });
+  } });
+  await flush();
+  h.chooseSharing(true);
+  assert.equal(h.elements.get("participant-input").disabled, false, "local selection stays available after answering Yes");
+  const file = makeFile();
+  await h.select("participant-input", file);
+  const operation = h.workflow.operation;
+  assert.equal(h.elements.get("canvas").hidden, false);
+  assert.equal(h.calls.develop.length, 1);
+  assert.equal(h.calls.connect, 1);
+  assert.equal(h.timers.size, 1, "the save retry replaces the earlier connection retry timer");
+  assert.equal(h.elements.get("error").hidden, true);
+  await h.advanceTime(2000);
+  assert.equal(h.calls.connect, 2);
+  assert.equal(h.calls.retry, 1);
+  assert.strictEqual(h.workflow.operation, operation);
+  assert.ok(operation.receipt);
+  assert.equal(h.calls.start.length, 1);
+  assert.equal(h.calls.develop.length, 1);
+  assert.ok(h.calls.begin.every(call => call.originalFile === file && call.allowReuse === true &&
+    call.submissionId === operation.submissionId && call.preferredBaseSha256 === operation.previewBase.sha256));
+  assertResultControlsLocked(h, false);
+  await h.click("reset-button");
+  assert.equal(h.timers.size, 0, "a confirmed save clears the earlier connection failure");
+  assert.equal(h.elements.get("status").textContent, "");
+  await h.advanceTime(30000);
+  assert.equal(h.calls.connect, 2, "resetting a successfully recovered photo needs no extra reconnect");
+});
+
+test("permanent initial connection errors remain manual and a connection timer is cancelled on page exit", async () => {
+  const permanent = harness({ connect: async () => {
+    throw Object.assign(new Error("The archive address is invalid."), { code: "INVALID_ENDPOINT" });
+  } });
+  await flush();
+  assert.equal(permanent.timers.size, 0);
+  assert.equal(permanent.elements.get("retry-button").hidden, false);
+  await permanent.advanceTime(1000000);
+  assert.equal(permanent.calls.connect, 1);
+  permanent.setConnection(async () => ({ totalEligible: 113 }));
+  await permanent.click("retry-button");
+  assert.equal(permanent.calls.connect, 2);
+  assert.equal(permanent.elements.get("allow-reuse").checked, false);
+  assert.equal(permanent.elements.get("decline-reuse").checked, false);
+  let onlineAttempts = 0;
+  const online = harness({ connect: async () => {
+    if (++onlineAttempts === 1) throw Object.assign(new Error("Connection failed."), { code: "CONNECTION_FAILED" });
+    return { totalEligible: 113 };
+  } });
+  await flush();
+  online.chooseSharing(false);
+  online.dispatchWindow("online");
+  await flush();
+  assert.equal(online.calls.connect, 2, "an online event can reconnect immediately without a selected file");
+  assert.equal(online.timers.size, 0);
+  assert.equal(online.elements.get("decline-reuse").checked, true);
+  assert.equal(online.elements.get("participant-input").disabled, false);
+  const transient = harness({ connect: async () => {
+    throw Object.assign(new Error("Connection failed."), { code: "CONNECTION_FAILED" });
+  } });
+  await flush();
+  assert.equal(transient.timers.size, 1);
+  transient.dispatchWindow("pagehide", { persisted: false });
+  assert.equal(transient.timers.size, 0);
+  assert.equal(transient.calls.dispose, 1);
+  await transient.advanceTime(1000000);
+  assert.equal(transient.calls.connect, 1);
+});
+
 test("all result controls stay locked through original saving and cannot queue a pairing or discard the preview", async () => {
   const beginning = deferred();
   const completing = deferred();
@@ -1142,7 +1279,7 @@ test("connection setup stays in the status area until a selected photograph queu
 for (const unavailable of ["failure", "empty collection"]) {
   test(`an archive ${unavailable} preserves the queued selection and retries it once with frozen choices`, async () => {
     const h = harness({ connect: async () => {
-      if (unavailable === "failure") throw new Error("Connection failed.");
+      if (unavailable === "failure") throw Object.assign(new Error("Connection failed."), { code: "INVALID_ENDPOINT" });
       return { totalEligible: 0 };
     } });
     await flush();
@@ -1214,7 +1351,7 @@ for (const failConnection of [false, true]) {
     const selecting = h.select("participant-input", makeFile());
     assert.equal(h.elements.get("status").textContent, "");
     assert.equal(h.elements.get("busy-indicator").textContent, developingMessage);
-    if (failConnection) connection.reject(new Error("Connection failed."));
+    if (failConnection) connection.reject(Object.assign(new Error("Connection failed."), { code: "INVALID_ENDPOINT" }));
     else connection.resolve({ totalEligible: 2 });
     await flush();
     assert.equal(h.elements.get("status").textContent, "");

@@ -396,8 +396,11 @@ function initializeExposureStudio() {
   const { loadPhoto, releasePhoto, develop } = createExposureProcessor();
   const storage = new GoogleDriveStorage(EXPOSURE_CONFIG);
   let retryTimer = null;
+  let retryTarget = null;
   let retryAttempts = 0;
   let lastSaveError = null;
+  let connectionRetryAttempts = 0;
+  let lastConnectionError = null;
   let exited = false;
   const workflow = new ExposureArchiveWorkflow({
     storage, settings: PROJECT_SETTINGS, render: renderSubmission,
@@ -415,9 +418,11 @@ function initializeExposureStudio() {
   }
   function announce(message) { ui.status.textContent = message; }
   function restoreConnectionStatus() {
+    const reconnecting = retryTarget === "connection";
     announce(state.connecting && state.selectedFile ? "" : state.connecting ? "Connecting…"
-      : state.ready || !storage.configured ? "" : "Photo submissions are temporarily unavailable.");
-    ui.retry.hidden = state.connecting || state.ready || !storage.configured;
+      : reconnecting ? "Reconnecting automatically…"
+        : state.ready || !storage.configured ? "" : "Photo submissions are temporarily unavailable.");
+    ui.retry.hidden = state.connecting || reconnecting || state.ready || !storage.configured;
   }
   function clearError() { ui.error.hidden = true; ui.error.textContent = ""; ui.retry.hidden = true; }
   function showError(error) {
@@ -440,13 +445,26 @@ function initializeExposureStudio() {
   function clearRetryTimer() {
     if (retryTimer !== null) clearTimeout(retryTimer);
     retryTimer = null;
+    retryTarget = null;
   }
-  function scheduleRetry(error) {
-    if (exited || !workflow.pending || !isRetryableSaveError(error)) return;
+  function scheduleRetry(error, connection = false) {
+    if (exited || !isRetryableSaveError(error) || (connection ? workflow.pending : !workflow.pending)) return;
     clearRetryTimer();
     const delays = [2000, 5000, 15000, 30000];
-    const delay = delays[Math.min(retryAttempts++, delays.length - 1)];
-    retryTimer = setTimeout(() => { retryTimer = null; void retrySave(); }, delay);
+    const attempt = connection ? connectionRetryAttempts++ : retryAttempts++;
+    const delay = delays[Math.min(attempt, delays.length - 1)];
+    retryTarget = connection ? "connection" : "save";
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      retryTarget = null;
+      if (exited) return;
+      if (state.working || state.colourWorking || state.connecting) {
+        if (connection && !workflow.pending) scheduleRetry(error, true);
+        return;
+      }
+      if (workflow.pending) void retrySave();
+      else if (connection) void connectArchive();
+    }, delay);
     retryTimer?.unref?.();
   }
   async function retrySave() {
@@ -482,7 +500,7 @@ function initializeExposureStudio() {
     const pending = workflow.pending;
     const unsaved = pending || pendingColourResults();
     const completed = state.hasResult && !unsaved;
-    const processing = state.working || state.colourWorking || (state.queued && state.connecting);
+    const processing = state.working || state.colourWorking || (state.queued && (state.connecting || retryTarget === "connection"));
     const imageReady = state.hasResult && !state.colourWorking && (!state.working || state.previewing);
     for (const input of [ui.participantInput, ui.cameraInput]) {
       input.disabled = state.working || selected || pending || !sharingChoiceMade();
@@ -541,9 +559,10 @@ function initializeExposureStudio() {
     state.selectionChoices = null;
     state.queued = false;
     state.rePairUnavailable = false;
-    clearRetryTimer();
+    if (retryTarget !== "connection") clearRetryTimer();
     lastSaveError = null;
     retryAttempts = 0;
+    if (lastConnectionError && retryTimer === null && !state.connecting) scheduleRetry(lastConnectionError, true);
     ui.allowReuse.checked = false;
     ui.declineReuse.checked = false;
     clearResult();
@@ -565,7 +584,8 @@ function initializeExposureStudio() {
     } finally { releasePhoto(basePhoto); }
   }
   async function connectArchive() {
-    if (state.connecting) return;
+    if (exited || state.connecting || state.working || state.colourWorking || workflow.pending || pendingColourResults()) return;
+    clearRetryTimer();
     clearError();
     if (!storage.configured) {
       state.ready = false;
@@ -578,17 +598,25 @@ function initializeExposureStudio() {
     refreshActions();
     try {
       const collection = await storage.connect();
+      if (exited) return;
+      lastConnectionError = null;
+      connectionRetryAttempts = 0;
       state.ready = collection.totalEligible > 0;
       state.previewBase = collection.previewBase || null;
     } catch (error) {
+      if (exited) return;
       state.ready = false;
+      lastConnectionError = error;
+      scheduleRetry(error, true);
       console.warn("Photo collection unavailable:", error.code || error.name, error.message);
     } finally {
       state.connecting = false;
-      if (!state.working && !workflow.pending && !state.hasResult) restoreConnectionStatus();
-      refreshActions();
+      if (!exited) {
+        if (!state.working && !workflow.pending && !state.hasResult) restoreConnectionStatus();
+        refreshActions();
+      }
     }
-    await startSelectedPhoto();
+    if (!exited) await startSelectedPhoto();
   }
   function presentResult(operation) {
     const base = operation.begin?.base || operation.previewBase || operation.resultBase;
@@ -639,6 +667,9 @@ function initializeExposureStudio() {
       if (exited) return;
       lastSaveError = null;
       retryAttempts = 0;
+      lastConnectionError = null;
+      connectionRetryAttempts = 0;
+      state.ready = true;
       state.rePairUnavailable = false;
       presentResult(operation);
       confirmed = true;
@@ -843,7 +874,8 @@ function initializeExposureStudio() {
     if (state.downloadUrl) URL.revokeObjectURL(state.downloadUrl);
   });
   window.addEventListener("online", () => {
-    if (lastSaveError && isRetryableSaveError(lastSaveError)) void retrySave();
+    if (lastSaveError && isRetryableSaveError(lastSaveError) && workflow.pending) void retrySave();
+    else if (lastConnectionError && isRetryableSaveError(lastConnectionError)) void connectArchive();
   });
   connectArchive();
 }
