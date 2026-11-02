@@ -185,11 +185,11 @@ h1 {
 }
 
 .home-panel h2 {
-  margin: 0 0 28px;
+  margin: 0 0 16px;
   color: var(--foreground);
-  font-size: 18px;
-  font-weight: 600;
-  line-height: 1.35;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.4;
 }
 
 /* Homepage links: Experiment 1, Experiment 2, Experiment 3, Create a Double Exposure */
@@ -210,9 +210,13 @@ h1 {
   list-style: none;
 }
 
+.home-panel > nav > ul {
+  padding-inline-start: 16px;
+}
+
 /* Gap between consecutive links in a list */
 .home-links li + li {
-  margin-top: 16px;
+  margin-top: 4px;
 }
 
 .home-memory {
