@@ -185,10 +185,11 @@ h1 {
 }
 
 .home-panel h2 {
-  margin: 0 0 24px;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 400;
+  margin: 0 0 28px;
+  color: var(--foreground);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 /* Homepage links: Experiment 1, Experiment 2, Experiment 3, Create a Double Exposure */
