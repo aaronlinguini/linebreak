@@ -55,15 +55,23 @@
         </div>
       </div>
 
+      <p id="upload-again-note" class="save-progress" role="status" aria-live="polite" hidden>Please wait while your photo is saving… Keep this page open.</p>
+
       <div class="image-toolbar">
         <div id="repeat-actions" class="actions repeat-actions" hidden>
           <button id="reset-button" class="save-button" type="button">Upload another photo</button>
           <button id="new-pairing-button" class="save-button" type="button">Create another double exposure using this photo</button>
         </div>
         <div id="result-actions" class="actions result-actions" hidden>
-          <button id="download-button" class="save-button" type="button" disabled>Download image</button>
+          <button id="download-button" class="save-button" type="button" disabled>Save image</button>
           <button id="rotate-button" class="save-button" type="button" aria-label="Rotate the finished image clockwise by 90 degrees" disabled>Rotate 90°</button>
         </div>
+      </div>
+
+      <div class="feedback exposure-feedback">
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+        <p id="error" class="error" role="alert" hidden></p>
+        <button id="retry-button" class="save-button" type="button" hidden>Retry</button>
       </div>
 
       <div class="image-stage">
@@ -81,12 +89,6 @@
           <input id="visitor-colour" type="radio" name="output-colour" value="original" disabled>
           Original colour
         </label>
-      </div>
-
-      <div class="feedback">
-        <p id="status" class="status" role="status" aria-live="polite"></p>
-        <p id="error" class="error" role="alert" hidden></p>
-        <button id="retry-button" class="save-button" type="button" hidden>Retry</button>
       </div>
     </main>
 

@@ -560,6 +560,15 @@ content: ""; creates the pseudo-element with empty content. It's there purely fo
 
 /* STATUS AND ERROR MESSAGES */
 
+.save-progress {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border: 1px solid #555;
+  color: var(--foreground);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
 .feedback {
   min-height: 53px;
   padding-top: 14px;
@@ -582,6 +591,22 @@ content: ""; creates the pseudo-element with empty content. It's there purely fo
   margin: 6px auto 0;
   color: #d8b2b2;
   overflow-wrap: anywhere;
+}
+
+.workspace .exposure-feedback {
+  min-height: 0;
+  padding-top: 0;
+  text-align: left;
+}
+
+.exposure-feedback .status:not(:empty),
+.exposure-feedback .error:not([hidden]) {
+  max-width: none;
+  margin: 0 0 12px;
+}
+
+.exposure-feedback .save-button {
+  margin-bottom: 16px;
 }
 
 /* FOOTER */
