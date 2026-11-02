@@ -9,13 +9,15 @@ The dedicated account **aaron.double.exposure.project@gmail.com** holds the priv
 | Property | Value / status |
 | --- | --- |
 | `PROJECT_OWNER_EMAIL` | `aaron.double.exposure.project@gmail.com` |
-| `SITE_URL` | `https://aaronlinguini.github.io/br/` — saved and verified after reloading |
+| `SITE_URL` | `https://aaronlinguini.github.io/linebreak/` — saved and verified after reloading |
 | `UPLOADS_PAUSED` | `false` — explicitly approved and saved for live testing |
 | `ALLOWED_ORIGINS` | `http://127.0.0.1:5500,http://localhost:5500` |
 
 The earlier November 1 website and repository rename was to [apparitions](https://aaronlinguini.github.io/apparitions/) and [aaronlinguini/apparitions](https://github.com/aaronlinguini/apparitions). The existing Google project's `SITE_URL` was saved and verified after reloading; every other script property stayed unchanged. No backend deployment, account, permission, scope, folder ID or renderer changed. Earlier release records below retain their historical addresses.
 
-The configured website is [aaronlinguini.github.io/br/](https://aaronlinguini.github.io/br/) and repository [aaronlinguini/br](https://github.com/aaronlinguini/br). The rename preserved repository ID `1442190888`, history, and `main`; local `origin` was verified. Google `SITE_URL` was saved and verified after reloading; it was the only changed value among the same eleven properties. Apps Script deployment, endpoint, account, permissions, scopes, folder IDs, local origins, artist assets, and renderer were unchanged. Verify the Pages run and live result after pushing website edits.
+The preceding rename configured [aaronlinguini.github.io/br/](https://aaronlinguini.github.io/br/) and repository [aaronlinguini/br](https://github.com/aaronlinguini/br), preserving repository ID `1442190888`, history, and `main`. Local `origin` and Google's `SITE_URL` were verified; only that property changed among the same eleven properties.
+
+The configured website is [aaronlinguini.github.io/linebreak/](https://aaronlinguini.github.io/linebreak/) and repository [aaronlinguini/linebreak](https://github.com/aaronlinguini/linebreak). The rename and local `origin` were verified, preserving repository ID `1442190888`, history, and `main`. Google `SITE_URL` was saved and verified after reloading in the project account; it was the only changed value among the same eleven properties. Apps Script deployment, endpoint, account, permissions, scopes, folder IDs, local origins, artist assets, and renderer were unchanged. Verify the Pages run and live result after pushing website edits.
 
 The tool opened at its new public path and completed Google connection after **Retry**. Its first handshake timed out; this check does not establish why, or verify a new upload/archive receipt.
 
@@ -164,7 +166,7 @@ Preparation is local only. If publication is explicitly requested later, publish
 
 Do not publish the working repository, its history, `google-apps-script/` including **AssetCatalog.gs**, docs, tests, secrets, local comparisons, or unselected photos. The packager does not sweep in `images/` or experiment photographs; these need a separate explicit selection. The optional owner-page assets contain no credentials. Never publish every project file automatically.
 
-Keep `SITE_URL` as the HTTPS repository base, including its path and trailing slash; the configured base is `https://aaronlinguini.github.io/br/`. The prepared tool page is `double-exposure.html`; `index.html` remains the physical homepage entry file, and its shared Home link uses `href="./"` for the clean repository root, not `/home`. The address change updated only the existing `SITE_URL` property, without an Apps Script redeployment. `SITE_URL` supplies the public website's permitted origin and the optional owner-page asset base. Local HTTP previews need their exact origins in `ALLOWED_ORIGINS`; `file://` cannot connect to the archive.
+Keep `SITE_URL` as the HTTPS repository base, including its path and trailing slash; the configured base is `https://aaronlinguini.github.io/linebreak/`. The prepared tool page is `double-exposure.html`; `index.html` remains the physical homepage entry file, and its shared Home link uses `href="./"` for the clean repository root, not `/home`. The address change updated only the existing `SITE_URL` property, without an Apps Script redeployment. `SITE_URL` supplies the public website's permitted origin and the optional owner-page asset base. Local HTTP previews need their exact origins in `ALLOWED_ORIGINS`; `file://` cannot connect to the archive.
 
 The visitor bridge HTML now points to the same Google deployment's fixed `?asset=bridge` route. That route serves only the generated JavaScript with a JavaScript MIME type; it reads no script properties or Google files and accepts no filename or caller-supplied code. The normal bridge page still checks the website origin, and the JavaScript still checks its top window, channel, message origin, and permitted operations. The route uses [Google's Content Service](https://developers.google.com/apps-script/guides/content), which redirects the static response to a Google content URL. HTML continues to contain only an external script reference.
 

@@ -825,8 +825,8 @@ test("Home links resolve and static pages do not start the archive", () => {
   assert.match(header, /<a\b[^>]*href="\.\/"[^>]*>\s*[^<\s]/i);
   for (const page of ["", "index.html", "double-exposure.html", "experiment-1.html", "experiment-2-part-1.html", "experiment-2-part-2.html", "experiment-3.html"]) {
     const homeLink = header.match(/<a\b[^>]*href="([^"]+)"[^>]*\bdata-site-name/)[1];
-    assert.equal(new URL(homeLink, `https://aaronlinguini.github.io/br/${page}`).href,
-      "https://aaronlinguini.github.io/br/");
+    assert.equal(new URL(homeLink, `https://aaronlinguini.github.io/linebreak/${page}`).href,
+      "https://aaronlinguini.github.io/linebreak/");
   }
   assert.match(tool, /<div\b[^>]*\bdata-site-header(?:\s|=|>)/i);
   assert.match(tool, /<script\b[^>]*src="site-header\.js"[^>]*defer/i);
