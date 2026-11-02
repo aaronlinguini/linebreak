@@ -408,7 +408,7 @@ function initializeExposureStudio() {
       if (stage !== "preview" && stage !== "archive") return;
       presentResult(workflow.operation);
       state.previewing = true;
-      ui.busy.textContent = "Finishing…";
+      ui.busy.textContent = "Developing…";
       refreshActions();
     }
   });
@@ -660,7 +660,7 @@ function initializeExposureStudio() {
     clearError();
     state.previewing = state.hasResult && (background || workflow.pending);
     let confirmed = false;
-    setWorking(true, state.previewing ? "Finishing…" : developingMessage);
+    setWorking(true, state.previewing ? "Developing…" : developingMessage);
     try {
       const operation = await action();
       if (exited) return;

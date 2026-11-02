@@ -526,7 +526,7 @@ test("transient save failures retry with capped backoff while all controls stay 
   assert.equal(h.elements.get("error").hidden, true);
   assert.equal(h.elements.get("retry-button").hidden, true);
   assert.equal(h.elements.get("status").textContent, "");
-  assert.match(h.elements.get("upload-again-note").textContent, /Please wait while your photo is saving/);
+  assert.match(h.elements.get("upload-again-note").textContent, /Please wait while your double exposure is being developed/);
   assert.doesNotMatch(h.elements.get("upload-again-note").textContent, /retry|reconnect/i);
   for (const delay of [2000, 5000, 15000, 30000, 30000]) {
     assertResultControlsLocked(h, true);
@@ -686,7 +686,7 @@ test("a delayed real SHA-256 completes before the pending operation can deliver 
   assert.deepEqual(chosen, [createHash("sha256").update(Buffer.from(await file.arrayBuffer())).digest("hex")]);
   h.deliverPreview("preview");
   assert.equal(h.elements.get("canvas").hidden, false);
-  assert.equal(h.elements.get("busy-indicator").textContent, "Finishing…");
+  assert.equal(h.elements.get("busy-indicator").textContent, "Developing…");
   saving.resolve();
   await selecting;
 });
@@ -708,7 +708,7 @@ test("bootstrap's candidate enables early preview without changing frozen consen
   assert.equal(h.calls.start[0].choice.monochrome, false);
   h.deliverPreview("preview");
   assert.equal(h.elements.get("canvas").hidden, false);
-  assert.equal(h.elements.get("busy-indicator").textContent, "Finishing…");
+  assert.equal(h.elements.get("busy-indicator").textContent, "Developing…");
   assertResultControlsLocked(h, true);
   saving.resolve();
   await selecting;
@@ -1030,7 +1030,7 @@ test("library and camera selection submit once and show the developed image whil
     h.deliverPreview();
     assert.equal(h.elements.get("canvas").hidden, false, "the rendered double exposure appears before the archive receipt");
     assert.equal(h.calls.draws.length, 1);
-    assert.equal(h.elements.get("busy-indicator").textContent, "Finishing…");
+    assert.equal(h.elements.get("busy-indicator").textContent, "Developing…");
     assert.equal(h.elements.get("busy-indicator").hidden, false);
     assertResultControlsLocked(h, true);
     assert.equal(h.elements.get("new-pairing-button").hidden, false);
@@ -1084,7 +1084,7 @@ test("a save failure after rendering retains the pending preview and retries wit
   const retrying = h.click("retry-button");
   h.deliverPreview();
   assert.equal(h.elements.get("canvas").hidden, false);
-  assert.equal(h.elements.get("busy-indicator").textContent, "Finishing…");
+  assert.equal(h.elements.get("busy-indicator").textContent, "Developing…");
   retryReceipt.resolve();
   await retrying;
   assert.equal(h.calls.start.length, 1);
