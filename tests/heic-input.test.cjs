@@ -31,6 +31,9 @@ function harness({ nativeFails = false, nativeSize = { width: 4000, height: 3000
   bitmapSize = { width: 1200, height: 800 }, output = new Blob([jpegBytes], { type: "image/jpeg" }) } = {}) {
   const calls = { images: [], decoderLoads: 0, decoderRequests: [], bitmaps: [], draws: [], encodings: [], urls: [], revoked: [] };
   const timers = new Map();
+  const deadlineReady = deferred();
+  const nativeReady = deferred();
+  const decoderReady = deferred();
   let serial = 0;
   let nativeGate;
   let decoderGate;
@@ -38,7 +41,12 @@ function harness({ nativeFails = false, nativeSize = { width: 4000, height: 3000
   let encoded = output;
   const sandbox = {
     Error, Blob, File, crypto: webcrypto,
-    setTimeout(callback, delay) { const id = ++serial; timers.set(id, { callback, delay }); return id; },
+    setTimeout(callback, delay) {
+      const id = ++serial;
+      timers.set(id, { callback, delay });
+      if (delay === 120000) deadlineReady.resolve();
+      return id;
+    },
     clearTimeout(id) { timers.delete(id); },
     URL: {
       createObjectURL(file) { const url = `blob:heic-${calls.urls.length + 1}`; calls.urls.push({ url, file }); return url; },
@@ -49,6 +57,7 @@ function harness({ nativeFails = false, nativeSize = { width: 4000, height: 3000
         this.naturalWidth = this.width = nativeSize.width;
         this.naturalHeight = this.height = nativeSize.height;
         calls.images.push(this);
+        nativeReady.resolve();
       }
       async decode() {
         if (nativeGate) await nativeGate;
@@ -77,6 +86,7 @@ function harness({ nativeFails = false, nativeSize = { width: 4000, height: 3000
     return {
       async heicTo(request) {
         calls.decoderRequests.push(request);
+        decoderReady.resolve();
         if (decoderGate) await decoderGate;
         if (decoderError) throw decoderError;
         const bitmap = { ...bitmapSize, closed: 0, close() { this.closed++; } };
@@ -86,7 +96,8 @@ function harness({ nativeFails = false, nativeSize = { width: 4000, height: 3000
     };
   };
   return {
-    calls, timers,
+    calls, timers, deadlineReady: deadlineReady.promise,
+    nativeReady: nativeReady.promise, decoderReady: decoderReady.promise,
     normalize(file) { return sandbox.normalizeForTest(file, { loadDecoder }); },
     blockNative(gate) { nativeGate = gate; },
     blockDecoder(gate) { decoderGate = gate; },
@@ -136,7 +147,7 @@ test("the fallback decoder loads only after native decoding fails and releases i
   assert.deepEqual(h.calls.revoked, h.calls.urls.map(({ url }) => url));
 });
 
-test("same-byte HEIC inputs share in-flight conversion and the bounded cache preserves each upload name", async () => {
+test("same-byte HEIC inputs share in-flight conversion and the bounded cache preserves each upload name", { timeout: 10000 }, async () => {
   const h = harness();
   const gate = deferred();
   h.blockNative(gate.promise);
@@ -144,7 +155,7 @@ test("same-byte HEIC inputs share in-flight conversion and the bounded cache pre
   const renamed = new File([await original.arrayBuffer()], "second.heif", { type: "image/heif" });
   const first = h.normalize(original);
   const second = h.normalize(renamed);
-  for (let attempt = 0; attempt < 20 && !h.calls.images.length; attempt++) await flush();
+  await h.nativeReady;
   assert.equal(h.calls.images.length, 1);
   gate.resolve();
   const [a, b] = await Promise.all([first, second]);
@@ -212,7 +223,7 @@ test("failed conversions do not poison later attempts for the same raw bytes", a
   assert.equal(h.calls.bitmaps[0].closed, 1);
 });
 
-test("a 120-second decode deadline rejects stalled native or fallback work and cleans up late bitmaps", async () => {
+test("a 120-second decode deadline rejects stalled native or fallback work and cleans up late bitmaps", { timeout: 10000 }, async () => {
   for (const nativeFails of [false, true]) {
     const h = harness({ nativeFails });
     const gate = deferred();
@@ -220,10 +231,7 @@ test("a 120-second decode deadline rejects stalled native or fallback work and c
     else h.blockNative(gate.promise);
     const converting = h.normalize(heicFile());
     const rejected = assert.rejects(converting, /time|long|120|minute/i);
-    for (let attempt = 0; attempt < 30; attempt++) {
-      if (h.timers.size && (nativeFails ? h.calls.decoderRequests.length : h.calls.images.length)) break;
-      await flush();
-    }
+    await Promise.all([h.deadlineReady, nativeFails ? h.decoderReady : h.nativeReady]);
     const deadline = [...h.timers.values()].find(timer => timer.delay === 120000);
     assert.ok(deadline, "conversion must have a bounded decode deadline");
     deadline.callback();
