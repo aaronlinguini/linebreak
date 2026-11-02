@@ -22,6 +22,7 @@ const deferred = () => {
 const developingMessage = toolHtml.match(/<p\b[^>]*id="busy-indicator"[^>]*>([^<]+)<\/p>/)[1].trim();
 
 function harness({ configured = true, canRePair = true, forceBlackAndWhite = false, supportsCapture = false, assets,
+  digest = (...args) => webcrypto.subtle.digest(...args),
   connect = async () => ({ totalEligible: 2 }) } = {}) {
   const ids = ["workspace", "canvas", "result-empty", "source-actions", "result-actions", "repeat-actions", "allow-reuse",
     "new-pairing-button", "reset-button", "participant-input", "participant-camera-input",
@@ -48,6 +49,7 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
   let rotationError;
   let startGate;
   let startError;
+  const startReady = deferred();
   let photoGate;
   let rePairGate;
   let rePairError;
@@ -63,7 +65,7 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
   const baseFor = (id) => ({ id, name: `${id}.jpg`, mimeType: "image/jpeg", base64: "AQID",
     sha256: (id === "first-base" ? "a" : "b").repeat(64), byteLength: 3 });
   const sandbox = vm.createContext({
-    Error, File, setTimeout, atob, crypto: webcrypto,
+    Error, File, setTimeout, atob, crypto: { subtle: { digest } },
     document: {
       getElementById(id) { return mounted ? elements.get(id) : null; },
       createElement(tag) { return tag === "canvas" ? { width: 0, height: 0 } : {
@@ -94,6 +96,7 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
           previewBase: choice.previewBase || null, begin: { base, token: "first-token" },
           result: { blob: { type: "image/jpeg", size: 10, monochrome: choice.monochrome }, width: 600, height: 400, preparedCanvas: {} },
           receipt: { canRePair } };
+        startReady.resolve(this.operation);
         if (startGate) await startGate;
         if (startError) throw startError;
         this.pending = false;
@@ -166,7 +169,7 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
   mounted = true;
   sandbox.initializeExposureStudio();
   return {
-    elements, calls, urls, get workflow() { return workflow; },
+    elements, calls, urls, startReady: startReady.promise, get workflow() { return workflow; },
     blockRotation(gate) { rotationGate = gate; },
     failRotation(error) { rotationError = error; },
     blockStart(gate) { startGate = gate; },
@@ -207,7 +210,7 @@ test("the local asset preview starts while Google connection is still unresolved
   } });
   h.blockStart(saving.promise);
   const selecting = h.select("participant-input", makeFile());
-  for (let attempt = 0; attempt < 20 && !h.calls.start.length; attempt++) await flush();
+  await h.startReady;
   assert.equal(h.calls.start.length, 1, "development does not wait for Google bootstrap");
   assert.equal(chosen.length, 1);
   assert.match(chosen[0], /^[a-f0-9]{64}$/);
@@ -223,6 +226,40 @@ test("the local asset preview starts while Google connection is still unresolved
   await selecting;
 });
 
+test("a delayed real SHA-256 completes before the pending operation can deliver its preview", async () => {
+  const hashing = deferred();
+  const hashingStarted = deferred();
+  const saving = deferred();
+  const chosen = [];
+  const previewBase = { name: "base.jpg", mimeType: "image/jpeg", byteLength: 10,
+    path: "assets/base-photos/base.jpg", sha256: "a".repeat(64) };
+  const h = harness({ connect: () => new Promise(() => {}), assets: {
+    async chooseBase(hash) { chosen.push(hash); return previewBase; }
+  }, async digest(...args) {
+    hashingStarted.resolve();
+    await hashing.promise;
+    return webcrypto.subtle.digest(...args);
+  } });
+  h.blockStart(saving.promise);
+  const file = makeFile();
+  const selecting = h.select("participant-input", file);
+  await hashingStarted.promise;
+  await flush();
+  assert.equal(h.calls.start.length, 0);
+  assert.equal(h.workflow.operation, null);
+  assert.equal(h.elements.get("canvas").hidden, true);
+  hashing.resolve();
+  const operation = await h.startReady;
+  assert.strictEqual(operation, h.workflow.operation);
+  assert.equal(h.workflow.pending, true, "start readiness must not wait for the archive receipt");
+  assert.deepEqual(chosen, [createHash("sha256").update(Buffer.from(await file.arrayBuffer())).digest("hex")]);
+  h.deliverPreview("preview");
+  assert.equal(h.elements.get("canvas").hidden, false);
+  assert.equal(h.elements.get("busy-indicator").textContent, "Finishing…");
+  saving.resolve();
+  await selecting;
+});
+
 test("bootstrap's candidate enables early preview without changing frozen consent or colour", async () => {
   const previewBase = { id: "base-1", name: "base.jpg", mimeType: "image/jpeg", byteLength: 10,
     path: "assets/base-photos/base.jpg", sha256: "a".repeat(64) };
@@ -233,7 +270,7 @@ test("bootstrap's candidate enables early preview without changing frozen consen
   const saving = deferred();
   h.blockStart(saving.promise);
   const selecting = h.select("participant-input", makeFile());
-  for (let attempt = 0; attempt < 20 && !h.calls.start.length; attempt++) await flush();
+  await h.startReady;
   assert.equal(h.calls.start.length, 1);
   assert.strictEqual(h.calls.start[0].choice.previewBase, previewBase);
   assert.equal(h.calls.start[0].choice.allowReuse, true);
@@ -472,7 +509,7 @@ test("library and camera selection submit once and show the developed image whil
     h.blockStart(saving.promise);
     const file = makeFile();
     const selecting = h.select(id, file);
-    await flush();
+    await h.startReady;
     assert.equal(h.calls.load[0], file);
     assert.equal(h.calls.start.length, 1);
     assert.equal(h.calls.start[0].file, file);
@@ -529,7 +566,7 @@ test("one next pairing can be queued during finishing and only starts after a re
     const saving = deferred();
     h.blockStart(saving.promise);
     const selecting = h.select("participant-input", makeFile());
-    await flush();
+    await h.startReady;
     h.deliverPreview();
     assert.equal(h.elements.get("repeat-actions").hidden, false);
     assert.equal(h.elements.get("new-pairing-button").disabled, false);
@@ -556,7 +593,7 @@ test("a queued pairing survives a failed save and waits for the retry receipt wi
   h.blockStart(saving.promise);
   h.failStart(Object.assign(new Error("Response lost."), { originalSaved: true }));
   const selecting = h.select("participant-input", makeFile());
-  await flush();
+  await h.startReady;
   h.deliverPreview();
   await h.click("new-pairing-button");
   saving.resolve();
@@ -592,7 +629,7 @@ test("a save failure after rendering retains the pending preview and retries wit
   h.blockStart(saving.promise);
   h.failStart(Object.assign(new Error("Response lost."), { originalSaved: true }));
   const selecting = h.select("participant-input", makeFile());
-  await flush();
+  await h.startReady;
   h.deliverPreview();
   saving.resolve();
   await selecting;
@@ -759,7 +796,7 @@ test("colour and downloads respond before either receipt, then queued pairing us
   h.blockMonochrome(modeReceipt.promise);
   const original = makeFile();
   const selecting = h.select("participant-input", original);
-  for (let attempt = 0; attempt < 20 && !h.calls.start.length; attempt++) await flush();
+  await h.startReady;
   h.deliverPreview("preview");
   const initialBlob = h.workflow.operation.result.blob;
   await h.toggleMonochrome(true);
@@ -806,7 +843,7 @@ test("switching back before the first receipt still archives the already-rendere
   const receipt = deferred();
   h.blockStart(receipt.promise);
   const selecting = h.select("participant-input", makeFile());
-  await flush();
+  await h.startReady;
   h.deliverPreview();
   const initialBlob = h.workflow.operation.result.blob;
   await h.toggleMonochrome(true);
@@ -835,7 +872,7 @@ test("a receipt arriving during local colour development cannot skip that varian
   h.blockDevelopment(rendering.promise);
   h.blockMonochrome(alternateReceipt.promise);
   const selecting = h.select("participant-input", makeFile());
-  await flush();
+  await h.startReady;
   h.deliverPreview();
   await h.click("new-pairing-button");
   const changing = h.toggleMonochrome(true);

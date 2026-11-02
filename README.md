@@ -1,35 +1,35 @@
-# Ghost Image &lt;br&gt; Apparitions
+# &lt;br&gt;
 
-## Publishing from VS Code
+## Publishing website changes
 
-Save the edited files, stage the intended changes, and choose **Commit & Push** on `main`. This folder is connected directly to [aaronlinguini/apparitions](https://github.com/aaronlinguini/apparitions). GitHub Actions runs the checks, prepares `.public-site`, and publishes the result to [the website](https://aaronlinguini.github.io/apparitions/). Wait for the **Publish website** run to finish before checking the live update. A failed run keeps the previous deployed site.
+Requested website changes are validated, committed, and pushed on `main` by default, without another publication confirmation. Preserve unrelated work and stage only the intended changes. You can also use **Commit & Push** in VS Code whenever you edit the site yourself. This folder is connected directly to [aaronlinguini/apparitions](https://github.com/aaronlinguini/apparitions). GitHub Actions runs the checks, prepares `.public-site`, and publishes the result to [the website](https://aaronlinguini.github.io/apparitions/). Check that the **Publish website** run succeeds before reporting the update live. A failed run keeps the previous deployed site.
 
 CSS and JavaScript cache labels are generated automatically during that build. Ordinary root HTML files are website pages; `local-test.html` stays a local comparison. Photos under `images/` are included in the website build when an active page references them. Keep editing source files rather than `.public-site`. Credentials, incoming uploads, temporary backups and generated copies remain ignored. Source code, tests, documentation and Git history are now in the normal GitHub repository; the deployed website contains only its prepared pages and assets.
 
 The separate selected-copy publication records below describe the earlier setup. Normal pushes from this folder replace that workflow.
 
 
-Live site: [Ghost Image &lt;br&gt; Apparitions](https://aaronlinguini.github.io/apparitions/) · [Double-exposure tool](https://aaronlinguini.github.io/apparitions/double-exposure.html) · [Public repository](https://github.com/aaronlinguini/apparitions).
+Live site: [&lt;br&gt;](https://aaronlinguini.github.io/apparitions/) · [Double-exposure tool](https://aaronlinguini.github.io/apparitions/double-exposure.html) · [Public repository](https://github.com/aaronlinguini/apparitions).
 
-Published November 1, 2026, with explicit approval: one `Publish website` commit (`4e4ecec`) containing 21 site/support files and 113 selected photos. Development history and this README were excluded. Pages deployment succeeded; 30 delivery checks passed, and the live tool completed Google bootstrap. A new live upload/save and physical iPhone HEIC/camera tests are still separate checks. Later local edits are not published automatically.
+Initial selected-copy publication (historical), November 1, 2026: one `Publish website` commit (`4e4ecec`) containing 21 site/support files and 113 selected photos. Development history and this README were excluded. Pages deployment succeeded; 30 delivery checks passed, and the live tool completed Google bootstrap. A new live upload/save and physical iPhone HEIC/camera tests are still separate checks. That selected-copy workflow has been superseded by the normal commit, push, and Actions deployment workflow above.
 
 Participants add a photograph to create a double exposure. The Google connection archives original uploads and finished JPEGs. The revised folder workflow places an explicitly opted-in original in `My_photos` only after its result is saved, with a stable name such as `participant_photo_1.jpg`. It moves that original instead of saving a second copy. Pending and nonconsenting originals remain privately archived in `participant_uploads`, and finished exposures stay in `Completed_double_exposures`.
 
-This tool is one part of a larger interactive artwork. The website is named Ghost Image &lt;br&gt; Apparitions; the artist leads the wording, photo selections, page counts, and layouts, with ordinary HTML/CSS kept easy to edit.
+This tool is one part of a larger interactive artwork. The website is named &lt;br&gt;, displayed as literal text, and Experiment 3 is called Apparitions. The artist leads the wording, photo selections, page counts, and layouts, with ordinary HTML/CSS kept easy to edit.
 
-The local home page in `index.html` has **Experiments** on the left, linking to three editable experiment pages, and **Interactive** on the right, linking to `double-exposure.html`. These columns stack in the same order on smaller screens. The experiment pages contain no selected photographs or written reflections yet. The approved November 1 snapshot includes this home/tool structure and three empty experiment templates; later edits remain local until separately published.
+The home page in `index.html` has **Experiments** on the left, linking to Sketch, Memory Part 1, Memory Part 2, and Apparitions, and **Interactive** on the right, linking to `double-exposure.html`. These columns stack in the same order on smaller screens. The experiment pages contain the selected photographs and reflections. Edit their source files; validated requested changes follow the commit, push, and Actions deployment workflow above.
 
 ## Try it
 
 To test without Google, right-click `local-test.html` in VS Code and choose **Open with Live Server**. Choose your base photo and a second photo. The left preview keeps the saved **Current** treatment at zero EV and contrast 12. The right starts with **Reduced overlap (trial)** at the same settings, with **Haze reduction 20%**, matching the approved screenshot preset. All five optional tone controls start at zero. Increasing Haze reduction reduces overlapping light across shadows, midtones, and highlights. Dark areas leave the brighter photograph clearer; two dark areas stay closer to their original darkness. Move Haze reduction to 0% to reproduce the saved Current treatment. Current + contrast, Revised smooth, Saved smooth exposure, and the earlier film curve remain available. Adjust each photograph's exposure separately and compare black and white with colour. Use the visible **Tone adjustments** sliders for optional Shadows, Highlights, Mids, Whites, and Blacks finishing controls; **Reset tones** clears only those five controls. Both results use the same full-frame preparation and JPEG export. Download the results and settings to keep a record; nothing is uploaded or automatically archived there. See [FILM-EXPERIMENT.md](FILM-EXPERIMENT.md) for comparisons and how to return to the saved version.
 
-There is no frontend dependency installation. The Google archive runs as **Version 8** in the dedicated project account, deployed at **12:42 PM on October 31** on the same endpoint with unchanged account, Anyone access, scopes, and archive IDs. The current local revision passes **439/439 checks**. The user approved activating the existing service, and `UPLOADS_PAUSED=false` is verified. Google serves the visitor bridge itself, so local testing does not need GitHub Pages. Independent archive-folder, consent, duplicate, colour-variant, and device checks remain pending.
+There is no frontend dependency installation. The Google archive runs as **Version 8** in the dedicated project account, deployed at **12:42 PM on October 31** on the same endpoint with unchanged account, Anyone access, scopes, and archive IDs. The current local revision passes **454/454 checks**. The user approved activating the existing service, and `UPLOADS_PAUSED=false` is verified. Google serves the visitor bridge itself, so local testing does not need GitHub Pages. Independent archive-folder, consent, duplicate, colour-variant, and device checks remain pending.
 
 The saved-result colour toggle and earlier rendered preview are implemented locally, and their backend changes are installed in **Google Version 6**. `Code.gs` and `Storage.gs` were verified byte-for-byte after reloading the Google editor. Browser checks use the real image processor with simulated storage; both colour directions, pending-preview locks, and the unlocked checkbox after a receipt were verified. These checks do not establish a live archived colour variant. A fresh Version 6 Chrome/Live Server connection completed bootstrap after **Retry**; its initial handshake timed out without an established cause. These changes preserve the exposure calculation, original files, consent, scopes, and archive IDs.
 
 The selected **113 artist bases** have byte-exact local copies in `assets/base-photos/`. Google `Code.gs` and `AssetCatalog.gs` matched their local files after editor reload. The **11:39:43 PM** owner refresh verified all **113/113** catalog/index matches, with zero unmatched, skipped, deferred, or issue entries. Browser checks loaded the actual **4,702,374-byte** `30thbirthday.JPG` over direct same-site HTTP with a SHA query and no load errors, verified it through the loader, and used the real processor in both colour modes. The archive was simulated, so no new external photo upload or live saved-result claim follows. A fresh Version 7 Chrome/Live Server bootstrap completed after Retry, clearing status and errors; its first handshake timed out. No photo was resized, re-encoded, or renamed by the builder.
 
-The current public release is `4e4ecec` in [ghost-images](https://github.com/aaronlinguini/ghost-images). The old [double-exposure-online-project repository](https://github.com/aaronlinguini/double-exposure-online-project) stays private with its earlier selected publication and history. Working files and development history were not pushed. See [GOOGLE-SETUP.md](GOOGLE-SETUP.md) for service details and remaining checks.
+Release `0514c19` in [apparitions](https://github.com/aaronlinguini/apparitions) was deployed by [Publish website run 41371532468, attempt 2](https://github.com/aaronlinguini/apparitions/actions/runs/41371532468/attempts/2) after 453 checks passed. This update changes the site name to literal &lt;br&gt; and Experiment 3 to Apparitions, and includes the test timing fix. The updated local suite passes 454 checks; GitHub Actions validates and deploys pushed updates. See [GOOGLE-SETUP.md](GOOGLE-SETUP.md) for service details and remaining checks.
 
 ## Phones and tablets
 
@@ -53,7 +53,7 @@ Before public use, check both library selection and native camera capture on an 
 
 The tool page stays minimal and black, with no exposure sliders or collection-management panel. A private Google Sheet records consent, source IDs, and each result. The future-use checkbox starts unchecked and controls entry into the shared base-photo pool; it does not turn off the private original archive. Server-computed SHA-256 checks reuse identical original files across artist and participant records and identical results across repeated tests or pairings. An existing artist photo is reused without renaming or moving it. No image pairs with identical bytes, and pending saves keep their assigned base. Renaming a file does not bypass this check. Edited, resized, or re-exported files can have different bytes and are not guaranteed to match. Copies manually dragged into Drive are detected and indexed once, but the program does not silently delete those externally created files.
 
-The existing [GitHub repository](https://github.com/aaronlinguini/double-exposure-online-project) contains only an earlier selected publication, not a mirror of this working repository. Its private visibility and the old website’s 404 response have been verified. Editing a file on GitHub does not automatically update the local copy, and saving or committing locally does not publish it. When publication is requested later, remote and local edits must first be compared. The Google deployment is separate; a frontend publication does not replace its code or settings.
+The older [double-exposure-online-project repository](https://github.com/aaronlinguini/double-exposure-online-project) is a historical selected publication; its private visibility and the old website’s 404 response were verified. The current [apparitions repository](https://github.com/aaronlinguini/apparitions) contains this working repository and its history. Editing a file on GitHub does not automatically update the local copy, so compare remote and local work before pushing. The Google deployment is separate; a frontend publication does not replace its code or settings.
 
 The [Photo archive Apps Script project](https://script.google.com/home/projects/1gj7CIChAW6rMFOmP_Pb16TWSAwUKzZQxnOUOvvEUvDFOwQxKo65lYols/edit) runs in **aaron.double.exposure.project@gmail.com**. Version 4 deployed the Google-hosted visitor bridge on October 30, 2026, at **6:10 PM**. Version 5 deployed faster source scanning at **6:44 PM**. Version 6 added same-base colour variants and one batched read for the three existing archive tabs at **10:00 PM**, keeping the same `/exec` URL, account, Anyone access, OAuth scopes, and archive folders. The user explicitly approved activating the existing photo service; **`UPLOADS_PAUSED=false`** was saved and verified. No personal-folder sharing or new authorization/setup is needed, and working archive IDs must be preserved.
 
@@ -76,7 +76,7 @@ python3 -m http.server 5500 --bind 127.0.0.1
 - `site-header.js`: loads the shared header in local previews and supplies the same rendering functions to the publication builder.
 - `experiment-1.html`: the Sketch photo gallery and reflection.
 - `experiment-2-part-1.html` and `experiment-2-part-2.html`: the separate Memory pages, with links to both parts at the top.
-- `experiment-3.html`: an editable photo/reflection page template with a commented-out entry example.
+- `experiment-3.html`: the Apparitions photo gallery and reflection.
 - `double-exposure.html`: the double-exposure tool’s HTML; loads its external stylesheet and scripts.
 - `styles.css`: shared page styling and responsive layouts.
 - `scripts.js`: photo loading, pairing, light processing, finished-image rotation, and downloads.
@@ -107,7 +107,7 @@ There are no inline styles, executable script bodies, or inline event handlers i
 3. Keep the corresponding byte-identical Drive originals for the current source index and duplicate checks. New or changed local assets must match indexed artist originals; adding only an unmapped local file does not make it eligible.
 4. Save the generated `google-apps-script/AssetCatalog.gs` in the existing Google project. Save `Code.gs` too only when its code changed, then deploy a new version of that existing endpoint. No new authorization or setup is needed. Refresh the owner collection check and confirm the catalog has no unmatched assets.
 
-The public manifest, `base-assets.js`, and selected image files belong in a future approved website package. The Google catalog and backend stay private. Local builds do not publish anything.
+The public manifest, `base-assets.js`, and selected image files are included in the generated website package. The Google catalog and backend are excluded from the deployed artifact. A local build prepares the package; pushing to `main` starts the Actions deployment.
 
 ## Exposure treatment
 
@@ -183,7 +183,7 @@ node scripts/build-base-assets.cjs --check
 node --test tests/*.test.cjs
 ```
 
-The current revision passes **439/439 checks**, including local base selection, concurrent rendering and original saving, exact source identity, colour variants, retries, consent, batched sheet reads, HEIC preparation, and publication packaging. Google **Version 8** is deployed on the existing URL. A foreground Live Server test with a synthetic 2400 × 1600 participant image and an actual artist asset displayed the result at **0.92 seconds**, before Google connected at 5.89 seconds; the matching real archive receipt arrived at 18.84 seconds. A real libheif HEIC sample converted through the Chrome fallback in **3.32 seconds**, from 718,114 bytes to a 675,803-byte JPEG at 1280 × 854; a repeated conversion returned identical JPEG bytes. These are individual test timings, not a guarantee for every photo or device. Physical-device camera, iPhone HEIC, and consent-folder checks remain separate.
+The current revision passes **454/454 checks**, including local base selection, concurrent rendering and original saving, exact source identity, colour variants, retries, consent, batched sheet reads, HEIC preparation, and publication packaging. Google **Version 8** is deployed on the existing URL. A foreground Live Server test with a synthetic 2400 × 1600 participant image and an actual artist asset displayed the result at **0.92 seconds**, before Google connected at 5.89 seconds; the matching real archive receipt arrived at 18.84 seconds. A real libheif HEIC sample converted through the Chrome fallback in **3.32 seconds**, from 718,114 bytes to a 675,803-byte JPEG at 1280 × 854; a repeated conversion returned identical JPEG bytes. These are individual test timings, not a guarantee for every photo or device. Physical-device camera, iPhone HEIC, and consent-folder checks remain separate.
 
 The checks cover exposure maths, exact original bytes, consent, another pairing, duplicate and self-pairing rules, result eligibility timing, interrupted archive writes, stable retries, limited-access API boundaries, owner imports, iframe-message validation, and the separation of HTML, CSS, and JavaScript. Google services are simulated in those tests; live account authorization and deployment require the setup guide's smoke test.
 
@@ -233,11 +233,11 @@ To undo a later committed change, ask to revert that change; Git can create an u
 
 ### Editing the shared header
 
-Edit the name once in `includes/site-header.html` to change **Ghost Image &lt;br&gt; Apparitions** across the website. Write the visible tag as `&lt;br&gt;` so it appears as text. The same template contains the grey `<hr class="site-divider">` and the four experiment links. Change the line's colour, thickness, and spacing in the `.site-divider` rule in `styles.css`.
+Edit the name once in `includes/site-header.html` to change **&lt;br&gt;** across the website. Write the visible tag as `&lt;br&gt;` so it appears as text. The same template contains the grey `<hr class="site-divider">` and the four experiment links. Change the line's colour, thickness, and spacing in the `.site-divider` rule in `styles.css`.
 
 Each website page loads `site-header.js` and contains a `<div data-site-header></div>` placeholder. Experiment pages use `<div data-site-header="experiments"></div>` to show the experiment navigation. Keep page-specific headings and content outside that placeholder.
 
-Save the template and refresh each Live Server page to see the changes. During publication preparation, the builder embeds the header into every page and updates the marked home/tool titles and tool link-preview metadata. Published pages therefore contain the complete header without JavaScript or a runtime template request. Saving a local file does not update the live website; use the normal manual **Commit & Push** workflow above when ready to publish.
+Save the template and refresh each Live Server page to see the changes. During publication preparation, the builder embeds the header into every page and updates the marked home/tool titles and tool link-preview metadata. Published pages therefore contain the complete header without JavaScript or a runtime template request. Saving a local file alone does not update the live website; validated requested changes are committed and pushed through the normal Actions workflow above.
 
 ### Editing experiment content
 
@@ -250,9 +250,9 @@ Memory has separate Part 1 and Part 2 links under its home-page label. Edit each
 3. In `experiment-1.html`, remove the `<!--` and `-->` around the example `<section class="experiment-entry">` to display it. Set the image's `src` to the real filename and replace its `alt` description. Use the corresponding paths in the other two pages.
 4. Put your reflection in the empty `<p></p>`. Repeat the complete `experiment-entry` section for another photo/reflection pair. Keep layout changes in `styles.css`; no inline CSS or JavaScript is needed.
 
-Photo files referenced by active experiment HTML load in the local preview, but are **not automatically selected for publication**. The packager includes twenty-one core files and only the artist image files explicitly listed in `assets/base-photos.json`—currently 113. It does not sweep in `images/` or experiment photographs. Those need a separate deliberate asset selection before a later manual publication. Never include `AssetCatalog.gs`, backend sources, docs, or private photos automatically.
+Photo files referenced by active experiment HTML are selected automatically for the website package, alongside the artist assets listed in `assets/base-photos.json`—currently 113. Unreferenced experiment photos and commented-out examples are excluded from the deployed artifact. README, project instructions, tests, local comparisons, backend sources, and Git history belong to the working repository but are not website assets; secrets and incoming participant files remain ignored.
 
-The twenty-one core paths are:
+The earlier selected-copy package used these twenty-one core paths (historical):
 
 ```text
 index.html
@@ -278,13 +278,13 @@ vendor/heic-to/SOURCES.tar.gz
 .nojekyll
 ```
 
-Run `node scripts/prepare-public-site.cjs` to build `.public-site/` from these twenty-one core files and listed artist assets, including the separate decoder's license, notices, and corresponding sources. This only prepares a local copy; it does not publish. If publication is requested later, only that generated copy belongs on the host. README, instructions, tests, local comparisons, backend source including AssetCatalog.gs, secrets, unselected photos, and Git history stay out. Rebuild the asset catalog after changing artist files, then rebuild the package. The packager validates included HTML, JavaScript, photo sizes/hashes, paths, and existing output contents before replacement. Unapproved experiment image links stop packaging instead of silently publishing broken or private images.
+The current packager discovers ordinary root HTML pages automatically, excluding `local-test.html`, and includes their active gallery images, shared header, carousel assets, the listed artist assets, and the separate decoder's license, notices, and corresponding sources. Run `node scripts/prepare-public-site.cjs` to prepare `.public-site/` locally, or push the validated source changes to `main` and let Actions build and deploy it. Rebuild the asset catalog after changing artist base files. The packager validates HTML, JavaScript, photo sizes/hashes, paths, and existing output contents before replacement; invalid or missing image references stop packaging.
 
 ### Automatic cache labels
 
 Edit the normal source files, including `styles.css`, in VS Code. HTML uses plain filenames such as `href="styles.css"`; there is no version number to maintain or filename to rename.
 
-Before publishing, run:
+GitHub Actions runs preparation before deployment. To inspect the same package locally, run:
 
 ```sh
 node scripts/prepare-public-site.cjs
@@ -294,11 +294,11 @@ The prepared HTML in `.public-site/` gets a `?v=` label calculated from each sty
 
 Script imports are processed before their parent is hashed, including the HEIC helper and its separate decoder. Updating the decoder therefore also updates the helper and main script URLs. The parser identifies executable imports without changing commented examples, quoted text, or the vendor decoder's bytes. Computed import URLs and circular local import chains stop preparation with an error instead of producing incomplete cache labels. The current project uses literal, acyclic imports.
 
-Publish the **contents of `.public-site/`** when the site is ready. A Git commit alone does not run preparation, and uploading the unprepared source files skips this automation. The source files stay editable and unchanged by preparation; changes belong there rather than in the generated directory. No framework, runtime cache script, or new Google deployment is needed. This updates asset URLs when the latest HTML is loaded; it cannot force a visitor's already-open page to reload. The optional Google-served owner import page still uses its separate backend URLs.
+After a push to `main`, GitHub Actions prepares and deploys the **contents of `.public-site/`** automatically. The generated directory stays ignored; commit editable source files rather than generated output. Preparation leaves those source files unchanged. No framework, runtime cache script, or new Google deployment is needed. This updates asset URLs when the latest HTML is loaded; it cannot force a visitor's already-open page to reload. The optional Google-served owner import page still uses its separate backend URLs.
 
-Checkpoint **`9a9e90f`** preserves the home-page draft and the project before automatic cache labels. The cache changes are left uncommitted for review. No further commit will be made unless explicitly requested.
+Historical checkpoint **`9a9e90f`** preserves the home-page draft and the project before automatic cache labels. At that stage, changes were left uncommitted for review; the current standing authorization is to commit and push validated requested website changes.
 
-To add a further experiment page, create an ordinary `.html` file and add it to the home page's Experiments list and the relevant navigation. Add the page explicitly to `PUBLIC_FILES` in `scripts/prepare-public-site.cjs`, adjust publication checks, and rebuild when it is intended for release. The page's photos, text, layout, and label are yours to choose. Keep Google's `SITE_URL` at the repository root; these static pages need no Apps Script change.
+To add a further experiment page, create an ordinary `.html` file and add it to the home page's Experiments list and the relevant navigation. Root HTML pages are discovered automatically by `scripts/prepare-public-site.cjs`; validate the new page and its image references, then commit and push through the normal workflow. The page's photos, text, layout, and label are yours to choose. Keep Google's `SITE_URL` at the repository root; these static pages need no Apps Script change.
 
 The Google backend includes global request, daily submission, and daily new-file-byte limits plus an owner pause switch. These run inside Apps Script on Google; no rented server is needed. The daily byte allowance is an adjustable intake limit, not total Drive storage capacity. See [GOOGLE-SETUP.md](GOOGLE-SETUP.md) for settings and the live archive check, which is still required after deploying.
 
