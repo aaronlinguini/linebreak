@@ -17,7 +17,7 @@ Participants must choose **Yes** or **No** to future use in the shared base-phot
 
 This tool is one part of a larger interactive artwork. The website is named &lt;br&gt;, displayed as literal text, and Experiment 3 is called Apparitions. The artist leads the wording, photo selections, page counts, and layouts, with ordinary HTML/CSS kept easy to edit.
 
-The home page in `index.html` has **Experiments** on the left, linking to Sketch, Memory Part 1, Memory Part 2, and Apparitions, and **Interactive** on the right, linking to `double-exposure.html`. These columns stack in the same order on smaller screens. The experiment pages contain the selected photographs and reflections. Edit their source files; validated requested changes follow the commit, push, and Actions deployment workflow above.
+The home page in `index.html` has **Interactive** on the left, linking to `double-exposure.html`, and **Experiments** on the right, linking to Sketch, Memory Part 1, Memory Part 2, and Apparitions. Mobile stacks Interactive before Experiments. To adjust the scroll space below both boxes, change `padding-bottom: 60vh` in the `.home-links` rule in `styles.css`; `60vh` is 60% of the viewport height. The experiment pages contain the selected photographs and reflections. Edit their source files; validated requested changes follow the commit, push, and Actions deployment workflow above.
 
 ## Try it
 

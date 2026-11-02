@@ -166,6 +166,7 @@ h1 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 24px;
   align-items: stretch;
+  padding-bottom: 60vh;
 }
 
 /* Closed borders and centered content inside each box */
