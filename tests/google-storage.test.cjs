@@ -697,7 +697,9 @@ test("the real backend archives through the limited adapters with consent, origi
   const settings = { baseExposure: 0, participantExposure: 0, contrast: 12, monochrome: true };
   const firstId = crypto.randomUUID();
   const first = h.api("begin", { submissionId: firstId, original: image(2), allowReuse: false });
-  assert.equal(h.records("Sources").find(source => source.kind === "participant").eligible, false);
+  assert.equal(h.records("Sources").some(source => source.kind === "participant"), false);
+  assert.equal(first.originalRetained, false);
+  assert.match(first.originalId, /^unretained:[0-9a-f]{64}$/);
   const firstResult = { submissionId: firstId, token: first.token, result: image(3), width: 720, height: 480, settings };
   const completedFirst = h.api("complete", firstResult);
   assert.equal(completedFirst.saved, true);
@@ -705,7 +707,8 @@ test("the real backend archives through the limited adapters with consent, origi
 
   const secondId = crypto.randomUUID();
   const second = h.api("begin", { submissionId: secondId, original: image(2, "same-photo-again.jpg"), allowReuse: true });
-  assert.equal(second.originalId, first.originalId, "byte-identical uploads must reuse the same original file");
+  assert.notEqual(second.originalId, first.originalId, "only the later opted-in upload obtains a retained file ID");
+  assert.equal(second.originalRetained, true);
   assert.equal(h.api("bootstrap").participantCount, 0, "opt-in does not become eligible before a saved result");
   h.api("complete", { submissionId: secondId, token: second.token, result: image(4), width: 720, height: 480, settings });
   const sourcePool = h.api("bootstrap");
@@ -715,13 +718,13 @@ test("the real backend archives through the limited adapters with consent, origi
 
   const originals = [...h.files.values()].filter(file => file.metadata.parents.includes(h.properties.get("EXPOSURE_ORIGINALS_FOLDER_ID")));
   const results = [...h.files.values()].filter(file => file.metadata.parents.includes(h.properties.get("EXPOSURE_RESULTS_FOLDER_ID")));
-  assert.equal(originals.length, 0, "a completed opt-in moves the original out of private-only intake");
+  assert.equal(originals.length, 1, "a completed opt-in stays in the participant folder");
   assert.equal(results.length, 2);
-  const promoted = h.files.get(first.originalId);
-  assert.deepEqual(Array.from(promoted.metadata.parents), [h.properties.get("EXPOSURE_ARTIST_FOLDER_ID")]);
+  const promoted = h.files.get(second.originalId);
+  assert.deepEqual(Array.from(promoted.metadata.parents), [h.properties.get("EXPOSURE_ORIGINALS_FOLDER_ID")]);
   assert.match(promoted.metadata.name, /^participant_photo_[1-9]\d*\.jpg$/);
   assert.equal(promoted.metadata.appProperties.exposureRole, "participant");
-  assert.deepEqual(Buffer.from(promoted.bytes), Buffer.from(image(2).base64, "base64"), "moving and identifying the original preserves exact bytes");
+  assert.deepEqual(Buffer.from(promoted.bytes), Buffer.from(image(2).base64, "base64"), "retaining and identifying the original preserves exact bytes");
   assert.deepEqual(h.records("Submissions").map(row => [row.status, row.allowReuse]), [["complete", false], ["complete", true]]);
 
   const usage = h.records("Usage");
@@ -736,6 +739,27 @@ test("the real backend archives through the limited adapters with consent, origi
   assert.equal(h.api("bootstrap").participantCount, 1, "retrying an earlier opt-out result cannot revoke a later opt-in");
   assert.ok(h.calls.valuesUpdate.every(call => call.options.valueInputOption === "RAW"));
   assert.ok(h.calls.fetch.every(call => call.options.followRedirects === false));
+});
+
+test("a retained Yes original works with a read-only artist folder and is never moved into it", () => {
+  const h = backendHarness(); h.sandbox.setupProject();
+  const externalArtist = h.addFile({ mimeType: folderType, isAppAuthorized: false, appProperties: {} }, []);
+  h.addFile({ parents: [externalArtist.id], isAppAuthorized: false, appProperties: {} }, Buffer.from(image(1).base64, "base64"));
+  h.properties.set("EXPOSURE_ARTIST_FOLDER_ID", externalArtist.id);
+  const begun = h.api("begin", { submissionId: crypto.randomUUID(), original: image(2), allowReuse: true });
+  const receipt = h.api("complete", { submissionId: begun.submissionId, token: begun.token, result: image(3), width: 640, height: 480,
+    settings: { baseExposure: 0, participantExposure: 0, contrast: 12, monochrome: true } });
+  assert.equal(receipt.saved, true);
+  assert.equal(receipt.originalRetained, true);
+  assert.deepEqual(Array.from(h.files.get(begun.originalId).metadata.parents), [h.properties.get("EXPOSURE_ORIGINALS_FOLDER_ID")]);
+  assert.equal(h.files.get(begun.originalId).metadata.appProperties.exposureRole, "participant");
+  assert.ok(h.calls.update.every(call => !call.options.addParents || call.id !== begun.originalId), "consent never requires artist-folder write access");
+  h.sandbox.refreshArtistCollection();
+  assert.equal(h.api("bootstrap").participantCount, 1, "private-folder participants survive a fresh inventory");
+  assert.equal(h.api("bootstrap").artistCount, 1);
+  const next = h.api("begin", { submissionId: crypto.randomUUID(), original: image(1), allowReuse: false });
+  assert.equal(next.base.id, begun.originalId);
+  assert.equal(next.base.base64, image(2).base64);
 });
 
 test("the real backend discovers a Drive-dropped photo and pairs it without an artist import or extra copy", () => {

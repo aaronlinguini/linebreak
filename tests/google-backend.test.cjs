@@ -81,6 +81,7 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
     setTrashed(value) { this.trashed = value; return this; }
     getParents() { return iterator(this.folder ? [this.folder] : []); }
     moveTo(folder) {
+      if (this.folder === folder) return this;
       if (failures.fileMove) { failures.fileMove = false; throw new Error("Simulated Drive move failure"); }
       if (this.folder) this.folder.files = this.folder.files.filter((file) => file !== this);
       this.folder = folder; folder.files.push(this); return this;
@@ -214,8 +215,15 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
     return matches.find((entry) => /^\d+ /.test(entry.name)) || matches[0];
   };
   const seed = (marker = 1, name = `artist-${marker}.jpg`, mimeType = "image/jpeg", bytes = jpeg(marker)) => folder("Artist").createFile(new Blob(bytes, mimeType, name));
-  const begin = (number, marker = number + 10, allowReuse = false) =>
+  const begin = (number, marker = number + 10, allowReuse = true) =>
     data("begin", { submissionId: submissionId(number), original: original(marker), allowReuse });
+  const legacyBegin = (number, marker = number + 10) => {
+    const begun = begin(number, marker, true);
+    const sheet = [...books.values()][0].getSheetByName("Submissions");
+    const row = sheet.rows.find(values => values[0] === begun.submissionId);
+    row[sheet.rows[0].indexOf("allowReuse")] = false;
+    return begun;
+  };
   const completePayload = (begun, marker = 90) => ({ submissionId: begun.submissionId, token: begun.token, result: original(marker, `${begun.submissionId}.jpg`), width: 640, height: 480, settings: { baseExposure: -1, participantExposure: -1, contrast: 0, monochrome: false } });
   const setup = () => sandbox.setupProject();
   const refresh = () => sandbox.refreshArtistCollection();
@@ -225,7 +233,7 @@ function makeBackend({ activeEmail = "owner@example.test", effectiveEmail = "own
     const rows = [...books.values()][0].getSheetByName(name).rows;
     return clone(rows.slice(1).map((values) => Object.fromEntries(rows[0].map((header, index) => [header, values[index] ?? ""]))));
   };
-  return { sandbox, properties, files, folders, books, logs, failures, lock, source, api, data, folder, seed, begin, completePayload, setup, refresh, advance, usage, records, Blob, io };
+  return { sandbox, properties, files, folders, books, logs, failures, lock, source, api, data, folder, seed, begin, legacyBegin, completePayload, setup, refresh, advance, usage, records, Blob, io };
 }
 
 test("owner setup is repeatable and creates distinct private storage roles", () => {
@@ -278,18 +286,152 @@ test("completion archives the result, records both sources, and only then enable
   assert.equal(backend.lock.held, false);
 });
 
-test("a completed original is archived privately by default while an explicit opt-in joins the pool", () => {
+test("an opted-out original is not retained while an explicit opt-in stays private and joins the pool", () => {
   const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
-  const privateBegin = backend.begin(1, 22);
+  const privateBegin = backend.begin(1, 22, false);
+  assert.match(privateBegin.originalId, /^unretained:[0-9a-f]{64}$/);
+  assert.equal(privateBegin.originalRetained, false);
+  assert.equal(backend.records("Sources").length, 1);
   const privateResult = backend.data("complete", backend.completePayload(privateBegin, 90));
   assert.equal(privateResult.saved, true);
   assert.equal(backend.data("bootstrap").totalEligible, 1);
-  assert.equal(backend.folder("Participant").files.length, 1);
+  assert.equal(privateResult.originalRetained, false);
+  assert.equal(backend.folder("Participant").files.length, 0);
   assert.equal(backend.folder("Double exposure").files.length, 1);
   const publicBegin = backend.begin(2, 23, true);
+  assert.equal(publicBegin.originalRetained, true);
   backend.data("complete", backend.completePayload(publicBegin, 91));
   assert.equal(backend.data("bootstrap").totalEligible, 2);
+  assert.equal(backend.files.get(publicBegin.originalId).folder, backend.folder("Participant"));
+  assert.equal(backend.folder("Artist").files.length, 1);
   assert.equal(backend.api("begin", { submissionId: submissionId(2), original: original(23), allowReuse: false }).error.code, "SUBMISSION_CONFLICT");
+});
+
+test("No and an omitted sharing choice never write original files, source rows or original-byte reservations", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const beforeFiles = backend.files.size;
+  for (const [number, choice] of [[1, false], [2, undefined]]) {
+    const request = { submissionId: submissionId(number), original: original(22), ...(choice === undefined ? {} : { allowReuse: choice }) };
+    const begun = backend.data("begin", request);
+    assert.equal(begun.originalRetained, false);
+    assert.deepEqual(backend.data("begin", request), begun);
+    assert.equal(backend.files.size, beforeFiles);
+    assert.equal(backend.folder("Participant").files.length, 0);
+    assert.equal(backend.records("Sources").length, 1);
+    assert.equal(backend.records("Usage").filter(row => row.kind === "file").length, 0);
+    assert.equal(backend.api("begin", { ...request, original: original(23) }).error.code, "SUBMISSION_CONFLICT");
+    assert.equal(backend.api("begin", { ...request, allowReuse: true }).error.code, "SUBMISSION_CONFLICT");
+  }
+});
+
+test("an unretained original survives result retries and authenticated new-pair and colour reuse without any original write", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.seed(2); backend.refresh();
+  const first = backend.begin(1, 22, false);
+  const request = backend.completePayload(first);
+  backend.failures.fileCreate = true;
+  const failed = backend.api("complete", request);
+  assert.equal(failed.ok, false);
+  assert.equal(failed.error.originalSaved, false);
+  assert.equal(backend.records("Sources").length, 2);
+  const receipt = backend.data("complete", request);
+  assert.equal(receipt.originalRetained, false);
+  assert.deepEqual(backend.data("complete", request), receipt);
+  const reuse = { submissionId: first.submissionId, token: first.token };
+  const second = backend.data("begin", { submissionId: submissionId(2), reuse });
+  assert.equal(second.originalId, first.originalId);
+  assert.equal(second.originalRetained, false);
+  assert.notEqual(second.base.id, first.base.id);
+  backend.data("complete", backend.completePayload(second, 91));
+  const variant = backend.data("begin", { submissionId: submissionId(3), reuse: { ...reuse, sameBase: true } });
+  assert.deepEqual(variant.base, first.base);
+  const variantResult = backend.completePayload(variant, 92);
+  variantResult.settings.monochrome = true;
+  backend.data("complete", variantResult);
+  assert.equal(backend.folder("Participant").files.length, 0);
+  assert.equal(backend.records("Sources").length, 2);
+  assert.equal(backend.folder("Double exposure").files.length, 3);
+  assert.equal(backend.records("Usage").filter(row => row.kind === "file").length, 3);
+  assert.ok(backend.records("Submissions").every(row => row.allowReuse === false && row.originalId === first.originalId));
+  assert.equal(backend.api("begin", { submissionId: submissionId(4), reuse: { ...reuse, token: "forged" } }).error.code, "INVALID_TOKEN");
+  assert.equal(backend.api("begin", { submissionId: submissionId(4), reuse, allowReuse: true }).error.code, "INVALID_REQUEST");
+  assert.equal(backend.api("complete", { ...request, result: original(22) }).error.code, "RESULT_CONFLICT");
+});
+
+test("a No upload identical to an existing Yes source never stores or exposes its retained original ID", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const retained = backend.begin(1, 22, true); backend.data("complete", backend.completePayload(retained));
+  const count = backend.files.size;
+  const unretained = backend.begin(2, 22, false);
+  assert.notEqual(unretained.originalId, retained.originalId);
+  assert.equal(unretained.originalRetained, false);
+  assert.equal(backend.files.size, count);
+  backend.data("complete", backend.completePayload(unretained, 91));
+  assert.equal(backend.folder("Participant").files.length, 1);
+  assert.equal(backend.data("bootstrap").participantCount, 1);
+});
+
+test("No failures never claim original retention and cannot archive the unchanged transient original as a result", () => {
+  const backend = makeBackend(); backend.setup();
+  const request = { submissionId: submissionId(1), original: original(22), allowReuse: false };
+  const missing = backend.api("begin", request);
+  assert.equal(missing.error.code, "NO_BASE");
+  assert.equal(missing.error.originalSaved, false);
+  assert.equal(backend.folder("Participant").files.length, 0);
+  backend.seed(1); backend.refresh();
+  const begun = backend.data("begin", request);
+  const identical = backend.api("complete", backend.completePayload(begun, 22));
+  assert.equal(identical.error.code, "RESULT_MATCHES_SOURCE");
+  assert.equal(identical.error.originalSaved, false);
+  assert.equal(backend.folder("Double exposure").files.length, 0);
+  assert.equal(backend.records("Sources").length, 1);
+});
+
+test("Yes eligibility needs a completed result and survives scans without invoking any original move", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const begun = backend.begin(1, 22, true);
+  backend.refresh();
+  assert.equal(backend.data("bootstrap").participantCount, 0);
+  backend.failures.fileMove = true;
+  backend.data("complete", backend.completePayload(begun));
+  assert.equal(backend.failures.fileMove, true, "completing consent never attempts a folder move");
+  backend.refresh();
+  assert.equal(backend.data("bootstrap").participantCount, 1);
+  assert.equal(backend.files.get(begun.originalId).folder, backend.folder("Participant"));
+  assert.equal(backend.folder("Artist").files.length, 1);
+});
+
+test("a new Yes submission returns an existing participant original from My_photos without copying it", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
+  const previous = backend.legacyBegin(1, 22);
+  backend.data("complete", backend.completePayload(previous));
+  const originalFile = backend.files.get(previous.originalId);
+  originalFile.moveTo(backend.folder("Artist"));
+  originalFile.markParticipantPhoto("participant_photo_2.jpg");
+  const before = backend.files.size;
+  const next = backend.begin(2, 22, true);
+  assert.equal(next.originalId, previous.originalId);
+  assert.equal(originalFile.folder, backend.folder("Artist"), "begin does not move an existing original before the saved result");
+  backend.data("complete", backend.completePayload(next, 91));
+  assert.equal(originalFile.folder, backend.folder("Participant"));
+  assert.equal(backend.files.size, before + 1, "only the new completed exposure adds a file");
+  assert.deepEqual(originalFile.blob.bytes, jpeg(22));
+  backend.refresh();
+  assert.equal(backend.data("bootstrap").participantCount, 1);
+});
+
+test("a legacy retained No parent still re-pairs and archives colour variants without another original or new consent", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.seed(2); backend.refresh();
+  const first = backend.legacyBegin(1, 22);
+  backend.data("complete", backend.completePayload(first));
+  for (const [number, sameBase] of [[2, false], [3, true]]) {
+    const next = backend.data("begin", { submissionId: submissionId(number), reuse: { submissionId: first.submissionId, token: first.token, sameBase } });
+    assert.equal(next.originalId, first.originalId);
+    assert.equal(next.originalRetained, true);
+    backend.data("complete", backend.completePayload(next, 90 + number));
+  }
+  assert.equal(backend.folder("Participant").files.length, 1);
+  assert.equal(backend.data("bootstrap").participantCount, 0);
+  assert.ok(backend.records("Submissions").every(row => row.allowReuse === false));
 });
 
 test("another pairing reuses an authenticated original, chooses a different base, and archives a second result", () => {
@@ -306,8 +448,8 @@ test("another pairing reuses an authenticated original, chooses a different base
   assert.equal(secondReceipt.saved, true);
   assert.equal(secondReceipt.originalId, firstReceipt.originalId);
   assert.notEqual(secondReceipt.resultId, firstReceipt.resultId);
-  assert.equal(backend.folder("Participant").files.length, 0, "the consented original lives only in the shared base folder");
-  assert.equal(backend.folder("Artist").files.filter(file => file.getId() === first.originalId).length, 1);
+  assert.equal(backend.folder("Participant").files.length, 1, "the consented original stays in the private participant folder");
+  assert.equal(backend.folder("Artist").files.filter(file => file.getId() === first.originalId).length, 0);
   assert.equal(backend.folder("Double exposure").files.length, 2);
   const rows = [...backend.books.values()][0].getSheetByName("Submissions").rows;
   const secondRow = rows.find((row) => row.includes(second.submissionId));
@@ -318,12 +460,12 @@ test("another pairing reuses an authenticated original, chooses a different base
 
 test("a re-pair cannot reuse the same base when no alternative is available", () => {
   const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
-  const first = backend.begin(1, 22);
+  const first = backend.begin(1, 22, false);
   assert.equal(backend.data("complete", backend.completePayload(first)).canRePair, false);
   const attempt = backend.api("begin", { submissionId: submissionId(2), reuse: { submissionId: first.submissionId, token: first.token } });
   assert.equal(attempt.ok, false);
   assert.equal(attempt.error.code, "NO_ALTERNATIVE_BASE");
-  assert.equal(backend.folder("Participant").files.length, 1);
+  assert.equal(backend.folder("Participant").files.length, 0);
   assert.equal(backend.folder("Double exposure").files.length, 1);
 });
 
@@ -333,7 +475,7 @@ for (const consent of [false, true]) {
     const first = backend.begin(1, 22, consent);
     const firstResult = backend.completePayload(first, 90);
     const saved = backend.data("complete", firstResult);
-    const originalName = backend.files.get(first.originalId).getName();
+    const originalName = backend.files.get(first.originalId)?.getName();
     const request = { submissionId: submissionId(2), reuse: { submissionId: first.submissionId, token: first.token, sameBase: true } };
     const variant = backend.data("begin", request);
     assert.equal(variant.originalId, first.originalId);
@@ -344,21 +486,23 @@ for (const consent of [false, true]) {
     nextResult.settings.monochrome = true;
     const nextSaved = backend.data("complete", nextResult);
     assert.equal(nextSaved.baseId, saved.baseId);
-    assert.equal(backend.files.get(first.originalId).getName(), originalName);
-    assert.equal(backend.records("Sources").filter(source => source.kind === "participant").length, 1);
+    assert.equal(backend.files.get(first.originalId)?.getName(), originalName);
+    assert.equal(backend.records("Sources").filter(source => source.kind === "participant").length, consent ? 1 : 0);
     assert.equal(backend.folder("Double exposure").files.length, 2);
     const row = backend.records("Submissions").find(row => row.submissionId === variant.submissionId);
     assert.equal(row.allowReuse, consent);
     assert.equal(row.parentSubmissionId, first.submissionId);
     assert.equal(row.baseSha256, backend.records("Submissions")[0].baseSha256);
     assert.equal(JSON.parse(row.settingsJson).monochrome, true);
-    assert.equal(backend.folder(consent ? "Artist" : "Participant").files.filter(file => file.getId() === first.originalId).length, 1);
+    assert.equal(backend.folder("Participant").files.filter(file => file.getId() === first.originalId).length, consent ? 1 : 0);
+    assert.equal(variant.originalRetained, consent);
+    assert.equal(nextSaved.originalRetained, consent);
 
     const back = backend.data("begin", { submissionId: submissionId(3), reuse: { submissionId: variant.submissionId, token: variant.token, sameBase: true } });
     const backSaved = backend.data("complete", { ...firstResult, submissionId: back.submissionId, token: back.token });
     assert.equal(backSaved.resultId, saved.resultId, "identical finished bytes reuse the first colour version's archived file");
     assert.equal(backend.folder("Double exposure").files.length, 2);
-    assert.equal(backend.files.get(first.originalId).getName(), originalName);
+    assert.equal(backend.files.get(first.originalId)?.getName(), originalName);
   });
 }
 
@@ -450,12 +594,12 @@ test("trusted website artist assets replace base-byte downloads while keeping pi
   const asset = assetFor(backend, artist.getId(), "été #1? 50%.jpg");
   backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: [asset] });
   const reads = backend.io.blobReads;
-  const first = backend.begin(1, 22);
+  const first = backend.begin(1, 22, false);
   assert.deepEqual(first.base, { id: artist.getId(), ...asset });
   assert.equal(first.base.base64, undefined);
   assert.equal(first.base.url, undefined);
   assert.equal(backend.io.blobReads, reads, "cached artist intake and base delivery must not download the original photograph");
-  assert.deepEqual(backend.begin(1, 22), first);
+  assert.deepEqual(backend.begin(1, 22, false), first);
   backend.data("complete", backend.completePayload(first));
   const variant = backend.data("begin", { submissionId: submissionId(2), reuse: { submissionId: first.submissionId, token: first.token, sameBase: true } });
   assert.deepEqual(variant.base, first.base);
@@ -500,7 +644,7 @@ test("configured artist assets exclude unmapped sources and never fall back to a
   const first = backend.begin(1, 22);
   assert.equal(first.base.id, firstArtist.getId());
   backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: [secondAsset] });
-  assert.equal(backend.api("begin", { submissionId: first.submissionId, original: original(22) }).error.code, "BASE_UNAVAILABLE");
+  assert.equal(backend.api("begin", { submissionId: first.submissionId, original: original(22), allowReuse: true }).error.code, "BASE_UNAVAILABLE");
   assert.equal(backend.records("Submissions")[0].baseId, firstArtist.getId());
   assert.equal(backend.records("Submissions")[0].baseSha256, firstAsset.sha256);
   assert.equal(backend.begin(2, 23).base.id, secondArtist.getId());
@@ -538,7 +682,7 @@ test("changed artist bytes cannot be returned under a trusted website asset's ol
   const first = backend.begin(1, 22);
   artist.blob = new backend.Blob(jpeg(2), "image/jpeg", artist.getName());
   artist.date = new Date("2026-10-29T12:01:00Z"); backend.advance(60000);
-  assert.equal(backend.api("begin", { submissionId: first.submissionId, original: original(22) }).error.code, "BASE_UNAVAILABLE");
+  assert.equal(backend.api("begin", { submissionId: first.submissionId, original: original(22), allowReuse: true }).error.code, "BASE_UNAVAILABLE");
   assert.equal(backend.data("bootstrap").artistCount, 0);
   assert.equal(backend.records("Submissions")[0].baseSha256, asset.sha256);
 });
@@ -608,7 +752,7 @@ test("a preferred static preview is pinned before base delivery and stays stable
   const assets = [assetFor(backend, one.getId(), "one.jpg"), assetFor(backend, two.getId(), "two.jpg")];
   backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: assets });
   vm.runInContext("Math.random = () => 0", backend.sandbox);
-  const request = { submissionId: submissionId(1), original: original(22), preferredBaseSha256: assets[1].sha256 };
+  const request = { submissionId: submissionId(1), original: original(22), allowReuse: true, preferredBaseSha256: assets[1].sha256 };
   const begun = backend.data("begin", request);
   assert.equal(begun.base.id, two.getId(), "the server must honor the validated preview instead of drawing a different base");
   assert.equal(begun.base.sha256, assets[1].sha256);
@@ -652,7 +796,7 @@ test("preferred choices reject invalid types, unknown/unmapped/self hashes and n
   const asset = assetFor(backend, one.getId());
   const other = assetFor(backend, two.getId(), "other.jpg");
   backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: [asset] });
-  const participant = backend.begin(1, 22, false); backend.data("complete", backend.completePayload(participant));
+  const participant = backend.legacyBegin(1, 22); backend.data("complete", backend.completePayload(participant));
   const nonconsented = backend.records("Sources").find(source => source.sourceId === participant.originalId).sha256;
   const count = backend.files.size;
   for (const preferredBaseSha256 of [null, 1, true, "", "wrong", "A".repeat(64), [], {}]) {
@@ -673,7 +817,7 @@ test("failed preferred participant reads keep their exact pin and never substitu
   const source = backend.records("Sources").find(source => source.sourceId === first.originalId);
   const file = backend.files.get(first.originalId); const read = file.getBlob.bind(file);
   file.getBlob = () => { throw new Error("Temporary Drive read failure"); };
-  const request = { submissionId: submissionId(2), original: original(23), preferredBaseSha256: source.sha256 };
+  const request = { submissionId: submissionId(2), original: original(23), allowReuse: true, preferredBaseSha256: source.sha256 };
   const failed = backend.api("begin", request);
   assert.equal(failed.error.code, "BASE_UNAVAILABLE");
   assert.equal(failed.error.originalSaved, true);
@@ -684,12 +828,12 @@ test("failed preferred participant reads keep their exact pin and never substitu
   const retry = backend.data("begin", request);
   assert.equal(retry.base.id, first.originalId);
   assert.equal(retry.token, stored.token);
-  assert.equal(backend.folder("Participant").files.length, 1, "only the new nonconsented upload remains here");
+  assert.equal(backend.folder("Participant").files.length, 2, "the completed and pending opted-in originals remain private");
 });
 
 test("another pairing rejects a forged token and cannot change opt-in", () => {
   const backend = makeBackend(); backend.setup(); backend.seed(1); backend.seed(2); backend.refresh();
-  const first = backend.begin(1, 22); backend.data("complete", backend.completePayload(first));
+  const first = backend.begin(1, 22, false); backend.data("complete", backend.completePayload(first));
   const previous = { submissionId: first.submissionId, token: "wrong-token" };
   assert.equal(backend.api("begin", { submissionId: submissionId(2), reuse: previous }).error.code, "INVALID_TOKEN");
   assert.equal(backend.api("begin", { submissionId: submissionId(2), reuse: { ...previous, token: first.token }, allowReuse: true }).error.code, "INVALID_REQUEST");
@@ -751,7 +895,7 @@ for (const boundary of ["source", "pending", "paired"]) {
     backend.failures.sheetWrite = (sheet, values) => boundary === "source"
       ? sheet.name === "Sources" && values.some((row) => row.includes("participant"))
       : sheet.name === "Submissions" && values.some((row) => row.includes(boundary));
-    const failed = backend.api("begin", { submissionId: submissionId(1), original: original(22) });
+    const failed = backend.api("begin", { submissionId: submissionId(1), original: original(22), allowReuse: true });
     assert.equal(failed.ok, false);
     assert.equal(backend.folder("Participant").files.length, 1);
     assert.deepEqual(backend.folder("Participant").files[0].blob.bytes, jpeg(22));
@@ -792,8 +936,8 @@ test("duplicate participant files share one stored source while each result is r
   const first = backend.begin(1, 22, true); backend.data("complete", backend.completePayload(first, 90));
   const second = backend.begin(2, 22); backend.data("complete", backend.completePayload(second, 91));
   assert.equal(first.originalId, second.originalId);
-  assert.equal(backend.folder("Participant").files.length, 0);
-  assert.equal(backend.folder("Artist").files.filter(file => file.getId() === first.originalId).length, 1);
+  assert.equal(backend.folder("Participant").files.length, 1);
+  assert.equal(backend.folder("Artist").files.filter(file => file.getId() === first.originalId).length, 0);
   assert.equal(backend.folder("Double exposure").files.length, 2);
   assert.equal(backend.data("bootstrap").totalEligible, 2, "a duplicate must not gain additional selection weight");
 });
@@ -842,7 +986,7 @@ test("a temporary base-read error can be retried without manually reimporting th
   const read = artist.getBlob.bind(artist);
   let shouldFail = true;
   artist.getBlob = () => { if (shouldFail) { shouldFail = false; throw new Error("Temporary Drive read failure"); } return read(); };
-  const failed = backend.api("begin", { submissionId: submissionId(1), original: original(22) });
+  const failed = backend.api("begin", { submissionId: submissionId(1), original: original(22), allowReuse: true });
   assert.equal(failed.ok, false);
   assert.equal(failed.error.originalSaved, true);
   assert.equal(backend.data("bootstrap").totalEligible, 1, "a temporary read must not permanently disable the sole base");
@@ -871,7 +1015,7 @@ test("an invalid completion token cannot save a result or enable a source", () =
 
 test("a submission saved before a missing-base error can be resumed after artist seeding", () => {
   const backend = makeBackend(); backend.setup();
-  const response = backend.api("begin", { submissionId: submissionId(1), original: original(22) });
+  const response = backend.api("begin", { submissionId: submissionId(1), original: original(22), allowReuse: true });
   assert.equal(response.ok, false);
   assert.equal(response.error.originalSaved, true);
   assert.equal(backend.folder("Participant").files.length, 1);
@@ -1152,7 +1296,7 @@ test("failed Drive creation retains one reservation that a retry can reuse at th
   const backend = makeBackend(); backend.setup(); backend.seed(); backend.refresh();
   backend.properties.set("UPLOAD_BYTES_PER_DAY", String(jpeg(22).length));
   backend.failures.fileCreate = true;
-  assert.equal(backend.api("begin", { submissionId: submissionId(1), original: original(22) }).ok, false);
+  assert.equal(backend.api("begin", { submissionId: submissionId(1), original: original(22), allowReuse: true }).ok, false);
   assert.equal(backend.folder("Participant").files.length, 0);
   const reserved = backend.usage();
   assert.equal(reserved.length, 2);
@@ -1164,7 +1308,7 @@ test("failed Drive creation retains one reservation that a retry can reuse at th
 test("a failed quota reservation never proceeds to a Drive write", () => {
   const backend = makeBackend(); backend.setup(); backend.seed(); backend.refresh();
   backend.failures.sheetWrite = (sheet, values) => sheet.name === "Usage" && values.some((row) => row.includes("file"));
-  assert.equal(backend.api("begin", { submissionId: submissionId(1), original: original(22) }).ok, false);
+  assert.equal(backend.api("begin", { submissionId: submissionId(1), original: original(22), allowReuse: true }).ok, false);
   assert.equal(backend.folder("Participant").files.length, 0);
   assert.equal(backend.usage().length, 1, "the submission reservation remains conservative");
   backend.begin(1, 22);
@@ -1177,7 +1321,7 @@ test("an unused reservation from yesterday must fit today's limit before creatin
   const bytes = jpeg(22).length;
   backend.properties.set("UPLOAD_BYTES_PER_DAY", String(bytes));
   backend.failures.fileCreate = true;
-  const delayed = { submissionId: submissionId(1), original: original(22) };
+  const delayed = { submissionId: submissionId(1), original: original(22), allowReuse: true };
   assert.equal(backend.api("begin", delayed).ok, false);
   backend.advance(86400000);
   backend.begin(2, 23);
@@ -1281,7 +1425,7 @@ test("automatic folder refresh caches unchanged images including duplicate files
   assert.equal(backend.io.listings, listings, "ordinary requests within a minute reuse the last complete inventory");
   backend.advance(1);
   assert.equal(backend.data("bootstrap").artistCount, 1);
-  assert.equal(backend.io.listings, listings + 1);
+  assert.equal(backend.io.listings, listings + 2);
   assert.equal(backend.io.blobReads, reads, "metadata-matching duplicate files also skip binary reads");
   assert.notEqual(backend.properties.get("EXPOSURE_ARTIST_REFRESHED_AT"), refreshed);
 });
@@ -1331,7 +1475,7 @@ test("a begin retry never substitutes an edited artist file for its pinned base"
   backend.seed(3, "alternative.jpg");
   backend.advance(60000);
   for (let attempt = 0; attempt < 2; attempt++) {
-    const retry = backend.api("begin", { submissionId: first.submissionId, original: original(22) });
+    const retry = backend.api("begin", { submissionId: first.submissionId, original: original(22), allowReuse: true });
     assert.equal(retry.ok, false);
     assert.equal(retry.error.code, "BASE_UNAVAILABLE");
     assert.equal(retry.error.originalSaved, true);
@@ -1348,7 +1492,7 @@ test("metadata caching never replaces content verification for a previously assi
   // Even if a source keeps the same size and modification time, its actual
   // bytes must still match the photograph that this submission was assigned.
   artist.blob = new backend.Blob(jpeg(2), "image/jpeg", artist.getName());
-  const retry = backend.api("begin", { submissionId: first.submissionId, original: original(22) });
+  const retry = backend.api("begin", { submissionId: first.submissionId, original: original(22), allowReuse: true });
   assert.equal(retry.ok, false);
   assert.equal(retry.error.code, "BASE_UNAVAILABLE");
   assert.equal(backend.records("Submissions")[0].baseSha256, pinned);
@@ -1367,7 +1511,7 @@ test("legacy assigned bases are durably pinned before a refresh can change their
   artist.date = new Date("2026-10-29T12:01:00Z");
   backend.advance(60000);
   for (let attempt = 0; attempt < 2; attempt++) {
-    const retry = backend.api("begin", { submissionId: first.submissionId, original: original(22) });
+    const retry = backend.api("begin", { submissionId: first.submissionId, original: original(22), allowReuse: true });
     assert.equal(retry.error.code, "BASE_UNAVAILABLE");
     assert.equal(backend.records("Submissions")[0].baseSha256, oldHash);
   }
@@ -1522,7 +1666,7 @@ test("Drive SHA changes invalidate artist cache identity even when size and modi
   const updated = backend.records("Sources").find(record => record.sourceId === artist.getId());
   assert.equal(updated.sha256, crypto.createHash("sha256").update(jpeg(2)).digest("hex"));
   assert.notEqual(updated.sha256, pinned);
-  const retry = backend.api("begin", { submissionId: first.submissionId, original: original(22) });
+  const retry = backend.api("begin", { submissionId: first.submissionId, original: original(22), allowReuse: true });
   assert.equal(retry.error.code, "BASE_UNAVAILABLE");
   assert.equal(backend.records("Submissions")[0].baseSha256, pinned);
 });
@@ -1540,9 +1684,9 @@ test("failed artist probes preserve the old index and refuse new-original storag
   assert.equal(backend.records("Sources")[0].eligible, true);
 });
 
-test("late consent moves one unchanged original into the base folder and retains participant provenance", () => {
+test("late consent retains one legacy original in its private folder with participant provenance", () => {
   const backend = makeBackend(); backend.setup(); const artist = backend.seed(1); backend.seed(2); backend.refresh();
-  const first = backend.begin(1, 22, false);
+  const first = backend.legacyBegin(1, 22);
   backend.data("complete", backend.completePayload(first, 90));
   const participant = backend.files.get(first.originalId);
   const before = backend.files.size;
@@ -1552,8 +1696,8 @@ test("late consent moves one unchanged original into the base folder and retains
   assert.equal(participant.folder, backend.folder("Participant"), "selecting consent alone does not expose an unfinished submission");
   const request = backend.completePayload(optedIn, 91);
   backend.data("complete", request);
-  assert.equal(backend.files.size, before + 1, "only the new result is written; promoting the original is a move");
-  assert.equal(participant.folder, backend.folder("Artist"));
+  assert.equal(backend.files.size, before + 1, "only the new result is written; the original is retained in place");
+  assert.equal(participant.folder, backend.folder("Participant"));
   assert.match(participant.getName(), /^participant_photo_[1-9]\d*\.jpg$/);
   assert.deepEqual(participant.blob.bytes, jpeg(22));
   assert.equal(participant.isParticipantPhoto(), true);
@@ -1566,7 +1710,7 @@ test("late consent moves one unchanged original into the base folder and retains
   backend.data("complete", request);
   backend.data("complete", backend.completePayload(first, 90));
   assert.equal(participant.getName(), promotedName, "retries retain the participant's assigned number");
-  assert.equal(participant.folder, backend.folder("Artist"), "an earlier opt-out does not revoke a completed opt-in");
+  assert.equal(participant.folder, backend.folder("Participant"), "an earlier opt-out does not revoke a completed opt-in");
   assert.equal(artist.getName(), "artist-1.jpg");
   backend.properties.set("INCLUDE_PARTICIPANT_PHOTOS", "false");
   assert.equal(backend.data("bootstrap").totalEligible, 2, "participant provenance survives a folder scan and global exclusion");
@@ -1585,13 +1729,13 @@ test("different consenting participants receive distinct stable numbered names",
   }
   assert.equal(new Set(names).size, 3);
   for (const name of names) assert.match(name, /^participant_photo_[1-9]\d*\.jpg$/);
-  assert.equal(backend.folder("Participant").files.length, 0);
-  assert.equal(backend.folder("Artist").files.length, 4);
+  assert.equal(backend.folder("Participant").files.length, 3);
+  assert.equal(backend.folder("Artist").files.length, 1);
 });
 
 test("moving a private participant original into My_photos never bypasses consent", () => {
   const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
-  const begun = backend.begin(1, 22, false);
+  const begun = backend.legacyBegin(1, 22);
   backend.data("complete", backend.completePayload(begun, 90));
   const originalFile = backend.files.get(begun.originalId);
   originalFile.moveTo(backend.folder("Artist"));
@@ -1614,7 +1758,7 @@ test("a marked participant file without a completed consent record is not discov
   assert.equal(backend.records("Sources").filter(source => source.sourceId === orphan.getId() && source.kind === "artist").length, 0);
 });
 
-for (const boundary of ["participantMark", "fileMove"]) {
+for (const boundary of ["participantMark"]) {
   test(`a failed ${boundary} promotion retries without duplicate originals or a second participant number`, () => {
     const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
     const begun = backend.begin(1, 22, true);
@@ -1627,9 +1771,9 @@ for (const boundary of ["participantMark", "fileMove"]) {
     const receipt = backend.data("complete", request);
     const stored = backend.files.get(receipt.originalId);
     assert.equal(backend.files.size, fileCount, "retry repairs promotion rather than creating another image");
-    assert.equal(stored.folder, backend.folder("Artist"));
+    assert.equal(stored.folder, backend.folder("Participant"));
     assert.match(stored.getName(), /^participant_photo_[1-9]\d*\.jpg$/);
-    assert.equal(backend.folder("Participant").files.length, 0);
+    assert.equal(backend.folder("Participant").files.length, 1);
     assert.equal(backend.folder("Double exposure").files.length, 1);
     assert.equal(backend.data("bootstrap").participantCount, 1);
   });
@@ -1642,11 +1786,11 @@ test("identical finished exposures from separate submissions share one verified 
     const begun = backend.begin(number, 22, number === 1);
     receipts.push(backend.data("complete", backend.completePayload(begun, 90)));
   }
-  assert.equal(new Set(receipts.map(receipt => receipt.originalId)).size, 1);
+  assert.equal(new Set(receipts.map(receipt => receipt.originalId)).size, 2, "unretained submissions reference their hash without reusing a retained file ID");
   assert.equal(new Set(receipts.map(receipt => receipt.resultId)).size, 1, "same result bytes must not create another Drive copy, including artist tests");
   assert.equal(backend.folder("Double exposure").files.length, 1);
-  assert.equal(backend.folder("Artist").files.length, 3);
-  assert.equal(backend.folder("Participant").files.length, 0);
+  assert.equal(backend.folder("Artist").files.length, 2);
+  assert.equal(backend.folder("Participant").files.length, 1);
   assert.equal(backend.records("Submissions").length, 3, "each exposure's receipt and consent history is still recorded");
   assert.equal(backend.usage().filter(row => row[2] === "file").length, 2, "one original and one unique result are charged");
 });
@@ -1726,7 +1870,7 @@ test("unfinished bounded collection scans refuse new originals until duplicate c
 
 test("owner test imports reuse private participant originals without granting consent or copying them", () => {
   const backend = makeBackend(); backend.setup(); backend.seed(1); backend.refresh();
-  const begun = backend.begin(1, 22, false);
+  const begun = backend.legacyBegin(1, 22);
   backend.data("complete", backend.completePayload(begun, 90));
   const count = backend.files.size;
   const response = clone(backend.sandbox.artistApi({ action: "import", payload: { image: original(22, "artist-test-copy.jpg") } }));

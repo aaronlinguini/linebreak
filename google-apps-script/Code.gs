@@ -1,9 +1,9 @@
 /*
  * Private Drive archive + Sheets index for the double-exposure project.
- * Runs in a dedicated project account. My_photos contains artist bases and
- * completed, opted-in participant originals; unshared originals remain private
- * in participant_uploads. Each original file is stored once and moved, not
- * copied, when it joins the pool. Completed exposures have their own folder.
+ * Runs in a dedicated project account. My_photos contains artist bases.
+ * Opted-in originals stay in participant_uploads and join the pool only after
+ * their result is saved. Opted-out originals are not retained. Completed
+ * exposures have their own folder.
  * Archive writes remain limited to app-created files.
  * Run setupProject, then add base photographs directly in the Drive folder.
  * No operation changes Drive sharing settings.
@@ -124,7 +124,7 @@ function exposureApi(request) {
       code: error && error.exposureCode_ ? error.exposureCode_ : "ARCHIVE_UNAVAILABLE",
       message: error && error.exposureCode_ ? error.message : "The archive is temporarily unavailable. Please retry."
     };
-    if (error && error.originalSaved_ === true) response.originalSaved = true;
+    if (error && typeof error.originalSaved_ === "boolean") response.originalSaved = error.originalSaved_;
     return { ok: false, error: response };
   }
 }
@@ -328,7 +328,7 @@ function refreshArtistSources_(project) {
     issues.push(item);
   }
   var submissions = readRecords_(project.submissions, EXPOSURE_CONFIG_.submissionsHeaders);
-  var files = project.artist.getFiles();
+  var files = project.artist.getFiles(), participantFiles = project.originals.getFiles();
   function preserve(fileId) {
     var previous = byId[fileId];
     if (!previous || previous.kind !== "artist") return;
@@ -338,8 +338,9 @@ function refreshArtistSources_(project) {
       preserved++;
     }
   }
-  while (files.hasNext()) {
-    var file = files.next(), fileId = "", size = null, mimeType = "";
+  while (files.hasNext() || participantFiles.hasNext()) {
+    var privateOriginal = !files.hasNext();
+    var file = privateOriginal ? participantFiles.next() : files.next(), fileId = "", size = null, mimeType = "";
     try {
       fileId = file.getId();
       size = file.getSize(); mimeType = file.getMimeType();
@@ -349,6 +350,8 @@ function refreshArtistSources_(project) {
       if (invalidReason) { skipped++; issue(file, invalidReason, size, mimeType); continue; }
       var modifiedAt = file.getLastUpdated().toISOString();
       var previous = byId[fileId];
+      // A private-folder file needs recorded participant provenance and consent.
+      if (privateOriginal && (!previous || previous.kind !== "participant") && !file.isParticipantPhoto()) continue;
       // Moving a participant original into the pool never makes it an artist
       // photograph. A private role marker also protects an orphaned index row.
       var participant = previous && previous.kind === "participant";
@@ -515,7 +518,7 @@ function begin_(project, payload) {
     originalHash = previous.originalSha256;
     allowReuse = previous.allowReuse === true || previous.allowReuse === "true";
     if (sameBase && (!previous.baseId || !/^[0-9a-f]{64}$/.test(previous.baseSha256))) {
-      throw apiError_("BASE_UNAVAILABLE", "The previous photograph pairing is unavailable. Please contact the artist.", true);
+      throw apiError_("BASE_UNAVAILABLE", "The previous photograph pairing is unavailable. Please contact the artist.", !unretainedOriginal_(previous));
     }
   } else {
     if (payload.allowReuse !== undefined && typeof payload.allowReuse !== "boolean") {
@@ -545,13 +548,16 @@ function begin_(project, payload) {
       throw apiError_("SUBMISSION_CONFLICT", "This submission already belongs to a different photograph pairing. Retry the original choice.");
     }
     preferred = findRecord_(eligibleSources_(project, originalHash, includeParticipants_()), "sha256", preferredHash);
-    if (!preferred) throw apiError_("BASE_UNAVAILABLE", "The chosen photograph is unavailable for this pairing. Please retry the same photo.", Boolean(submission));
+    if (!preferred) throw apiError_("BASE_UNAVAILABLE", "The chosen photograph is unavailable for this pairing. Please retry the same photo.", Boolean(submission) && !unretainedOriginal_(submission));
   }
   if (!submission) {
     reserveUsage_(project, "submission:" + submissionId, "submission", 0);
+    if (!previous && !allowReuse) rejectArchivedResult_(project, original);
     var source = previous
-      ? findRecord_(readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders), "sourceId", previous.originalId)
-      : saveOriginal_(project, original);
+      ? unretainedOriginal_(previous) ? { sourceId: previous.originalId, sha256: originalHash }
+        : findRecord_(readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders), "sourceId", previous.originalId)
+      : allowReuse ? saveOriginal_(project, original)
+        : { sourceId: "unretained:" + originalHash, sha256: originalHash };
     if (!source || source.sha256 !== originalHash) throw apiError_("ARCHIVE_UNAVAILABLE", "The original photograph is unavailable. Please contact the artist.");
     submission = {
       submissionId: submissionId, token: newToken_(), originalId: source.sourceId,
@@ -590,18 +596,19 @@ function begin_(project, payload) {
         }
       }
       if (!base) {
-        if (hadCandidates) throw apiError_("BASE_UNAVAILABLE", "Your original was saved, but source photographs could not be read. Please retry.", true);
-        if (previous) throw apiError_("NO_ALTERNATIVE_BASE", "There is no different photograph available for another pairing yet.", true);
-        throw apiError_("NO_BASE", "Your original was saved. No different source photograph is available yet. Retry after the artist adds photographs.", true);
+        if (hadCandidates) throw apiError_("BASE_UNAVAILABLE", "Source photographs could not be read. Please retry.", !unretainedOriginal_(submission));
+        if (previous) throw apiError_("NO_ALTERNATIVE_BASE", "There is no different photograph available for another pairing yet.", !unretainedOriginal_(submission));
+        throw apiError_("NO_BASE", "No different source photograph is available yet. Retry after the artist adds photographs.", !unretainedOriginal_(submission));
       }
       submission.baseId = base.id;
       submission.baseSha256 = baseHash;
       submission.status = "paired";
       writeRecord_(project.submissions, EXPOSURE_CONFIG_.submissionsHeaders, submission);
     }
-    return { submissionId: submissionId, token: submission.token, originalId: submission.originalId, base: base };
+    return { submissionId: submissionId, token: submission.token, originalId: submission.originalId,
+      originalRetained: !unretainedOriginal_(submission), base: base };
   } catch (error) {
-    error.originalSaved_ = true;
+    error.originalSaved_ = !unretainedOriginal_(submission);
     throw error;
   }
 }
@@ -613,7 +620,7 @@ function complete_(project, payload) {
     throw apiError_("INVALID_TOKEN", "This submission could not be verified. Retry the original submission.");
   }
   try {
-    if (!submission.baseId) throw apiError_("NO_BASE", "Your original is saved, but it has not been paired yet. Retry the original submission.", true);
+    if (!submission.baseId) throw apiError_("NO_BASE", "This photograph has not been paired yet. Retry the original submission.", !unretainedOriginal_(submission));
     var result = imageInput_(payload.result, EXPOSURE_CONFIG_.maxResultBytes, true);
     var dimensions = dimensions_(payload.width, payload.height);
     var settings = settings_(payload.settings);
@@ -621,7 +628,7 @@ function complete_(project, payload) {
     if (submission.resultSha256 && (submission.resultSha256 !== result.hash || Number(submission.width) !== dimensions.width || Number(submission.height) !== dimensions.height || submission.settingsJson !== settingsJson)) {
       throw apiError_("RESULT_CONFLICT", "This submission already has a different result. Start a new submission to save another result.", true);
     }
-    var sourceMatch = readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders).some(function (source) {
+    var sourceMatch = result.hash === submission.originalSha256 || readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders).some(function (source) {
       return source.sha256 === result.hash;
     });
     if (sourceMatch) throw apiError_("RESULT_MATCHES_SOURCE", "The finished exposure is identical to an archived original. No additional copy was saved.");
@@ -638,21 +645,29 @@ function complete_(project, payload) {
     submission.status = "complete";
     if (!submission.completedAt) submission.completedAt = now_();
     writeRecord_(project.submissions, EXPOSURE_CONFIG_.submissionsHeaders, submission);
-    var original = findRecord_(readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders), "sourceId", submission.originalId);
-    if (!original) throw apiError_("ARCHIVE_UNAVAILABLE", "The original's archive record is unavailable. Please retry.", true);
+    var original = unretainedOriginal_(submission) ? null
+      : findRecord_(readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders), "sourceId", submission.originalId);
+    if (!original && !unretainedOriginal_(submission)) throw apiError_("ARCHIVE_UNAVAILABLE", "The original's archive record is unavailable. Please retry.", true);
     // Eligibility follows the saved result and this photograph's consent.
     // A retry repairs an interrupted final update without another file write.
-    if ((submission.allowReuse === true || submission.allowReuse === "true") && original.kind === "participant") {
+    if ((submission.allowReuse === true || submission.allowReuse === "true") && original && original.kind === "participant") {
       shareParticipantOriginal_(project, original);
     }
     var currentBase = findRecord_(readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders), "sourceId", submission.baseId);
     var alternatives = currentBase ? eligibleSources_(project, submission.originalSha256, includeParticipants_(), submission.baseSha256 || currentBase.sha256) : [];
     return { submissionId: submissionId, saved: true, resultId: file.getId(), originalId: submission.originalId,
+      originalRetained: !unretainedOriginal_(submission),
       baseId: submission.baseId, canRePair: alternatives.length > 0 };
   } catch (error) {
-    error.originalSaved_ = true;
+    error.originalSaved_ = !unretainedOriginal_(submission);
     throw error;
   }
+}
+
+function unretainedOriginal_(submission) {
+  return submission && submission.allowReuse !== true && submission.allowReuse !== "true" &&
+    /^[0-9a-f]{64}$/.test(submission.originalSha256 || "") &&
+    submission.originalId === "unretained:" + submission.originalSha256;
 }
 
 function saveOriginal_(project, image) {
@@ -678,16 +693,15 @@ function saveOriginal_(project, image) {
   return source;
 }
 
-// A contribution keeps the same file ID and bytes. The source-row ordinal is
-// stable across retries and avoids a second counter or a duplicate Drive write.
+// A contribution keeps its file ID and bytes in the participant folder. The
+// source-row ordinal stays stable across retries without another counter.
 function shareParticipantOriginal_(project, source) {
   readSource_(source);
   var file = ArchiveDrive.getFileById(source.sourceId);
   var filename = "participant_photo_" + (source._row - 1) + "." + extension_(source.mimeType);
-  // Persist the participant role before moving. Folder discovery can then never
-  // mistake this managed original for an artist photo if a later write fails.
+  // Persist provenance before eligibility so a scan cannot invent consent.
   file.markParticipantPhoto(filename);
-  file.moveTo(ArchiveDrive.getFolderById(project.artist.getId()));
+  file.moveTo(project.originals);
   source.nameJson = JSON.stringify(filename);
   source.modifiedAt = file.getLastUpdated().toISOString();
   source.eligible = true;
@@ -1139,6 +1153,6 @@ function escapeHtml_(value) { return String(value).replace(/&/g, "&amp;").replac
 function apiError_(code, message, originalSaved) {
   var error = new Error(message);
   error.exposureCode_ = code;
-  if (originalSaved) error.originalSaved_ = true;
+  if (typeof originalSaved === "boolean") error.originalSaved_ = originalSaved;
   return error;
 }

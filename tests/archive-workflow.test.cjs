@@ -38,21 +38,24 @@ function fixture(overrides = {}) {
   return { workflow, calls, storage };
 }
 
-function modeFixture({ monochrome = false, canRePair = true } = {}) {
+function modeFixture({ monochrome = false, canRePair = true, originalRetained } = {}) {
   const calls = [];
   const bases = new Map();
+  const original = originalRetained === undefined ? {} : {
+    originalRetained, originalId: originalRetained ? "original-1" : `unretained:${"c".repeat(64)}`
+  };
   let serial = 0;
   const storage = {
     begin: async request => {
       calls.push(["begin", request]);
       const baseId = request.reuse && request.reuse.sameBase !== true ? "base-2" : "base-1";
       bases.set(request.submissionId, baseId);
-      return { ...begin(), submissionId: request.submissionId, token: `token-${request.submissionId}`,
+      return { ...begin(), ...original, submissionId: request.submissionId, token: `token-${request.submissionId}`,
         base: { id: baseId, mimeType: "image/jpeg", base64: "AA==" } };
     },
     complete: async request => {
       calls.push(["complete", request]);
-      return { ...receipt(), submissionId: request.submissionId, resultId: `result-${request.submissionId}`,
+      return { ...receipt(), ...original, submissionId: request.submissionId, resultId: `result-${request.submissionId}`,
         baseId: bases.get(request.submissionId), canRePair };
     }
   };
@@ -340,6 +343,83 @@ test("sharing is opt-in and is sent with the exact original", async () => {
   await workflow.start(file, { allowReuse: true });
   const secondBegin = calls.filter(([type]) => type === "begin")[1][1];
   assert.equal(secondBegin.allowReuse, true);
+});
+
+test("an unretained original supports authenticated variants, new pairings and identical archive retries", async () => {
+  const { workflow, calls, storage } = modeFixture({ originalRetained: false });
+  const complete = storage.complete;
+  const attempts = [];
+  const failed = new Set();
+  storage.complete = async request => {
+    attempts.push(request);
+    if (!failed.has(request.submissionId)) {
+      failed.add(request.submissionId);
+      throw Object.assign(new Error("response lost"), { code: "REQUEST_TIMEOUT", originalSaved: true });
+    }
+    return complete(request);
+  };
+  const retryExposure = async (saving, expectedBlob) => {
+    await assert.rejects(saving, error => error.stage === "archive" && error.originalSaved === false && error.resultReady);
+    const pending = workflow.operation;
+    const assigned = pending.begin;
+    assert.equal(workflow.pending, true);
+    assert.equal(assigned.originalRetained, false);
+    assert.equal(assigned.originalId, `unretained:${"c".repeat(64)}`);
+    assert.strictEqual(pending.file, file);
+    const saved = await workflow.retry();
+    assert.strictEqual(saved, pending);
+    assert.strictEqual(saved.begin, assigned);
+    assert.equal(saved.receipt.originalId, assigned.originalId);
+    assert.equal(saved.receipt.originalRetained, false);
+    assert.equal(saved.allowReuse, false);
+    assert.equal(workflow.pending, false);
+    const requests = attempts.filter(request => request.submissionId === saved.submissionId);
+    assert.equal(requests.length, 2);
+    assert.strictEqual(requests[0].resultBlob, expectedBlob);
+    assert.strictEqual(requests[1].resultBlob, expectedBlob);
+    assert.strictEqual(requests[0].settings, requests[1].settings);
+    assert.equal(requests[0].token, assigned.token);
+    assert.equal(requests[1].token, assigned.token);
+    assert.equal(Object.isFrozen(requests[1].settings), true);
+    return saved;
+  };
+  const first = await retryExposure(workflow.start(file, { allowReuse: false }), blob);
+  workflow.settings = Object.freeze({ ...settings, contrast: 40, monochrome: true });
+  const prepared = { blob: new Blob(["cached colour JPEG"], { type: "image/jpeg" }), width: 640, height: 480 };
+  const variant = await retryExposure(workflow.changeMonochrome(true, { result: prepared, base: first.begin.base }), prepared.blob);
+  const paired = await retryExposure(workflow.rePair(), blob);
+  const requests = calls.filter(([type]) => type === "begin").map(([, request]) => request);
+  assert.equal(requests.length, 3, "archive retries do not submit another original or choose another base");
+  assert.strictEqual(requests[0].originalFile, file);
+  assert.equal(requests[0].allowReuse, false);
+  assert.deepEqual({ ...requests[1].reuse }, { submissionId: first.submissionId, token: first.begin.token, sameBase: true });
+  assert.deepEqual({ ...requests[2].reuse }, { submissionId: variant.submissionId, token: variant.begin.token });
+  for (const request of requests.slice(1)) {
+    assert.equal("originalFile" in request, false);
+    assert.equal("allowReuse" in request, false, "the authenticated parent determines inherited consent");
+  }
+  assert.equal(variant.begin.base.id, first.begin.base.id);
+  assert.notEqual(paired.begin.base.id, variant.begin.base.id);
+  assert.equal(paired.settings.monochrome, true);
+  assert.equal(paired.settings.contrast, settings.contrast);
+  const renders = calls.filter(([type]) => type === "render").map(([, request]) => request);
+  assert.equal(renders.length, 2, "the prepared colour JPEG is archived without regenerating it");
+  for (const request of renders) assert.strictEqual(request.file, file, "local development retains the exact selected file");
+});
+
+test("a rejected prepared pairing reports whether the authenticated original was retained", async () => {
+  for (const originalRetained of [false, true]) {
+    const { workflow, storage } = modeFixture({ originalRetained });
+    const saved = await workflow.start(file, { allowReuse: originalRetained });
+    const assign = storage.begin;
+    storage.begin = async request => ({ ...await assign(request), base: { ...saved.begin.base, id: "substituted-base" } });
+    await assert.rejects(workflow.changeMonochrome(true, {
+      result: { blob, width: 640, height: 480 }, base: saved.begin.base
+    }), error => /did not confirm the prepared/.test(error.message) && error.originalSaved === originalRetained);
+    assert.equal(workflow.operation.begin, null);
+    assert.equal(workflow.operation.receipt, null);
+    assert.strictEqual(workflow.operation.file, file);
+  }
 });
 
 test("the artist's monochrome default and each visitor override reach rendering and archiving together", async () => {

@@ -124,7 +124,9 @@ class ExposureArchiveWorkflow {
             throw new Error("The collection did not confirm the preview photograph. Please retry.");
           }
           if (operation.resultBase && !this.matchesBase(operation.resultBase, begin.base)) {
-            throw Object.assign(new Error("The collection did not confirm the prepared photograph pairing. Please retry."), { originalSaved: true });
+            throw Object.assign(new Error("The collection did not confirm the prepared photograph pairing. Please retry."), {
+              originalSaved: begin.originalRetained !== false && Boolean(begin.originalId)
+            });
           }
           operation.begin = begin;
         } catch (error) {
@@ -160,7 +162,8 @@ class ExposureArchiveWorkflow {
       return operation;
     } catch (error) {
       const failure = error instanceof Error ? error : new Error("The photograph could not be saved.");
-      failure.originalSaved = Boolean(operation.begin?.originalId || failure.originalSaved);
+      failure.originalSaved = operation.begin?.originalRetained === false
+        ? false : Boolean(operation.begin?.originalId || failure.originalSaved);
       failure.resultReady = Boolean(operation.result);
       failure.stage = stage;
       throw failure;
