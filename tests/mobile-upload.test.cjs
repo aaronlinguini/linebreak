@@ -303,7 +303,7 @@ test("initial transient archive connections retry with capped backoff without de
   assert.equal(h.elements.get("participant-input").disabled, true);
   for (const delay of [2000, 5000, 15000, 30000, 30000]) {
     assert.deepEqual([...h.timers.values()].map(timer => timer.delay), [delay]);
-    assert.equal(h.elements.get("status").textContent, "Reconnecting automatically…");
+    assert.equal(h.elements.get("status").textContent, "Please wait…");
     assert.equal(h.elements.get("retry-button").hidden, true);
     await h.advanceTime(delay);
   }
@@ -525,8 +525,9 @@ test("transient save failures retry with capped backoff while all controls stay 
   const operation = h.workflow.operation;
   assert.equal(h.elements.get("error").hidden, true);
   assert.equal(h.elements.get("retry-button").hidden, true);
-  assert.match(h.elements.get("status").textContent, /retry automatically/);
-  assert.match(h.elements.get("upload-again-note").textContent, /Retrying automatically/);
+  assert.equal(h.elements.get("status").textContent, "");
+  assert.match(h.elements.get("upload-again-note").textContent, /Please wait while your photo is saving/);
+  assert.doesNotMatch(h.elements.get("upload-again-note").textContent, /retry|reconnect/i);
   for (const delay of [2000, 5000, 15000, 30000, 30000]) {
     assertResultControlsLocked(h, true);
     assert.deepEqual([...h.timers.values()].map(timer => timer.delay), [delay]);
@@ -1252,7 +1253,7 @@ test("connection setup stays in the status area until a selected photograph queu
   for (const id of ["participant-input", "participant-camera-input"]) {
     assert.equal(h.elements.get(id).disabled, true);
   }
-  assert.equal(h.elements.get("status").textContent, "Connecting…");
+  assert.equal(h.elements.get("status").textContent, "Please wait…");
   assert.equal(h.elements.get("busy-indicator").hidden, true);
   assert.equal(h.elements.get("workspace").attributes["aria-busy"], "false");
   h.chooseSharing(true);

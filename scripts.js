@@ -419,8 +419,7 @@ function initializeExposureStudio() {
   function announce(message) { ui.status.textContent = message; }
   function restoreConnectionStatus() {
     const reconnecting = retryTarget === "connection";
-    announce(state.connecting && state.selectedFile ? "" : state.connecting ? "Connecting…"
-      : reconnecting ? "Reconnecting automatically…"
+    announce(state.connecting && state.selectedFile ? "" : state.connecting || reconnecting ? "Please wait…"
         : state.ready || !storage.configured ? "" : "Photo submissions are temporarily unavailable.");
     ui.retry.hidden = state.connecting || reconnecting || state.ready || !storage.configured;
   }
@@ -531,7 +530,7 @@ function initializeExposureStudio() {
     ui.workspace.classList.toggle("has-result", state.hasResult);
     ui.busy.classList.toggle("is-finishing", state.previewing);
     ui.savingNote.hidden = !(workflow.pending || pendingColourResults() || state.colourWorking);
-    ui.savingNote.textContent = retryTimer !== null ? `${savingMessage} Retrying automatically…` : savingMessage;
+    ui.savingNote.textContent = savingMessage;
   }
   function setWorking(value, message) {
     state.working = value;
@@ -685,7 +684,7 @@ function initializeExposureStudio() {
         state.rePairUnavailable = error.code === "NO_ALTERNATIVE_BASE";
       }
       announce(error.previousResultRestored ? "Your previous exposure is still saved."
-        : retryTimer !== null ? "Saving will retry automatically. Keep this page open."
+        : retryTimer !== null ? ""
           : error.originalSaved ? "Your photo is saved. Please retry to finish the double exposure."
             : "The save could not be confirmed.");
     } finally {
