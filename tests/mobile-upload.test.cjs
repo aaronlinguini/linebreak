@@ -24,7 +24,7 @@ const developingMessage = toolHtml.match(/<p\b[^>]*id="busy-indicator"[^>]*>([^<
 function harness({ configured = true, canRePair = true, forceBlackAndWhite = false, supportsCapture = false, assets,
   digest = (...args) => webcrypto.subtle.digest(...args),
   connect = async () => ({ totalEligible: 2 }) } = {}) {
-  const ids = ["workspace", "canvas", "result-empty", "source-actions", "result-actions", "repeat-actions", "allow-reuse",
+  const ids = ["workspace", "canvas", "result-empty", "source-actions", "result-actions", "repeat-actions", "allow-reuse", "decline-reuse",
     "new-pairing-button", "reset-button", "participant-input", "participant-camera-input",
     "upload-label", "camera-label", "download-button", "rotate-button", "retry-button", "status", "error",
     "busy-indicator", "exposure-controls", "upload-instructions", "output-options", "visitor-monochrome", "visitor-colour",
@@ -191,6 +191,11 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
       return handlers.get(id + ":change")();
     },
     click(id) { return handlers.get(id + ":click")(); },
+    chooseSharing(allowReuse) {
+      elements.get("allow-reuse").checked = allowReuse;
+      elements.get("decline-reuse").checked = !allowReuse;
+      return handlers.get(`${allowReuse ? "allow-reuse" : "decline-reuse"}:change`)();
+    },
     toggleMonochrome(checked) {
       elements.get("visitor-monochrome").checked = checked;
       elements.get("visitor-colour").checked = !checked;
@@ -209,6 +214,7 @@ test("the local asset preview starts while Google connection is still unresolved
     async chooseBase(hash) { chosen.push(hash); return previewBase; }
   } });
   h.blockStart(saving.promise);
+  h.chooseSharing(false);
   const selecting = h.select("participant-input", makeFile());
   await h.startReady;
   assert.equal(h.calls.start.length, 1, "development does not wait for Google bootstrap");
@@ -242,6 +248,7 @@ test("a delayed real SHA-256 completes before the pending operation can deliver 
   } });
   h.blockStart(saving.promise);
   const file = makeFile();
+  h.chooseSharing(false);
   const selecting = h.select("participant-input", file);
   await hashingStarted.promise;
   await flush();
@@ -265,7 +272,7 @@ test("bootstrap's candidate enables early preview without changing frozen consen
     path: "assets/base-photos/base.jpg", sha256: "a".repeat(64) };
   const h = harness({ connect: async () => ({ totalEligible: 2, previewBase }) });
   await flush();
-  h.elements.get("allow-reuse").checked = true;
+  h.chooseSharing(true);
   h.elements.get("visitor-monochrome").checked = false;
   const saving = deferred();
   h.blockStart(saving.promise);
@@ -296,6 +303,7 @@ test("an identical preselected base is discarded so Google can choose a differen
     path: "assets/base-photos/base.jpg", sha256 };
   const h = harness({ connect: async () => ({ totalEligible: 2, previewBase }) });
   await flush();
+  h.chooseSharing(false);
   await h.select("participant-input", file);
   assert.equal(h.calls.start[0].choice.previewBase, undefined);
   assert.strictEqual(h.calls.start[0].file, file);
@@ -308,7 +316,14 @@ test("public photo choices are distinct and HTML has no inline code", () => {
   assert.match(html, /id="camera-separator"[^>]*\bhidden>or<\/span>/);
   assert.match(html, /id="camera-picker"[^>]*\bhidden>/);
   assert.match(html, /id="camera-instructions"[^>]*\bhidden>/);
-  assert.match(html, /id="allow-reuse" type="checkbox"/);
+  for (const [id, value] of [["allow-reuse", "yes"], ["decline-reuse", "no"]]) {
+    const radio = html.match(new RegExp(`<input\\b[^>]*id="${id}"[^>]*>`))?.[0];
+    assert.ok(radio);
+    assert.match(radio, /\btype="radio"/);
+    assert.match(radio, /\bname="original-sharing"/);
+    assert.match(radio, new RegExp(`\\bvalue="${value}"`));
+    assert.doesNotMatch(radio, /\bchecked(?:\s|=|>)/);
+  }
   for (const [id, label] of [["visitor-monochrome", "Black and white"], ["visitor-colour", "Original colour"]]) {
     const radio = html.match(new RegExp(`<input\\b[^>]*id="${id}"[^>]*>`))?.[0];
     assert.ok(radio, `${label} must be an explicit choice`);
@@ -335,8 +350,9 @@ test("native camera controls and instructions appear only when the browser suppo
       assert.equal(h.elements.get(id).hidden, !supportsCapture, id);
     }
     assert.equal(h.elements.get("picker-singular").hidden, supportsCapture);
-    assert.equal(h.elements.get("participant-input").disabled, false);
+    assert.equal(h.elements.get("participant-input").disabled, true);
     assert.equal(h.elements.get("allow-reuse").checked, false);
+    h.chooseSharing(false);
     await h.select("participant-input", makeFile());
     h.click("reset-button");
     assert.equal(h.elements.get("camera-picker").hidden, !supportsCapture);
@@ -359,6 +375,7 @@ test("photo choices and a shared action toolbar precede the image, with colour c
     assert.ok(location >= 0 && location < stage, `${name} must be above the image`);
   }
   assert.ok(controls < browse && controls < consent, "photo selection and permission belong to the top controls");
+  assert.ok(consent < browse, "the reuse choice must precede the photo pickers");
   assert.ok(stage < options && options < colour, "the black-and-white choice remains below the image");
   assert.match(html, /<label\b[^>]*for="allow-reuse"/);
   assert.doesNotMatch(html.match(/<input\b[^>]*id="allow-reuse"[^>]*>/)[0], /\bchecked(?:\s|=|>)/);
@@ -421,6 +438,7 @@ test("the visitor colour radios start from the artist default and freeze either 
       assert.equal(h.elements.get("upload-instructions").hidden, false);
       await h.toggleMonochrome(visitorChoice);
       assert.equal(h.calls.changeMonochrome.length, 0, "choosing a mode before a photo does not create a result");
+      h.chooseSharing(false);
       await h.select("participant-input", makeFile());
       assert.equal(h.calls.start.length, 1);
       assert.equal(h.calls.start[0].choice.monochrome, visitorChoice);
@@ -447,7 +465,7 @@ test("selection shows processing immediately and snapshots consent and colour be
   await flush();
   const preparation = deferred();
   h.blockPhoto(preparation.promise);
-  h.elements.get("allow-reuse").checked = true;
+  h.chooseSharing(true);
   h.elements.get("visitor-monochrome").checked = true;
   const file = makeFile();
   const selecting = h.select("participant-input", file);
@@ -460,7 +478,7 @@ test("selection shows processing immediately and snapshots consent and colour be
   assert.equal(h.elements.get("result-actions").hidden, true);
   assert.equal(h.elements.get("repeat-actions").hidden, true);
   assert.equal(h.elements.get("upload-instructions").hidden, true);
-  for (const id of ["participant-input", "participant-camera-input", "allow-reuse", "visitor-monochrome", "visitor-colour"]) {
+  for (const id of ["participant-input", "participant-camera-input", "allow-reuse", "decline-reuse", "visitor-monochrome", "visitor-colour"]) {
     assert.equal(h.elements.get(id).disabled, true, `${id} must not change a selected submission`);
   }
   assert.equal(h.calls.start.length, 0);
@@ -476,28 +494,91 @@ test("selection shows processing immediately and snapshots consent and colour be
   assert.equal(h.elements.get("status").textContent, "", "a saved result has no extra confirmation message");
 });
 
-test("consent can be chosen before either picker, and cancelling the picker does not submit or clear choices", async () => {
-  for (const input of ["participant-input", "participant-camera-input"]) {
+test("an unanswered sharing question blocks both pickers and direct file-change events", async () => {
+  const h = harness();
+  await flush();
+  assert.equal(h.elements.get("allow-reuse").checked, false);
+  assert.equal(h.elements.get("decline-reuse").checked, false);
+  for (const id of ["participant-input", "participant-camera-input"]) {
+    assert.equal(h.elements.get(id).disabled, true);
+    await h.select(id, makeFile());
+    assert.equal(h.calls.load.length, 0, "an unanswered selection must not prepare the photo");
+    assert.equal(h.calls.start.length, 0, "an unanswered selection must not upload or generate");
+    assert.equal(h.elements.get(id).value, "");
+    assert.equal(h.elements.get("busy-indicator").hidden, true);
+    assert.equal(h.elements.get("exposure-controls").hidden, false);
+    assert.equal(h.elements.get("status").textContent, "Choose Yes or No before selecting a photo.");
+  }
+  h.chooseSharing(false);
+  await h.select("participant-input", makeFile());
+  assert.equal(h.calls.start.length, 1);
+  assert.equal(h.calls.start[0].choice.allowReuse, false);
+});
+
+test("each sharing answer stays frozen through preparation, variants and another pairing", async () => {
+  for (const allowReuse of [false, true]) {
+    const h = harness();
+    await flush();
+    h.chooseSharing(allowReuse);
+    const saving = deferred();
+    h.blockStart(saving.promise);
+    const selecting = h.select("participant-input", makeFile());
+    await h.startReady;
+    for (const id of ["allow-reuse", "decline-reuse"]) assert.equal(h.elements.get(id).disabled, true);
+    h.chooseSharing(!allowReuse);
+    assert.equal(h.elements.get("allow-reuse").checked, allowReuse);
+    assert.equal(h.elements.get("decline-reuse").checked, !allowReuse);
+    assert.equal(h.calls.start[0].choice.allowReuse, allowReuse);
+    saving.resolve();
+    await selecting;
+    await h.toggleMonochrome(true);
+    await h.click("new-pairing-button");
+    assert.equal(h.calls.start.length, 1, "variants and pairings must not upload another original");
+    assert.equal(h.calls.changeMonochrome.length, 1);
+    assert.equal(h.calls.rePair, 1);
+    assert.equal(h.elements.get("allow-reuse").checked, allowReuse);
+    assert.equal(h.elements.get("decline-reuse").checked, !allowReuse);
+    assert.equal(h.elements.get("exposure-controls").hidden, true, "the saved original must not be asked again");
+  }
+});
+
+test("either sharing answer enables either picker, and cancelling preserves the answer", async () => {
+  for (const [input, allowReuse] of [
+    ["participant-input", false], ["participant-input", true],
+    ["participant-camera-input", false], ["participant-camera-input", true]
+  ]) {
     const h = harness();
     await flush();
     assert.equal(h.elements.get("allow-reuse").checked, false);
     assert.equal(h.elements.get("allow-reuse").disabled, false);
-    h.elements.get("allow-reuse").checked = true;
+    assert.equal(h.elements.get("decline-reuse").checked, false);
+    h.chooseSharing(allowReuse);
+    assert.equal(h.elements.get(input).disabled, false);
     h.elements.get("visitor-monochrome").checked = true;
     await h.select(input, null);
-    assert.equal(h.elements.get("allow-reuse").checked, true);
+    assert.equal(h.elements.get("allow-reuse").checked, allowReuse);
+    assert.equal(h.elements.get("decline-reuse").checked, !allowReuse);
     assert.equal(h.elements.get("visitor-monochrome").checked, true);
     assert.equal(h.elements.get("busy-indicator").hidden, true);
     assert.equal(h.calls.load.length, 0);
     assert.equal(h.calls.start.length, 0);
     await h.select(input, makeFile());
-    assert.equal(h.calls.start[0].choice.allowReuse, true);
+    assert.equal(h.calls.start[0].choice.allowReuse, allowReuse);
     assert.equal(h.elements.get("output-options").hidden, false);
     assert.equal(h.elements.get("exposure-controls").hidden, true);
     h.click("reset-button");
     assert.equal(h.elements.get("allow-reuse").checked, false, "a new contribution requires a fresh opt-in");
+    assert.equal(h.elements.get("decline-reuse").checked, false);
+    assert.equal(h.elements.get(input).disabled, true, "a new photo needs a fresh answer");
     assert.equal(h.elements.get("output-options").hidden, false);
     assert.equal(h.elements.get("exposure-controls").hidden, false);
+    await h.select(input, makeFile());
+    assert.equal(h.calls.load.length, 1, "Start over must not reuse an earlier answer to prepare another original");
+    assert.equal(h.calls.start.length, 1);
+    h.chooseSharing(!allowReuse);
+    await h.select(input, makeFile());
+    assert.equal(h.calls.start.length, 2);
+    assert.equal(h.calls.start[1].choice.allowReuse, !allowReuse);
   }
 });
 
@@ -508,6 +589,7 @@ test("library and camera selection submit once and show the developed image whil
     const saving = deferred();
     h.blockStart(saving.promise);
     const file = makeFile();
+    h.chooseSharing(false);
     const selecting = h.select(id, file);
     await h.startReady;
     assert.equal(h.calls.load[0], file);
@@ -565,6 +647,7 @@ test("one next pairing can be queued during finishing and only starts after a re
     await flush();
     const saving = deferred();
     h.blockStart(saving.promise);
+    h.chooseSharing(false);
     const selecting = h.select("participant-input", makeFile());
     await h.startReady;
     h.deliverPreview();
@@ -592,6 +675,7 @@ test("a queued pairing survives a failed save and waits for the retry receipt wi
   const saving = deferred();
   h.blockStart(saving.promise);
   h.failStart(Object.assign(new Error("Response lost."), { originalSaved: true }));
+  h.chooseSharing(false);
   const selecting = h.select("participant-input", makeFile());
   await h.startReady;
   h.deliverPreview();
@@ -628,6 +712,7 @@ test("a save failure after rendering retains the pending preview and retries wit
   const saving = deferred();
   h.blockStart(saving.promise);
   h.failStart(Object.assign(new Error("Response lost."), { originalSaved: true }));
+  h.chooseSharing(false);
   const selecting = h.select("participant-input", makeFile());
   await h.startReady;
   h.deliverPreview();
@@ -667,7 +752,7 @@ test("a pending save retries the same operation without re-reading the original 
   const h = harness();
   await flush();
   h.elements.get("visitor-monochrome").checked = true;
-  h.elements.get("allow-reuse").checked = true;
+  h.chooseSharing(true);
   h.failStart(Object.assign(new Error("Response lost."), { originalSaved: true }));
   await h.select("participant-input", makeFile());
   const operation = h.workflow.operation;
@@ -705,7 +790,7 @@ test("a pending save retries the same operation without re-reading the original 
 test("a second pairing does not reupload the original and Start over clears consent", async () => {
   const h = harness();
   await flush();
-  h.elements.get("allow-reuse").checked = true;
+  h.chooseSharing(true);
   await h.select("participant-input", makeFile());
   assert.equal(h.calls.start[0].choice.allowReuse, true);
   assert.equal(h.elements.get("new-pairing-button").hidden, false);
@@ -724,6 +809,7 @@ test("a second pairing does not reupload the original and Start over clears cons
 test("a second-pairing failure before its preview retains the saved image until a retry is confirmed", async () => {
   const h = harness();
   await flush();
+  h.chooseSharing(false);
   await h.select("participant-input", makeFile());
   await h.click("download-button");
   const originalUrl = h.calls.downloads.at(-1).href;
@@ -759,6 +845,7 @@ test("a saved exposure can switch between colour and black and white without cho
   const h = harness();
   await flush();
   const file = makeFile();
+  h.chooseSharing(false);
   await h.select("participant-input", file);
   const base = h.workflow.operation.base;
   assert.equal(h.elements.get("output-options").hidden, false);
@@ -795,6 +882,7 @@ test("colour and downloads respond before either receipt, then queued pairing us
   h.blockStart(initialReceipt.promise);
   h.blockMonochrome(modeReceipt.promise);
   const original = makeFile();
+  h.chooseSharing(false);
   const selecting = h.select("participant-input", original);
   await h.startReady;
   h.deliverPreview("preview");
@@ -842,6 +930,7 @@ test("switching back before the first receipt still archives the already-rendere
   await flush();
   const receipt = deferred();
   h.blockStart(receipt.promise);
+  h.chooseSharing(false);
   const selecting = h.select("participant-input", makeFile());
   await h.startReady;
   h.deliverPreview();
@@ -871,6 +960,7 @@ test("a receipt arriving during local colour development cannot skip that varian
   h.blockStart(receipt.promise);
   h.blockDevelopment(rendering.promise);
   h.blockMonochrome(alternateReceipt.promise);
+  h.chooseSharing(false);
   const selecting = h.select("participant-input", makeFile());
   await h.startReady;
   h.deliverPreview();
@@ -897,6 +987,7 @@ test("a receipt arriving during local colour development cannot skip that varian
 test("only the short local colour render locks colour and download controls", async () => {
   const h = harness();
   await flush();
+  h.chooseSharing(false);
   await h.select("participant-input", makeFile());
   const rendering = deferred();
   h.blockDevelopment(rendering.promise);
@@ -936,6 +1027,7 @@ test("a failed mode save remains downloadable and retries its exact JPEG while t
   const h = harness();
   await flush();
   const original = makeFile();
+  h.chooseSharing(false);
   await h.select("participant-input", original);
   const initialBlob = h.workflow.operation.result.blob;
   const base = h.workflow.operation.begin.base;
@@ -980,11 +1072,11 @@ test("a failed mode save remains downloadable and retries its exact JPEG while t
 test("an unconfigured archive allows local choices without fabricating a result or a successful save", async () => {
   const h = harness({ configured: false, forceBlackAndWhite: true });
   await flush();
-  assert.equal(h.elements.get("participant-input").disabled, false);
-  assert.equal(h.elements.get("participant-camera-input").disabled, false);
+  assert.equal(h.elements.get("participant-input").disabled, true);
+  assert.equal(h.elements.get("participant-camera-input").disabled, true);
   assert.equal(h.elements.get("visitor-monochrome").disabled, false);
   h.elements.get("visitor-monochrome").checked = false;
-  h.elements.get("allow-reuse").checked = true;
+  h.chooseSharing(true);
   await h.select("participant-camera-input", makeFile());
   assert.equal(h.calls.connect, 0);
   assert.equal(h.calls.start.length, 0);
@@ -1009,13 +1101,16 @@ test("an unconfigured archive allows local choices without fabricating a result 
 test("connection setup stays in the status area until a selected photograph queues automatic development", async () => {
   const connection = deferred();
   const h = harness({ connect: () => connection.promise });
-  for (const id of ["participant-input", "participant-camera-input", "allow-reuse", "visitor-monochrome", "visitor-colour"]) {
+  for (const id of ["allow-reuse", "decline-reuse", "visitor-monochrome", "visitor-colour"]) {
     assert.equal(h.elements.get(id).disabled, false);
+  }
+  for (const id of ["participant-input", "participant-camera-input"]) {
+    assert.equal(h.elements.get(id).disabled, true);
   }
   assert.equal(h.elements.get("status").textContent, "Connecting…");
   assert.equal(h.elements.get("busy-indicator").hidden, true);
   assert.equal(h.elements.get("workspace").attributes["aria-busy"], "false");
-  h.elements.get("allow-reuse").checked = true;
+  h.chooseSharing(true);
   h.elements.get("visitor-monochrome").checked = true;
   await h.select("participant-camera-input", makeFile());
   assert.equal(h.elements.get("busy-indicator").hidden, false);
@@ -1045,9 +1140,9 @@ for (const unavailable of ["failure", "empty collection"]) {
     await flush();
     const message = "Photo submissions are temporarily unavailable.";
     assert.equal(h.elements.get("status").textContent, message);
-    assert.equal(h.elements.get("participant-input").disabled, false);
+    assert.equal(h.elements.get("participant-input").disabled, true);
     assert.equal(h.elements.get("visitor-monochrome").disabled, false);
-    h.elements.get("allow-reuse").checked = true;
+    h.chooseSharing(true);
     h.elements.get("visitor-monochrome").checked = true;
     const file = makeFile();
     await h.select("participant-input", file);
@@ -1083,11 +1178,11 @@ for (const unavailable of ["failure", "empty collection"]) {
 test("Start over discards an unavailable queued photo so reconnecting cannot submit it later", async () => {
   const h = harness({ connect: async () => ({ totalEligible: 0 }) });
   await flush();
-  h.elements.get("allow-reuse").checked = true;
+  h.chooseSharing(true);
   h.elements.get("visitor-monochrome").checked = true;
   await h.select("participant-input", makeFile());
   h.click("reset-button");
-  assert.equal(h.elements.get("participant-input").disabled, false);
+  assert.equal(h.elements.get("participant-input").disabled, true);
   assert.equal(h.elements.get("allow-reuse").checked, false);
   assert.equal(h.elements.get("visitor-monochrome").checked, true);
   assert.equal(h.elements.get("upload-instructions").hidden, false);
@@ -1095,6 +1190,7 @@ test("Start over discards an unavailable queued photo so reconnecting cannot sub
   h.setConnection(async () => ({ totalEligible: 2 }));
   await h.click("retry-button");
   assert.equal(h.calls.start.length, 0);
+  h.chooseSharing(false);
   await h.select("participant-camera-input", makeFile());
   assert.equal(h.calls.start.length, 1);
   assert.equal(h.calls.start[0].choice.allowReuse, false);
@@ -1106,6 +1202,7 @@ for (const failConnection of [false, true]) {
     const preparation = deferred();
     const h = harness({ connect: () => connection.promise });
     h.blockPhoto(preparation.promise);
+    h.chooseSharing(false);
     const selecting = h.select("participant-input", makeFile());
     assert.equal(h.elements.get("status").textContent, "");
     assert.equal(h.elements.get("busy-indicator").textContent, developingMessage);
@@ -1129,16 +1226,18 @@ test("an unsupported selection returns to the photo chooser without uploading or
   const h = harness();
   await flush();
   const unsupported = new File([Uint8Array.from([1])], "phone.txt", { type: "text/plain" });
+  h.chooseSharing(false);
   await h.select("participant-input", unsupported);
   assert.equal(h.calls.start.length, 0);
   assert.equal(h.calls.draws.length, 0);
   assert.equal(h.elements.get("busy-indicator").hidden, true);
-  assert.equal(h.elements.get("participant-input").disabled, false);
+  assert.equal(h.elements.get("participant-input").disabled, true);
   assert.equal(h.elements.get("exposure-controls").hidden, false);
   assert.equal(h.elements.get("output-options").hidden, false);
   assert.equal(h.elements.get("error").textContent, "Unsupported photograph.");
   assert.equal(h.elements.get("retry-button").hidden, true);
   assert.equal(h.elements.get("canvas").hidden, true);
+  h.chooseSharing(false);
   await h.select("participant-camera-input", makeFile());
   assert.equal(h.calls.start.length, 1);
   assert.equal(h.elements.get("error").hidden, true);
@@ -1150,6 +1249,7 @@ test("rotation updates the finished preview and download without creating anothe
   assert.equal(h.elements.get("rotate-button").disabled, true);
   await h.click("rotate-button");
   assert.equal(h.calls.rotate, 0);
+  h.chooseSharing(false);
   await h.select("participant-input", makeFile());
   const archivedResult = h.workflow.operation.result;
   const archivedBlob = archivedResult.blob;
@@ -1186,6 +1286,7 @@ test("rotation updates the finished preview and download without creating anothe
 test("a failed rotation preserves the previous download and does not offer an archive retry", async () => {
   const h = harness();
   await flush();
+  h.chooseSharing(false);
   await h.select("participant-input", makeFile());
   await h.click("download-button");
   const originalUrl = h.calls.downloads.at(-1).href;

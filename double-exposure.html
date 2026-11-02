@@ -25,6 +25,21 @@
     <main id="workspace" class="workspace" aria-busy="false">
       <div id="exposure-controls" class="exposure-controls">
         <p id="upload-instructions" class="upload-instructions">Use the <span id="picker-singular">button</span><span id="picker-plural" hidden>buttons</span> below to select a photo from your library<span id="camera-instructions" hidden> or take a photo with your camera</span>. The photo that you provide will be combined with another image to create a double exposure. You may choose whether you want your upload to be added to the library of base photos upon which new double exposures can be made.</p>
+        <fieldset class="library-option" aria-describedby="library-note">
+          <legend class="library-question">Add your photo to the shared library for future double exposures?</legend>
+          <div class="library-choices">
+            <label class="checkbox-label library-choice" for="allow-reuse">
+              <input id="allow-reuse" type="radio" name="original-sharing" value="yes" required>
+              <span>Yes, add my photo</span>
+            </label>
+            <label class="checkbox-label library-choice" for="decline-reuse">
+              <input id="decline-reuse" type="radio" name="original-sharing" value="no" required>
+              <span>No, don’t add it</span>
+            </label>
+          </div>
+          <p id="library-note" class="library-note">Choose Yes or No before selecting or taking a photo. Your original is saved either way; choosing No keeps it in a separate private folder.</p>
+        </fieldset>
+
         <div class="exposure-buttons">
           <div id="source-actions" class="actions source-actions">
             <div class="file-picker">
@@ -37,14 +52,6 @@
               <label id="camera-label" class="upload-label" for="participant-camera-input">Take a photo</label>
             </div>
           </div>
-        </div>
-
-        <div class="library-option">
-          <label class="checkbox-label library-choice" for="allow-reuse">
-            <input id="allow-reuse" type="checkbox" aria-describedby="library-note">
-            <span>Add my uploaded photo to the library of base photos</span>
-          </label>
-          <p id="library-note" class="library-note">Your uploaded photo will only be added to the base-photo library if you check this box.</p>
         </div>
       </div>
 
@@ -84,7 +91,7 @@
     </main>
 
     <footer class="site-footer">
-      <p id="archive-note" class="privacy-note">The project saves all finished double exposures.</p>
+      <p id="archive-note" class="privacy-note">The project saves uploaded originals and all finished double exposures. Only opted-in originals are added to the shared library.</p>
     </footer>
   </body>
 </html>

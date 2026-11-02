@@ -333,7 +333,7 @@ function initializeExposureStudio() {
     exposureControls: byId("exposure-controls"), uploadInstructions: byId("upload-instructions"),
     outputOptions: byId("output-options"), monochrome: byId("visitor-monochrome"),
     colour: byId("visitor-colour"), repeatActions: byId("repeat-actions"),
-    resultActions: byId("result-actions"), allowReuse: byId("allow-reuse"),
+    resultActions: byId("result-actions"), allowReuse: byId("allow-reuse"), declineReuse: byId("decline-reuse"),
     newPairing: byId("new-pairing-button"), reset: byId("reset-button"),
     participantInput: byId("participant-input"), cameraInput: byId("participant-camera-input"),
     cameraPicker: byId("camera-picker"), cameraSeparator: byId("camera-separator"),
@@ -357,6 +357,7 @@ function initializeExposureStudio() {
     desiredMonochrome: PROJECT_SETTINGS.monochrome, colourWorking: false };
   setColourChoice(PROJECT_SETTINGS.monochrome);
   ui.allowReuse.checked = false;
+  ui.declineReuse.checked = false;
   const { loadPhoto, releasePhoto, develop } = createExposureProcessor();
   const storage = new GoogleDriveStorage(EXPOSURE_CONFIG);
   const workflow = new ExposureArchiveWorkflow({
@@ -415,7 +416,7 @@ function initializeExposureStudio() {
     const imageReady = state.hasResult && !state.colourWorking && (!state.working || state.previewing);
     const canQueuePairing = state.hasResult && unsaved && state.previewing && visiblePairIsCurrent();
     for (const input of [ui.participantInput, ui.cameraInput]) {
-      input.disabled = state.working || selected || pending;
+      input.disabled = state.working || selected || pending || !sharingChoiceMade();
     }
     ui.sourceActions.hidden = selected || state.hasResult;
     ui.uploadInstructions.hidden = selected;
@@ -426,6 +427,7 @@ function initializeExposureStudio() {
     ui.repeatActions.hidden = !state.hasResult && !(selected && !processing && !pending);
     ui.resultActions.hidden = !state.hasResult;
     ui.allowReuse.disabled = state.working || selected || pending;
+    ui.declineReuse.disabled = ui.allowReuse.disabled;
     ui.download.hidden = !state.hasResult;
     ui.rotate.hidden = !state.hasResult;
     ui.download.disabled = !imageReady;
@@ -471,6 +473,7 @@ function initializeExposureStudio() {
     state.rePairUnavailable = false;
     state.nextPairQueued = false;
     ui.allowReuse.checked = false;
+    ui.declineReuse.checked = false;
     clearResult();
     restoreConnectionStatus();
   }
@@ -645,9 +648,19 @@ function initializeExposureStudio() {
     if (!workflow.pending) connectArchive();
   }
 
+  function sharingChoiceMade() {
+    return ui.allowReuse.checked !== ui.declineReuse.checked;
+  }
+
   async function chooseParticipantPhoto(input) {
     const file = input.files?.[0];
     if (!file || state.selectedFile || state.working || workflow.pending) return;
+    if (!sharingChoiceMade()) {
+      input.value = "";
+      announce("Choose Yes or No before selecting a photo.");
+      refreshActions();
+      return;
+    }
     clearError();
     state.selectedFile = file;
     state.selectionChoices = Object.freeze({ allowReuse: ui.allowReuse.checked, monochrome: ui.monochrome.checked });
@@ -671,6 +684,19 @@ function initializeExposureStudio() {
   }
   for (const input of [ui.participantInput, ui.cameraInput]) {
     input.addEventListener("change", () => chooseParticipantPhoto(input));
+  }
+  for (const input of [ui.allowReuse, ui.declineReuse]) {
+    input.addEventListener("change", () => {
+      if (input.disabled) {
+        if (state.selectionChoices) {
+          ui.allowReuse.checked = state.selectionChoices.allowReuse;
+          ui.declineReuse.checked = !state.selectionChoices.allowReuse;
+        }
+        return;
+      }
+      restoreConnectionStatus();
+      refreshActions();
+    });
   }
   for (const [input, monochrome] of [[ui.monochrome, true], [ui.colour, false]]) {
     input.addEventListener("change", async () => {
