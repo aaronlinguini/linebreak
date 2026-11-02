@@ -59,8 +59,9 @@ function makeStudio({ activeEmail = "owner@example.test", effectiveEmail = "owne
   new Folder("managed-results", "Completed_double_exposures", archiveRoot);
   const indexAccess = () => { io.indexCalls++; throw new Error("The personal studio must not access the visitor index."); };
   class HtmlOutput {
-    constructor(content) { this.content = content; }
+    constructor(content) { this.content = content; this.metaTags = []; }
     getContent() { return this.content; }
+    addMetaTag(name, content) { this.metaTags.push({ name, content }); return this; }
     setTitle(title) { this.title = title; return this; }
     setXFrameOptionsMode(mode) { this.frameMode = mode; return this; }
   }
@@ -138,6 +139,7 @@ test("the owner-only studio route loads its template with configured external as
   const studio = makeStudio();
   const page = studio.sandbox.doGet({ parameter: { view: "studio" } });
   assert.equal(page.title, "Double exposure · local test");
+  assert.deepEqual(page.metaTags, [{ name: "viewport", content: "width=device-width, initial-scale=1" }]);
   assert.equal(page.frameMode, undefined);
   assert.match(page.getContent(), /https:\/\/artist\.example\/exposures\/owner-studio\.css/);
   assert.match(page.getContent(), /https:\/\/artist\.example\/exposures\/owner-studio\.js/);

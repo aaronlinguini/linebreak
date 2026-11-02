@@ -3,7 +3,9 @@ function studioPage_(siteUrl) {
   requireProjectOwner_();
   var html = HtmlService.createHtmlOutputFromFile("Studio").getContent();
   html = html.split("__STUDIO_ASSET_ROOT__").join(escapeHtml_(siteUrl));
-  return HtmlService.createHtmlOutput(html).setTitle("Double exposure · local test");
+  return HtmlService.createHtmlOutput(html)
+    .addMetaTag("viewport", "width=device-width, initial-scale=1")
+    .setTitle("Double exposure · local test");
 }
 
 function studioApi(request) {
