@@ -63,6 +63,7 @@ function doGet(e) {
         .setMimeType(ContentService.MimeType.JAVASCRIPT);
     }
     var config = siteConfig_();
+    if (parameters.view === "studio") return studioPage_(config.siteUrl);
     if (parameters.view === "artist") {
       requireOwner_();
       var artistHtml = HtmlService.createHtmlOutputFromFile("Artist").getContent();
@@ -90,7 +91,9 @@ function doGet(e) {
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   } catch (error) {
     return HtmlService.createHtmlOutput(error && error.exposureCode_ === "OWNER_REQUIRED"
-      ? "Open the artist import page while signed into the account that deployed this project."
+      ? parameters && parameters.view === "studio"
+        ? "Open this page while signed into the project Google account."
+        : "Open the artist import page while signed into the account that deployed this project."
       : "The exposure archive connection is unavailable.");
   }
 }

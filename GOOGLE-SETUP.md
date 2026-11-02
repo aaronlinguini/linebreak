@@ -6,6 +6,8 @@ The double-exposure tool runs in the browser. The Google program supplies base p
 
 Both application-level daily caps are removed in the active deployment. Google Version 10 was deployed November 2 at 2:33 PM on the same endpoint with the same project account, Anyone access, scopes, properties, and folder IDs. Saved Code.gs matched local bytes after editor reload (62,548 bytes; SHA-256 6d8cd19ac48ad9d7653f89f90048f1be0000b9cbbd80cef38c6c7e706d993f4c). Version 9 remains available for rollback. The full automated suite passes 481/481 checks; no new live photo submission was performed.
 
+The personal-studio revision below is prepared locally. Its Google installation, deployment version, and live JPEG receipts have not yet been verified; Version 10 is the last recorded active release.
+
 The earlier consent-retention revision was installed as **Google Version 9**: Yes retains the original in `participant_uploads`; No archives only the finished result, with no original file or Sources row. Google Version 9 was deployed November 2 at 1:36 PM in the dedicated project account on the existing endpoint, with Anyone access and unchanged scopes, properties, and folder IDs. Saved Code.gs matched local bytes after editor reload (SHA-256 42067f2d67a72284e887bcd32df48727ab3c7f00a1c2602fa7932cab1791a5c9); Version 8 remains available for rollback. The same originals folder was renamed participant_uploads and its name was verified after reload. All 479 automated checks pass. No new live photo submission or physical-device check was performed in this revision.
 
 The dedicated account **aaron.double.exposure.project@gmail.com** holds the private photo archive and source index. Artist images are delivered from the website's selected static files; retained Drive originals still support index and duplicate verification. The [Apps Script project](https://script.google.com/home/projects/1gj7CIChAW6rMFOmP_Pb16TWSAwUKzZQxnOUOvvEUvDFOwQxKo65lYols/edit) uses these configured properties:
@@ -56,6 +58,22 @@ Keep the existing originals in [My_photos](https://drive.google.com/drive/folder
 The [GitHub repository](https://github.com/aaronlinguini/double-exposure-online-project) is private and retains the last published frontend `949dc1`; the former Pages site is offline. Its project-account endpoint configuration is unchanged. The earlier personal-account deployment and its folders remain unchanged and paused as a rollback reference. Distinct new-account installation, folder-link, and deployment records are saved privately in the Git-ignored `secrets/` directory.
 
 No personal Drive-folder sharing, repeated authorization, or new setup is needed. The optional owner import page is not required to manage the selected static artist assets.
+
+## Private personal studio
+
+The prepared owner address is [the existing web app with `?view=studio`](https://script.google.com/macros/s/AKfycbyzIdwIui57NUjmTMm_XyNMvWNHZixo4UyMedoRtz7Qod4COqvjAbcwGDQounUvsCPv/exec?view=studio). Use **aaron.double.exposure.project@gmail.com**. Both the `doGet` page and each `studioApi` status/save request require the active account to match the effective executing account and `PROJECT_OWNER_EMAIL`. The existing deployment remains accessible to Anyone for visitor use; the studio's separate owner checks apply before its HTML, folder, or save operations are accessed. There is no public navigation link.
+
+The generated `Studio.html` reuses `local-test.html` and its comparison controls. Ordinary `local-test.html` stays local-only and sends no images to Google. Only the private studio loads the autosave adapter. It saves completed reference and trial JPEGs after an 800 ms settling interval, with one latest queued version per output type and immutable in-flight/retry bytes. Source photographs are never uploaded separately; device downloads remain unchanged. A matching SHA-256, byte length, dimensions, file URL, and folder receipt are required before reporting a save. Transient failures retry automatically; other errors retain manual retry and unsaved work keeps the leave-page warning.
+
+The first authenticated studio status/save request obtains or creates the app-managed **Personal_double_exposures** folder under the existing project root. Its ID uses the new `EXPOSURE_OWNER_RESULTS_FOLDER_ID` property, separate from all existing artist, participant, and finished-visitor-result folder IDs. These personal JPEGs never join the visitor base pool and do not write Sources, Submissions, or Usage rows. Exact-byte duplicate results reuse verified files. No new scopes, account setup, sharing, or changes to existing archive IDs are required.
+
+To install or update this addition:
+
+1. Run `node scripts/build-owner-studio.cjs` and `node scripts/build-owner-studio.cjs --check`. The generated `google-apps-script/Studio.html` uses final content-hashed public asset URLs, with the configured `SITE_URL` substituted by Google.
+2. Publish the matching static dependencies through the normal Pages workflow: `local-test.js`, `local-test.css`, `film-renderer.js`, `tone-adjustments.js`, and `owner-studio.js`. They contain no credentials. Neither `local-test.html`, generated Studio.html, nor backend sources are Pages assets.
+3. Save affected **Code.gs**, **OwnerStudio.gs**, and generated **Studio.html** in the existing Google project. Regenerate and reinstall Studio.html whenever the comparison page or dependency bytes change.
+4. Update the existing deployment through **Manage deployments → Edit → New version**, preserving its `/exec` URL, project account, Anyone access, scopes, and existing properties/IDs. Do not rerun setup or create another initial deployment. Record the actual version and saved-source verification after installation.
+5. Verify owner access, denial when signed out or signed into a different account, an exact-byte personal save receipt, reference reuse, and a later trial adjustment. Confirm that source photos, visitor archives/index, and existing download controls remain untouched. Automated tests do not establish this live evidence.
 
 ## Keep the two Google projects separate
 
@@ -158,7 +176,7 @@ Then set `googleScriptUrl` in `project-config.js` to that new `/exec` URL. Prese
 node scripts/prepare-public-site.cjs
 ```
 
-Preparation is local only. If publication is explicitly requested later, publish only the generated `.public-site/` contents. It contains twenty-one core files plus only the artist photos listed in the public manifest—currently 113:
+Current publication uses normal commits/pushes and GitHub Actions to deploy only the generated `.public-site/` contents. Ordinary root HTML pages except `local-test.html`, their selected gallery photos, shared assets, the studio's five static dependencies, and the selected artist manifest are included. The following twenty-one-path list describes the earlier selected-copy package, retained for reference:
 
 - `index.html`, `double-exposure.html`, `experiment-1.html`, `experiment-2.html`, `experiment-3.html`
 - `styles.css`, `scripts.js`, `project-config.js`
@@ -168,7 +186,7 @@ Preparation is local only. If publication is explicitly requested later, publish
 - `heic-input.js`, `vendor/heic-to/heic-to.js`, its `LICENSE`, `NOTICE.txt`, `SOURCES.tar.gz`, and the empty `.nojekyll` marker
 - The exact `assets/base-photos/<filename>` entries in that manifest.
 
-Do not publish the working repository, its history, `google-apps-script/` including **AssetCatalog.gs**, docs, tests, secrets, local comparisons, or unselected photos. The packager does not sweep in `images/` or experiment photographs; these need a separate explicit selection. The optional owner-page assets contain no credentials. Never publish every project file automatically.
+The Pages artifact excludes `google-apps-script/` including **AssetCatalog.gs** and **Studio.html**, docs, tests, secrets, `local-test.html`, and unselected photos. Active gallery HTML references select experiment photographs. Shared comparison/studio JavaScript and CSS are static dependencies, not a public studio page, and contain no credentials. The normal repository and history are public under the current workflow; secrets and incoming participant files remain ignored. Never add every working file to the website artifact.
 
 Keep `SITE_URL` as the HTTPS repository base, including its path and trailing slash; the configured base is `https://aaronlinguini.github.io/linebreak/`. The prepared tool page is `double-exposure.html`; `index.html` remains the physical homepage entry file, and its shared Home link uses `href="./"` for the clean repository root, not `/home`. The address change updated only the existing `SITE_URL` property, without an Apps Script redeployment. `SITE_URL` supplies the public website's permitted origin and the optional owner-page asset base. Local HTTP previews need their exact origins in `ALLOWED_ORIGINS`; `file://` cannot connect to the archive.
 
@@ -191,6 +209,7 @@ The existing Google service is active as explicitly approved, and the frontend r
 7. Change **Black and white** on a saved result in both directions. Confirm a new submission ID with the same original, pinned base, and consent, no additional original copy, and an archived JPEG matching the displayed colour mode. The earlier result must remain unchanged. An identical JPEG should reuse its existing archived file. Retry a failed variant without selecting a new base or changing its JPEG/recipe.
 8. Verify `/exec?view=artist` denies signed-out and different-account visitors while the project owner can use it. Do not treat another signed-in browser as an anonymous test.
 9. Test library selection, camera capture, cancellation, and portrait input on actual phones/tablets. Desktop layout tests do not prove camera-picker or HEIC-conversion behavior.
+10. After installing the personal studio, verify its owner-only page/RPC access and exact saved reference/trial bytes in Personal_double_exposures, with no source-photo uploads or visitor index/pool changes. Confirm a later adjustment saves automatically, retries preserve the same JPEG, and device downloads still work independently.
 
 Do not describe the real archive workflow as tested until these checks pass. If the user wants to close the active service, set `UPLOADS_PAUSED=true` at their request; do not silently change it because a check remains unfinished.
 

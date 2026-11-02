@@ -28,9 +28,14 @@ const HEIC_PUBLIC_FILES = Object.freeze([
 const PREBUILT_PUBLIC_FILES = Object.freeze([...STATIC_PUBLIC_FILES, ...HEIC_PUBLIC_FILES]);
 const MARKED_PUBLIC_FILES = Object.freeze([...PREBUILT_PUBLIC_FILES, ".nojekyll"]);
 const GALLERY_FILES = Object.freeze(["experiment-carousel.css", "experiment-carousel.js"]);
+const OWNER_STUDIO_FILES = Object.freeze([
+  "local-test.js", "local-test.css", "film-renderer.js", "tone-adjustments.js", "owner-studio.js"
+]);
 const HEADER_TEMPLATE = "includes/site-header.html";
 const HEADER_SCRIPT = "site-header.js";
-const NON_HTML_PUBLIC_FILES = Object.freeze([...MARKED_PUBLIC_FILES.filter(name => !name.endsWith(".html")), ...GALLERY_FILES, HEADER_SCRIPT]);
+const NON_HTML_PUBLIC_FILES = Object.freeze([
+  ...MARKED_PUBLIC_FILES.filter(name => !name.endsWith(".html")), ...GALLERY_FILES, HEADER_SCRIPT, ...OWNER_STUDIO_FILES
+]);
 function publicSourceFiles(root) {
   const pages = fs.readdirSync(root).filter(name => !name.startsWith(".") && /\.html$/i.test(name) && name !== "local-test.html").sort();
   if (!pages.includes("index.html")) throw new Error("The public website needs index.html.");
@@ -263,7 +268,8 @@ function validatePreviousOutput(destination) {
   const hasGallery = fs.existsSync(path.join(destination, GALLERY_CATALOGUE_FILE));
   const galleryBytes = hasGallery ? readRegularFile(destination, GALLERY_CATALOGUE_FILE, true) : null;
   const gallery = hasGallery ? readCatalogue(galleryBytes, true) : [];
-  const pages = hasGallery ? JSON.parse(galleryBytes).pages : [];
+  const galleryManifest = hasGallery ? JSON.parse(galleryBytes) : null;
+  const pages = hasGallery ? galleryManifest.pages : [];
   if (hasGallery && (!Array.isArray(pages) || !pages.includes("index.html") || new Set(pages).size !== pages.length
     || pages.some(name => typeof name !== "string" || name.startsWith(".") || /[\/\\\p{Cc}]/u.test(name)
       || !/\.html$/i.test(name) || name === "local-test.html"))) {
@@ -272,13 +278,20 @@ function validatePreviousOutput(destination) {
   if (!hasGallery && GALLERY_FILES.some(name => entries.includes(name))) {
     throw new Error(`${OUTPUT_DIRECTORY} is missing its gallery catalogue; nothing was replaced.`);
   }
+  if (hasGallery && galleryManifest.ownerStudioAssetsVersion !== undefined && galleryManifest.ownerStudioAssetsVersion !== 1) {
+    throw new Error(`${OUTPUT_DIRECTORY} contains an invalid owner-studio asset version; nothing was replaced.`);
+  }
+  const expectsOwnerStudio = hasGallery && (galleryManifest.ownerStudioAssetsVersion === 1
+    || OWNER_STUDIO_FILES.some(name => entries.includes(name)));
   // Complete earlier releases have neither carousel files nor a gallery catalogue.
   const expectsHeaderScript = hasGallery && pages.some(page => {
     if (!fs.existsSync(path.join(destination, page))) return false;
     const html = readRegularFile(destination, page, true).toString("utf8").replace(/<!--[\s\S]*?-->/g, "");
     return /\bdata-site-header-rendered\b|<script\b[^>]*\bsrc=["']site-header\.js(?:[?"'])/i.test(html);
   });
-  const galleryCoreFiles = NON_HTML_PUBLIC_FILES.filter(name => name !== HEADER_SCRIPT || expectsHeaderScript || entries.includes(HEADER_SCRIPT));
+  const galleryCoreFiles = NON_HTML_PUBLIC_FILES.filter(name =>
+    (name !== HEADER_SCRIPT || expectsHeaderScript || entries.includes(HEADER_SCRIPT))
+    && (!OWNER_STUDIO_FILES.includes(name) || expectsOwnerStudio));
   const coreFiles = hasGallery ? [...galleryCoreFiles, ...pages] : entries.includes(".nojekyll") ? MARKED_PUBLIC_FILES
     : entries.includes("heic-input.js") || entries.includes("vendor") ? PREBUILT_PUBLIC_FILES : STATIC_PUBLIC_FILES;
   const expectedFiles = new Set([...coreFiles, ...photos.map((photo) => photo.path),
@@ -356,7 +369,8 @@ function preparePublicSite(root = path.resolve(__dirname, "..")) {
   }
   const gallery = readGallery(root, sourceFiles);
   for (const [filename, bytes] of gallery.files) contents.set(filename, bytes);
-  contents.set(GALLERY_CATALOGUE_FILE, Buffer.from(JSON.stringify({ version: 1, pages: sourceFiles.filter(name => name.endsWith(".html")), photos: gallery.photos }, null, 2) + "\n"));
+  contents.set(GALLERY_CATALOGUE_FILE, Buffer.from(JSON.stringify({ version: 1, ownerStudioAssetsVersion: 1,
+    pages: sourceFiles.filter(name => name.endsWith(".html")), photos: gallery.photos }, null, 2) + "\n"));
   const publicFiles = new Set(contents.keys());
   const template = readRegularFile(root, HEADER_TEMPLATE).toString("utf8");
   validateHtml(template, HEADER_TEMPLATE, publicFiles);
@@ -404,7 +418,8 @@ function preparePublicSite(root = path.resolve(__dirname, "..")) {
   return destination;
 }
 
-module.exports = { PUBLIC_FILES, OUTPUT_DIRECTORY, preparePublicSite };
+module.exports = { PUBLIC_FILES, OWNER_STUDIO_FILES, OUTPUT_DIRECTORY, preparePublicSite,
+  addContentVersions, validateHtml, validateJavaScript, readRegularFile };
 
 if (require.main === module) {
   try {

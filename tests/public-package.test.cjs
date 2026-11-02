@@ -7,7 +7,8 @@ const os = require("node:os");
 const path = require("node:path");
 const { createHash } = require("node:crypto");
 const { spawnSync } = require("node:child_process");
-const { PUBLIC_FILES, OUTPUT_DIRECTORY, preparePublicSite } = require("../scripts/prepare-public-site.cjs");
+const { PUBLIC_FILES, OWNER_STUDIO_FILES, OUTPUT_DIRECTORY, preparePublicSite } = require("../scripts/prepare-public-site.cjs");
+const { ASSET_ROOT, buildOwnerStudio } = require("../scripts/build-owner-studio.cjs");
 
 const project = path.resolve(__dirname, "..");
 const catalogueFile = "assets/base-photos.json";
@@ -67,7 +68,7 @@ function restoreSingleMemoryPage(destination) {
 }
 
 function removeGalleryOutput(destination) {
-  for (const name of [...galleryFiles, galleryCatalogueFile, headerScript, "images"]) {
+  for (const name of [...galleryFiles, galleryCatalogueFile, headerScript, ...OWNER_STUDIO_FILES, "images"]) {
     fs.rmSync(path.join(destination, name), { recursive: true, force: true });
   }
   restoreSingleMemoryPage(destination);
@@ -75,7 +76,8 @@ function removeGalleryOutput(destination) {
 
 function oldExpectedFiles(root) {
   return [...expectedFiles(root).filter(name => !galleryFiles.includes(name) && !memoryPartFiles.includes(name)
-    && name !== galleryCatalogueFile && name !== headerScript && !name.startsWith("images/")), "experiment-2.html"].sort();
+    && name !== galleryCatalogueFile && name !== headerScript && !OWNER_STUDIO_FILES.includes(name)
+    && !name.startsWith("images/")), "experiment-2.html"].sort();
 }
 
 function fixture(t) {
@@ -164,13 +166,14 @@ test("publication contains site code, selected artist photos and referenced gall
     ...fs.readdirSync(project).filter(name => !name.startsWith(".") && /\.html$/i.test(name) && name !== "local-test.html"),
     "base-assets.js", catalogueFile,
     "heic-input.js", "vendor/heic-to/heic-to.js", "vendor/heic-to/LICENSE",
-    "vendor/heic-to/NOTICE.txt", "vendor/heic-to/SOURCES.tar.gz", ".nojekyll", ...galleryFiles
+    "vendor/heic-to/NOTICE.txt", "vendor/heic-to/SOURCES.tar.gz", ".nojekyll", ...galleryFiles, ...OWNER_STUDIO_FILES
   ].sort());
   const root = fixture(t);
   for (const name of ["private-photo.jpg", "local-test.html", ".env", "README.md", "AGENTS.md", "Code.gs", "Storage.gs"]) fs.writeFileSync(path.join(root, name), "private");
   fs.mkdirSync(path.join(root, "google-apps-script"));
   fs.writeFileSync(path.join(root, "google-apps-script", "Code.gs"), "private backend");
   fs.writeFileSync(path.join(root, "google-apps-script", "Artist.html"), "private backend page");
+  fs.writeFileSync(path.join(root, "google-apps-script", "Studio.html"), "private owner page");
   fs.mkdirSync(path.join(root, "scripts", "vendor", "es-module-lexer"), { recursive: true });
   fs.writeFileSync(path.join(root, "scripts", "vendor", "es-module-lexer", "lexer.cjs"), "private preparation tool");
   fs.mkdirSync(path.join(root, ".git"));
@@ -192,6 +195,11 @@ test("publication contains site code, selected artist photos and referenced gall
     } else assert.deepEqual(actual, source, `${name}: contents must be copied unchanged`);
   }
   assert.equal(fs.existsSync(path.join(destination, "images", "experiment-1", "additional-gallery.jpg")), false);
+  assert.equal(fs.existsSync(path.join(destination, "local-test.html")), false);
+  assert.equal(fs.existsSync(path.join(destination, "google-apps-script")), false);
+  for (const name of OWNER_STUDIO_FILES) {
+    assert.deepEqual(fs.readFileSync(path.join(destination, name)), fs.readFileSync(path.join(root, name)));
+  }
   assertContentLabels(snapshot(root));
   assert.deepEqual(fs.readdirSync(root).filter((name) => name.startsWith(".public-site-stage-")), []);
 });
@@ -207,6 +215,27 @@ test("content labels are deterministic and preparation never edits the source fi
   for (const [name, bytes] of Object.entries(originals)) {
     assert.deepEqual(fs.readFileSync(path.join(root, name)), bytes, `${name}: source must remain editable and unchanged`);
   }
+});
+
+test("private owner-template labels match the actual public assets without publishing either owner page", (t) => {
+  const root = fixture(t);
+  fs.copyFileSync(path.join(project, "local-test.html"), path.join(root, "local-test.html"));
+  fs.mkdirSync(path.join(root, "google-apps-script"));
+  const template = buildOwnerStudio({ root });
+  const html = fs.readFileSync(template, "utf8");
+  const destination = preparePublicSite(root);
+  const files = snapshot(root);
+  for (const [, reference] of html.matchAll(/\b(?:src|href)=["']([^"']+)["']/g)) {
+    if (!reference.startsWith(ASSET_ROOT)) continue;
+    const url = new URL(reference.slice(ASSET_ROOT.length).replace(/&amp;/g, "&"), "https://site.example/");
+    const name = decodeURIComponent(url.pathname.slice(1));
+    assert.ok(files[name], `${name}: private dependencies must exist in the public artifact`);
+    assert.deepEqual(url.searchParams.getAll("v"), [sha256(files[name])], `${name}: private and public builds must agree on final emitted bytes`);
+  }
+  assert.equal(fs.existsSync(path.join(destination, "local-test.html")), false);
+  assert.equal(fs.existsSync(path.join(destination, "google-apps-script")), false);
+  assert.equal(JSON.parse(files[galleryCatalogueFile]).pages.includes("local-test.html"), false);
+  assert.equal(fs.readFileSync(template, "utf8"), html);
 });
 
 test("editing the one shared header updates static page headers, current navigation, and marked metadata", (t) => {
@@ -316,6 +345,53 @@ test("a complete earlier gallery without shared headers upgrades while missing c
   }
   preparePublicSite(root);
   assert.deepEqual(Object.keys(snapshot(root)).sort(), expectedFiles(root));
+});
+
+test("an earlier gallery without owner-studio assets upgrades without publishing its private page", (t) => {
+  const root = fixture(t);
+  const destination = preparePublicSite(root);
+  for (const name of OWNER_STUDIO_FILES) fs.unlinkSync(path.join(destination, name));
+  const manifestPath = path.join(destination, galleryCatalogueFile);
+  const manifest = JSON.parse(fs.readFileSync(manifestPath));
+  delete manifest.ownerStudioAssetsVersion;
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+  const previous = snapshot(root);
+  preparePublicSite(root);
+  const updated = snapshot(root);
+  assert.deepEqual(Object.keys(updated).sort(), expectedFiles(root));
+  assert.equal(JSON.parse(updated[galleryCatalogueFile]).ownerStudioAssetsVersion, 1);
+  assert.equal(fs.existsSync(path.join(destination, "local-test.html")), false);
+  for (const name of [...galleryPhotos(root), ...catalogue(root).photos.map(photo => photo.path)]) {
+    assert.deepEqual(updated[name], previous[name], `${name}: asset upgrade preserves selected photographs`);
+  }
+});
+
+test("missing or partial owner-studio assets preserve the existing generated output", (t) => {
+  for (const kind of ["one-missing", "all-missing", "legacy-partial", "invalid-version"]) {
+    const root = fixture(t);
+    const destination = preparePublicSite(root);
+    const manifestPath = path.join(destination, galleryCatalogueFile);
+    const manifest = JSON.parse(fs.readFileSync(manifestPath));
+    if (kind === "invalid-version") manifest.ownerStudioAssetsVersion = 2;
+    else {
+      const missing = kind === "all-missing" ? OWNER_STUDIO_FILES : [OWNER_STUDIO_FILES[0]];
+      for (const name of missing) fs.unlinkSync(path.join(destination, name));
+      if (kind === "legacy-partial") delete manifest.ownerStudioAssetsVersion;
+    }
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+    const previous = snapshot(root);
+    assert.throws(() => preparePublicSite(root), /missing required files|unexpected files|invalid owner-studio/);
+    assert.deepEqual(snapshot(root), previous);
+  }
+});
+
+test("an invalid owner-studio script cannot replace the previous publication", (t) => {
+  const root = fixture(t);
+  preparePublicSite(root);
+  const previous = snapshot(root);
+  fs.writeFileSync(path.join(root, "owner-studio.js"), "function invalid(");
+  assert.throws(() => preparePublicSite(root), SyntaxError);
+  assert.deepEqual(snapshot(root), previous);
 });
 
 test("the empty static-site marker preserves underscore photo names without publishing other dotfiles", (t) => {
@@ -871,7 +947,7 @@ test("inline code, unpublished references and invalid JavaScript fail before rep
   const previous = snapshot(root);
   for (const page of PUBLIC_FILES.filter(name => name.endsWith(".html"))) {
     const original = fs.readFileSync(path.join(root, page), "utf8");
-    for (const addition of ["<script>alert(1)</script>", "<style>body{}</style>", '<p style="color:red">text</p>', '<button onclick="run()">run</button>', '<script src="local-test.js"></script>', '<a href="GOOGLE-SETUP.md">private notes</a>']) {
+    for (const addition of ["<script>alert(1)</script>", "<style>body{}</style>", '<p style="color:red">text</p>', '<button onclick="run()">run</button>', '<iframe src="local-test.html"></iframe>', '<iframe src="google-apps-script/Studio.html"></iframe>', '<a href="GOOGLE-SETUP.md">private notes</a>']) {
       fs.writeFileSync(path.join(root, page), original + addition);
       assert.throws(() => preparePublicSite(root), error => error.message.includes(page) && /external files|unpublished file/.test(error.message));
       assert.deepEqual(snapshot(root), previous);

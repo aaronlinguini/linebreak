@@ -151,11 +151,62 @@ function harness({ colour = false } = {}) {
   const pixels = () => Array.from(elements.get("test-canvas").getContext("2d").getImageData().data);
   async function flushTimers() { for (const [id, callback] of [...timers]) { timers.delete(id); callback(); } await new Promise(setImmediate); }
   return { elements, renders, processing, rotations, downloads, urls, revoked, fire, select, pair, recipe, pixels, pageListeners, gradient, encodings, flushTimers,
+    editor: sandbox.window.LocalExposureTest,
     holdEncoding(value = true) { holdEncoding = value; }, releaseEncoding(index) { encodings[index].callback(); },
     async settle() { await new Promise(setImmediate); },
     blockNext(gate) { nextGate = gate; }, blockRotation(gate) { rotationGate = gate; }, failRotation(error) { rotationError = error; }
   };
 }
+
+test("personal saves capture the exact completed download JPEG without reading or rendering it again", async () => {
+  const h = harness();
+  assert.equal(h.editor.snapshot("trial"), null);
+  await h.pair();
+  const trial = h.editor.snapshot("trial");
+  const reference = h.editor.snapshot("reference");
+  assert.equal(Object.isFrozen(trial), true);
+  assert.deepEqual([trial.width, trial.height], [6, 4]);
+  await h.fire("test-download", "click");
+  assert.equal(trial.blob, h.urls.get(h.downloads.at(-1).href));
+  await h.fire("test-reference-download", "click");
+  assert.equal(reference.blob, h.urls.get(h.downloads.at(-1).href));
+  const earlierBytes = await trial.blob.text();
+  h.elements.get("test-shadows").value = "25";
+  await h.fire("test-shadows", "input");
+  assert.equal(h.editor.snapshot("trial"), null, "an unfinished tone export must not offer the preceding JPEG as current");
+  assert.equal(h.editor.snapshot("reference").blob, reference.blob);
+  await h.flushTimers();
+  const adjusted = h.editor.snapshot("trial");
+  assert.notEqual(adjusted.blob, trial.blob);
+  await h.fire("test-download", "click");
+  assert.equal(adjusted.blob, h.urls.get(h.downloads.at(-1).href));
+  assert.equal(await trial.blob.text(), earlierBytes, "a captured save remains immutable after later adjustments");
+  assert.equal(h.renders.length, 2, "capturing exports and tone-only adjustments do not rerender the pair");
+});
+
+test("personal output subscriptions cannot expose stale JPEGs during rendering or after leaving", async () => {
+  const h = harness();
+  let notices = 0;
+  const unsubscribe = h.editor.subscribe(() => { notices++; });
+  await h.pair();
+  assert.ok(notices > 1);
+  let release;
+  h.blockNext(new Promise(resolve => { release = resolve; }));
+  h.elements.get("test-base-exposure").value = "-0.5";
+  const changing = h.fire("test-base-exposure");
+  assert.equal(h.editor.snapshot("trial"), null);
+  assert.equal(h.editor.snapshot("reference"), null);
+  release();
+  await changing;
+  assert.ok(h.editor.snapshot("trial"));
+  unsubscribe();
+  const beforeExit = notices;
+  h.pageListeners.get("pagehide")({ persisted: false });
+  assert.equal(h.editor.snapshot("trial"), null);
+  assert.equal(h.editor.snapshot("reference"), null);
+  assert.equal(h.editor.snapshot("unknown"), null);
+  assert.equal(notices, beforeExit);
+});
 
 test("trial settings affect only the trial, and downloads identify the completed treatment", async () => {
   const h = harness();

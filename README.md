@@ -4,7 +4,7 @@
 
 Requested website changes are validated, committed, and pushed on `main` by default, without another publication confirmation. Preserve unrelated work and stage only the intended changes. You can also use **Commit & Push** in VS Code whenever you edit the site yourself. This folder is connected to [aaronlinguini/linebreak](https://github.com/aaronlinguini/linebreak); the rename and local origin were verified, preserving the existing repository ID and history. GitHub Actions runs the checks, prepares `.public-site`, and publishes the result to [the website](https://aaronlinguini.github.io/linebreak/). Check that the **Publish website** run succeeds before reporting the update live. A failed run keeps the previous deployed site.
 
-CSS and JavaScript cache labels are generated automatically during that build. Ordinary root HTML files are website pages; `local-test.html` stays a local comparison. Photos under `images/` are included in the website build when an active page references them. Keep editing source files rather than `.public-site`. Credentials, incoming uploads, temporary backups and generated copies remain ignored. Source code, tests, documentation and Git history are now in the normal GitHub repository; the deployed website contains only its prepared pages and assets.
+CSS and JavaScript cache labels are generated automatically during that build. Ordinary root HTML files are website pages; `local-test.html` stays a local comparison and is excluded from Pages. Its shared JavaScript/CSS and the personal-studio adapter are published as static dependencies, without a public studio page or navigation link. Photos under `images/` are included in the website build when an active page references them. Keep editing source files rather than `.public-site`. Credentials, incoming uploads, temporary backups and generated copies remain ignored. Source code, tests, documentation and Git history are now in the normal GitHub repository; the deployed website contains only its prepared pages and assets.
 
 The separate selected-copy publication records below describe the earlier setup. Normal pushes from this folder replace that workflow.
 
@@ -22,6 +22,23 @@ The home page in `index.html` has **Interactive photographic project** on the le
 ## Try it
 
 To test without Google, right-click `local-test.html` in VS Code and choose **Open with Live Server**. Choose your base photo and a second photo. The left preview keeps the saved **Current** treatment at zero EV and contrast 12. The right starts with **Reduced overlap (trial)** at the same settings, with **Haze reduction 20%**, matching the approved screenshot preset. All five optional tone controls start at zero. Increasing Haze reduction reduces overlapping light across shadows, midtones, and highlights. Dark areas leave the brighter photograph clearer; two dark areas stay closer to their original darkness. Move Haze reduction to 0% to reproduce the saved Current treatment. Current + contrast, Revised smooth, Saved smooth exposure, and the earlier film curve remain available. Adjust each photograph's exposure separately and compare black and white with colour. Use the visible **Tone adjustments** sliders for optional Shadows, Highlights, Mids, Whites, and Blacks finishing controls; **Reset tones** clears only those five controls. Both results use the same full-frame preparation and JPEG export. Download the results and settings to keep a record; nothing is uploaded or automatically archived there. See [FILM-EXPERIMENT.md](FILM-EXPERIMENT.md) for comparisons and how to return to the saved version.
+
+### Private personal studio
+
+The personal-studio addition is prepared locally; its Google installation and live saving have not yet been verified. After installation, open [the private studio](https://script.google.com/macros/s/AKfycbyzIdwIui57NUjmTMm_XyNMvWNHZixo4UyMedoRtz7Qod4COqvjAbcwGDQounUvsCPv/exec?view=studio) signed into **aaron.double.exposure.project@gmail.com**. Google serves the generated `Studio.html` only when the active account matches the executing account and configured project owner. There is no studio link on the public website. Ordinary `local-test.html` remains local-only, with no uploads.
+
+The private studio uses the same comparison controls, with automatic saving added separately from device downloads. Once completed reference and trial outputs have settled for 800 ms, their exact current JPEGs are saved to the app-managed **Personal_double_exposures** folder. The chosen source photographs are never sent separately. These personal results do not enter the visitor source pool, index, or Usage ledger. The new `EXPOSURE_OWNER_RESULTS_FOLDER_ID` property identifies this separate folder; existing archive IDs stay unchanged.
+
+Each output type keeps only its latest queued version. An in-flight save or retry keeps its exact frozen JPEG, and a reused saved reference Blob is not sent again. A matching hash, byte count, dimensions, file URL, and folder receipt are required before the studio says it is saved. Transient failures retry automatically; other failures retain manual retry. Keep the page open until saving is confirmed. Device image/settings downloads remain independent and unchanged.
+
+Build and check the private template whenever the comparison page or its dependencies change:
+
+```sh
+node scripts/build-owner-studio.cjs
+node scripts/build-owner-studio.cjs --check
+```
+
+The builder derives the final public content-hashed CSS/JavaScript URLs. The five added static dependencies are `local-test.js`, `local-test.css`, `film-renderer.js`, `tone-adjustments.js`, and `owner-studio.js`; they contain no credentials. `local-test.html`, generated `google-apps-script/Studio.html`, and backend sources stay out of the Pages artifact. Publish the matching dependencies, save the generated **Studio.html** and affected Google sources, then update the existing Google deployment without changing its endpoint, account, Anyone access, scopes, or existing IDs. No new authorization or setup is required. See [GOOGLE-SETUP.md](GOOGLE-SETUP.md) for the installation checks.
 
 There is no frontend dependency installation. The Google archive runs as **Version 10**, deployed November 2 at **2:33 PM** on the existing endpoint in the dedicated project account, with unchanged account, Anyone access, scopes, properties, and archive IDs. Saved `Code.gs` matched local bytes after editor reload. The current revision passes **481/481 checks**. The same originals folder is now named `participant_uploads`; no existing photos were deleted. No new live photo submission or physical-device check was performed for this revision.
 
@@ -80,9 +97,11 @@ python3 -m http.server 5500 --bind 127.0.0.1
 - `double-exposure.html`: the double-exposure tool’s HTML; loads its external stylesheet and scripts.
 - `styles.css`: shared page styling and responsive layouts.
 - `scripts.js`: photo loading, pairing, light processing, finished-image rotation, and downloads.
-- `local-test.html`, `local-test.js`, and `local-test.css`: browser-only comparison controls and layout without Google.
-- `tone-adjustments.js`: optional finishing curve for the local test only; excluded from the public website files.
-- `film-renderer.js`: experimental revised/saved smooth-exposure and assumed film-response models, loaded only by the local comparison page.
+- `local-test.html`: local comparison page without uploads; also the source for the private Google-served studio template, never a Pages page.
+- `local-test.js` and `local-test.css`: shared comparison controls and layout for the local page and private studio.
+- `tone-adjustments.js`: optional finishing curve for the comparison and private studio; it does not change the visitor renderer.
+- `film-renderer.js`: experimental revised/saved smooth-exposure and assumed film-response models for the comparison and private studio.
+- `owner-studio.js`: owner-studio-only autosave adapter; leaves the ordinary local page and device downloads untouched.
 - `project-config.js`: the public Google deployment URL, artist colour option, and connection timeouts.
 - `archive-workflow.js`: original → develop → result archive workflow, consent, saved colour variants, another pairing, and retries.
 - `drive-storage.js`: website-side Google connection.
@@ -92,7 +111,8 @@ python3 -m http.server 5500 --bind 127.0.0.1
 - `vendor/heic-to/`: the separate heic-to 1.6.7 decoder, its LGPL-3.0 license and notices, and the bundled corresponding sources in `SOURCES.tar.gz`.
 - `assets/base-photos/` and `assets/base-photos.json`: selected artist image files and their generated public manifest.
 - `artist-import.js` and `artist-import.css`: external assets for the owner-only import page; they contain no Google access credentials.
-- `google-apps-script/`: private Code.gs workflow, Drive/Sheets adapters in Storage.gs, generated Client.gs and AssetCatalog.gs, Bridge.html, optional owner-only Artist.html, and the dedicated-account manifest.
+- `google-apps-script/`: backend Code.gs workflow, Drive/Sheets adapters in Storage.gs, generated Client.gs and AssetCatalog.gs, Bridge.html, optional owner-only Artist.html, personal-save OwnerStudio.gs, generated owner-only Studio.html, and the dedicated-account manifest; none are Pages assets.
+- `scripts/build-owner-studio.cjs`: generates/checks the private Studio.html template from the comparison page and final hashed public dependencies.
 - `scripts/build-google-client.cjs`: rebuilds `Client.gs` from `drive-bridge.js`; use `--check` to confirm they match without writing.
 - `scripts/build-base-assets.cjs`: validates selected photo files and regenerates the public manifest and private Google catalog without changing the images.
 - `scripts/vendor/es-module-lexer/`: a small MIT-licensed parser used only during preparation to identify real JavaScript imports. It is not included in the website and needs no installation.
@@ -254,7 +274,7 @@ Memory has separate Part 1 and Part 2 links under its home-page label. Edit each
 3. In `experiment-1.html`, remove the `<!--` and `-->` around the example `<section class="experiment-entry">` to display it. Set the image's `src` to the real filename and replace its `alt` description. Use the corresponding paths in the other two pages.
 4. Put your reflection in the empty `<p></p>`. Repeat the complete `experiment-entry` section for another photo/reflection pair. Keep layout changes in `styles.css`; no inline CSS or JavaScript is needed.
 
-Photo files referenced by active experiment HTML are selected automatically for the website package, alongside the artist assets listed in `assets/base-photos.json`—currently 113. Unreferenced experiment photos and commented-out examples are excluded from the deployed artifact. README, project instructions, tests, local comparisons, backend sources, and Git history belong to the working repository but are not website assets; secrets and incoming participant files remain ignored.
+Photo files referenced by active experiment HTML are selected automatically for the website package, alongside the artist assets listed in `assets/base-photos.json`—currently 113. Unreferenced experiment photos and commented-out examples are excluded from the deployed artifact. README, project instructions, tests, `local-test.html`, generated Studio.html, backend sources, and Git history belong to the working repository but are not website assets; secrets and incoming participant files remain ignored. The comparison's shared static dependencies are included for the private studio.
 
 The earlier selected-copy package used these twenty-one core paths (historical):
 
@@ -282,7 +302,7 @@ vendor/heic-to/SOURCES.tar.gz
 .nojekyll
 ```
 
-The current packager discovers ordinary root HTML pages automatically, excluding `local-test.html`, and includes their active gallery images, shared header, carousel assets, the listed artist assets, and the separate decoder's license, notices, and corresponding sources. Run `node scripts/prepare-public-site.cjs` to prepare `.public-site/` locally, or push the validated source changes to `main` and let Actions build and deploy it. Rebuild the asset catalog after changing artist base files. The packager validates HTML, JavaScript, photo sizes/hashes, paths, and existing output contents before replacement; invalid or missing image references stop packaging.
+The current packager discovers ordinary root HTML pages automatically, excluding `local-test.html`, and includes their active gallery images, shared header, carousel assets, the listed artist assets, the private studio's static dependencies, and the separate decoder's license, notices, and corresponding sources. The private studio HTML and backend are not included. Run `node scripts/prepare-public-site.cjs` to prepare `.public-site/` locally, or push the validated source changes to `main` and let Actions build and deploy it. Rebuild the asset catalog after changing artist base files. The packager validates HTML, JavaScript, photo sizes/hashes, paths, and existing output contents before replacement; invalid or missing image references stop packaging.
 
 ### Automatic cache labels
 
@@ -298,7 +318,7 @@ The prepared HTML in `.public-site/` gets a `?v=` label calculated from each sty
 
 Script imports are processed before their parent is hashed, including the HEIC helper and its separate decoder. Updating the decoder therefore also updates the helper and main script URLs. The parser identifies executable imports without changing commented examples, quoted text, or the vendor decoder's bytes. Computed import URLs and circular local import chains stop preparation with an error instead of producing incomplete cache labels. The current project uses literal, acyclic imports.
 
-After a push to `main`, GitHub Actions prepares and deploys the **contents of `.public-site/`** automatically. The generated directory stays ignored; commit editable source files rather than generated output. Preparation leaves those source files unchanged. No framework, runtime cache script, or new Google deployment is needed. This updates asset URLs when the latest HTML is loaded; it cannot force a visitor's already-open page to reload. The optional Google-served owner import page still uses its separate backend URLs.
+After a push to `main`, GitHub Actions prepares and deploys the **contents of `.public-site/`** automatically. The generated directory stays ignored; commit editable source files rather than generated output. Preparation leaves those source files unchanged. Ordinary public-page cache updates need no framework, runtime cache script, or new Google deployment. This updates asset URLs when the latest HTML is loaded; it cannot force a visitor's already-open page to reload. The optional Google-served owner import page still uses its separate backend URLs. Private-studio page/dependency changes require rebuilding and installing Studio.html so its hashed URLs match the published bytes, then updating the existing Google deployment.
 
 Historical checkpoint **`9a9e90f`** preserves the home-page draft and the project before automatic cache labels. At that stage, changes were left uncommitted for review; the current standing authorization is to commit and push validated requested website changes.
 

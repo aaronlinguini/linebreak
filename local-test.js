@@ -39,11 +39,12 @@ function initializeLocalExposureTest() {
   });
   const state = {
     base: null, participant: null, working: false, disposed: false,
-    resultUrl: null, referenceUrl: null, settingsUrl: null,
+    resultUrl: null, referenceUrl: null, settingsUrl: null, resultBlob: null, referenceBlob: null,
     referenceRecord: null, completed: null, rotationQuarterTurns: 0,
     neutralPixels: null, neutralBlob: null, neutralSettings: null,
     exportPending: false, exportRevision: 0, exportTimer: null
   };
+  const outputListeners = new Set();
   const controls = [ui.base, ui.participant, ui.baseCamera, ui.participantCamera, ui.renderer, ui.baseExposure, ui.participantExposure, ui.contrast, ui.balance, ui.monochrome, ui.reset, ui.tonesReset, ui.rotate, ...toneInputs];
   ui.monochrome.checked = PROJECT_SETTINGS.monochrome;
 
@@ -92,6 +93,7 @@ function initializeLocalExposureTest() {
     }
     ui.rotate.hidden = !state.resultUrl;
     ui.rotate.disabled = state.working || state.exportPending || !state.resultUrl;
+    for (const listener of outputListeners) listener();
   }
   function invalidateToneExport() {
     if (state.exportTimer !== null) clearTimeout(state.exportTimer);
@@ -105,12 +107,14 @@ function initializeLocalExposureTest() {
     releaseUrl("resultUrl");
     releaseUrl("settingsUrl");
     state.completed = null;
+    state.resultBlob = null;
     ui.canvas.hidden = true;
     ui.canvas.width = ui.canvas.height = 1;
     ui.empty.hidden = false;
     if (includeReference) {
       releaseUrl("referenceUrl");
       state.referenceRecord = null;
+      state.referenceBlob = null;
       ui.referenceCanvas.hidden = true;
       ui.referenceCanvas.width = ui.referenceCanvas.height = 1;
       ui.referenceEmpty.hidden = false;
@@ -202,6 +206,7 @@ function initializeLocalExposureTest() {
     releaseUrl("resultUrl");
     releaseUrl("settingsUrl");
     state.resultUrl = nextResultUrl;
+    state.resultBlob = blob;
     state.settingsUrl = nextSettingsUrl;
     state.completed = recipe;
     state.exportPending = false;
@@ -269,6 +274,7 @@ function initializeLocalExposureTest() {
       const reference = await processor.develop(state.base, state.participant, ui.referenceCanvas, referenceSettings);
       if (state.disposed) return;
       state.referenceUrl = URL.createObjectURL(reference.blob);
+      state.referenceBlob = reference.blob;
       state.referenceRecord = renderRecord(referenceSettings, reference);
       ui.referenceCanvas.hidden = false;
       ui.referenceEmpty.hidden = true;
@@ -432,6 +438,21 @@ function initializeLocalExposureTest() {
   updateReadouts();
   updateTreatmentControls();
   updateTrialTitle();
+  return Object.freeze({
+    snapshot(kind) {
+      if (state.working || state.disposed || !state.completed || (kind !== "reference" && kind !== "trial")) return null;
+      if (kind === "trial" && state.exportPending) return null;
+      const blob = kind === "reference" ? state.referenceBlob : state.resultBlob;
+      const record = kind === "reference" ? state.completed.reference : state.completed.trial;
+      return blob && record ? Object.freeze({ blob, width: record.width, height: record.height,
+        filename: resultFilename(record) }) : null;
+    },
+    subscribe(listener) {
+      outputListeners.add(listener);
+      listener();
+      return () => outputListeners.delete(listener);
+    }
+  });
 }
 
-initializeLocalExposureTest();
+window.LocalExposureTest = initializeLocalExposureTest();
