@@ -807,7 +807,7 @@ test("photo choices and a shared action toolbar precede the image, with colour c
   assert.equal(sourceDepth, 0, "repeat choices must remain outside the upload controls that hide after selection");
   assert.deepEqual([...repeats[1].matchAll(/<button\b[^>]*id="([^"]+)"[^>]*>([^<]+)<\/button>/g)]
     .map(([, id, label]) => [id, label.trim()]), [
-    ["reset-button", "Use a different photo"],
+    ["reset-button", "Create a double exposure using a new image"],
     ["new-pairing-button", "Create another double exposure using this photo"]
   ]);
   const resultActions = html.match(/<div\b[^>]*id="result-actions"[^>]*>([\s\S]*?)<\/div>/);
@@ -1236,7 +1236,7 @@ test("an unconfigured archive allows local choices without fabricating a result 
   assert.equal(h.elements.get("download-button").hidden, true);
   assert.equal(h.elements.get("rotate-button").hidden, true);
   assert.equal(h.elements.get("result-actions").hidden, true);
-  assert.equal(h.elements.get("repeat-actions").hidden, false, "Use a different photo remains available for an unsent selection");
+  assert.equal(h.elements.get("repeat-actions").hidden, false, "Create a double exposure using a new image remains available for an unsent selection");
   assert.equal(h.elements.get("busy-indicator").hidden, true);
   assert.equal(h.elements.get("output-options").hidden, false);
   assert.equal(h.elements.get("visitor-monochrome").disabled, true, "an unsent queued selection retains its frozen mode");
