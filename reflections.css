@@ -1,6 +1,21 @@
 .home-reflections-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
   margin: 16px 0 0;
-  padding-left: 16px;
+  text-align: center;
+}
+
+.home-reflections-link > a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.home-reflections-link > span {
+  flex: none;
 }
 
 .reflections-page main {
