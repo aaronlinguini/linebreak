@@ -14,6 +14,11 @@ const endpoint = "https://script.google.com/macros/s/deployment-example/exec";
 const bootstrap = { totalEligible: 1, artistCount: 1, participantCount: 0, includeParticipantPhotos: true, maxOriginalBytes: 30 * 1024 * 1024, maxResultBytes: 12 * 1024 * 1024 };
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const plain = (value) => JSON.parse(JSON.stringify(value));
+const deferred = () => {
+  let resolve;
+  const promise = new Promise(yes => { resolve = yes; });
+  return { promise, resolve };
+};
 const websiteBridgeSource = fs.readFileSync(path.join(project, "drive-bridge.js"), "utf8");
 
 function googleBridgeSource() {
@@ -84,14 +89,232 @@ function makeTransport(options = {}) {
   const storage = new sandbox.GoogleDriveStorage({ googleScriptUrl: endpoint, connectionTimeoutMs: 100, requestTimeoutMs: 100 });
   const channel = () => new URL(iframes.at(-1).src).searchParams.get("channel");
   const ready = (overrides = {}, origin, source) => emit({ protocol, channel: channel(), type: "ready", ...overrides }, origin, source);
-  async function connect() {
-    const promise = storage.connect();
+  async function connect(options) {
+    const promise = storage.connect(options);
     await tick();
     ready();
     return promise;
   }
   return { storage, window, document, sandbox, listeners, iframes, messages, settings, emit, remote, channel, ready, connect };
 }
+
+test("bootstrap snapshots and deduplicates exposure history before the Google handshake", async () => {
+  const h = makeTransport();
+  try {
+    const history = ["a".repeat(64), "b".repeat(64), "a".repeat(64)];
+    const connection = h.storage.connect({ excludedBaseHashes: history });
+    history[0] = "c".repeat(64);
+    history.push("d".repeat(64));
+    await tick();
+    h.ready();
+    await connection;
+    const request = h.messages.find(({ message }) => message.request?.action === "bootstrap").message.request;
+    assert.deepEqual(request.payload, { excludedBaseHashes: ["a".repeat(64), "b".repeat(64)] });
+    await h.storage.connect({ excludedBaseHashes: ["c".repeat(64)] });
+    const latest = h.messages.filter(({ message }) => message.request?.action === "bootstrap").at(-1).message.request;
+    assert.deepEqual(latest.payload, { excludedBaseHashes: ["c".repeat(64)] });
+    assert.equal(h.iframes.length, 1, "history refreshes reuse the authenticated healthy frame");
+  } finally { h.storage.dispose(); }
+});
+
+test("absent and empty history do not add fields to the existing bootstrap, begin or complete payloads", async () => {
+  for (const options of [{}, { excludedBaseHashes: [] }]) {
+    const h = makeTransport();
+    try {
+      await h.connect(options);
+      await h.storage.begin({ submissionId: "empty-history", originalFile: {
+        name: "photo.jpg", type: "image/jpeg", bytes: Buffer.from([255, 216, 255, 217])
+      }, ...options });
+      await h.storage.complete({ submissionId: "empty-history", token: "token", resultBlob: {
+        type: "image/jpeg", bytes: Buffer.from([255, 216, 255, 217])
+      }, width: 3, height: 2, ...options });
+      for (const { message } of h.messages.filter(({ message }) => message.type === "request")) {
+        assert.equal(Object.hasOwn(message.request.payload, "excludedBaseHashes"), false);
+      }
+    } finally { h.storage.dispose(); }
+  }
+});
+
+test("fresh originals and completed JPEGs forward frozen history snapshots across asynchronous file reads", async () => {
+  const h = makeTransport();
+  try {
+    await h.connect();
+    const read = h.storage._readBase64.bind(h.storage);
+    let gate = deferred();
+    h.storage._readBase64 = async input => { await gate.promise; return read(input); };
+    const originalBytes = Buffer.from([1, 255, 0, 40]);
+    const history = ["a".repeat(64), "b".repeat(64), "a".repeat(64)];
+    const savingOriginal = h.storage.begin({ submissionId: "history-original", allowReuse: true,
+      preferredBaseSha256: "c".repeat(64), excludedBaseHashes: history,
+      originalFile: { name: "Original.PNG", type: "image/png", bytes: originalBytes } });
+    history[0] = "d".repeat(64);
+    history.push("e".repeat(64));
+    gate.resolve();
+    await savingOriginal;
+    const beginPayload = h.messages.find(({ message }) => message.request?.action === "begin").message.request.payload;
+    assert.deepEqual(beginPayload.excludedBaseHashes, ["a".repeat(64), "b".repeat(64)]);
+    assert.deepEqual(Buffer.from(beginPayload.original.base64, "base64"), originalBytes);
+    assert.equal(beginPayload.allowReuse, true);
+    assert.equal(beginPayload.preferredBaseSha256, "c".repeat(64));
+    gate = deferred();
+    const completedBytes = Buffer.from([255, 216, 2, 3, 255, 217]);
+    const completeHistory = ["c".repeat(64)];
+    const savingResult = h.storage.complete({ submissionId: "history-original", token: "private-token",
+      resultBlob: { type: "image/jpeg", bytes: completedBytes }, width: 600, height: 400,
+      settings: { monochrome: false }, excludedBaseHashes: completeHistory });
+    completeHistory[0] = "f".repeat(64);
+    gate.resolve();
+    await savingResult;
+    const completePayload = h.messages.find(({ message }) => message.request?.action === "complete").message.request.payload;
+    assert.deepEqual(completePayload.excludedBaseHashes, ["c".repeat(64)]);
+    assert.deepEqual(Buffer.from(completePayload.result.base64, "base64"), completedBytes);
+    assert.deepEqual(completePayload.settings, { monochrome: false });
+    assert.equal(completePayload.token, "private-token");
+  } finally { h.storage.dispose(); }
+});
+
+test("authenticated re-pairing and same-base variants include history without transmitting another original", async () => {
+  for (const sameBase of [undefined, true]) {
+    const h = makeTransport();
+    try {
+      await h.connect();
+      const reuse = { submissionId: "prior-submission", token: "authenticated-parent",
+        ...(sameBase === undefined ? {} : { sameBase }) };
+      await h.storage.begin({ submissionId: "next-submission", reuse,
+        excludedBaseHashes: ["a".repeat(64), "a".repeat(64)] });
+      const payload = h.messages.filter(({ message }) => message.request?.action === "begin").at(-1).message.request.payload;
+      assert.deepEqual(payload, { submissionId: "next-submission", reuse, excludedBaseHashes: ["a".repeat(64)] });
+      for (const key of ["original", "originalFile", "image", "base64", "preferredBaseSha256", "allowReuse"]) {
+        assert.equal(Object.hasOwn(payload, key), false);
+      }
+    } finally { h.storage.dispose(); }
+  }
+});
+
+test("malformed exposure history rejects before frame creation, file reads or an RPC", async () => {
+  const hash = "a".repeat(64);
+  const invalid = [null, false, hash, {}, new Set([hash]), [null], ["A".repeat(64)], ["a".repeat(63)],
+    ["a".repeat(65)], [new String(hash)], new Array(1), Array(20001).fill(hash)];
+  for (const excludedBaseHashes of invalid) {
+    for (const action of ["connect", "begin", "complete"]) {
+      const h = makeTransport();
+      try {
+        let reads = 0;
+        h.storage._readBase64 = async () => { reads++; return "AA=="; };
+        const request = action === "connect" ? { excludedBaseHashes }
+          : action === "begin" ? { submissionId: "invalid-history", excludedBaseHashes,
+            originalFile: { name: "photo.jpg", type: "image/jpeg", bytes: Buffer.from([255, 216, 255]) } }
+          : { submissionId: "invalid-history", token: "token", excludedBaseHashes, width: 1, height: 1,
+            resultBlob: { type: "image/jpeg", bytes: Buffer.from([255, 216, 255]) } };
+        let promise;
+        assert.doesNotThrow(() => { promise = h.storage[action](request); });
+        assert.equal(typeof promise?.then, "function");
+        await assert.rejects(promise, error => error.code === "INVALID_SUBMISSION");
+        assert.equal(h.iframes.length, 0);
+        assert.equal(h.messages.length, 0);
+        assert.equal(h.listeners.size, 0);
+        assert.equal(reads, 0);
+      } finally { h.storage.dispose(); }
+    }
+  }
+  const h = makeTransport();
+  try {
+    await h.connect({ excludedBaseHashes: Array(20000).fill(hash) });
+    const request = h.messages.find(({ message }) => message.request?.action === "bootstrap").message.request;
+    assert.deepEqual(request.payload.excludedBaseHashes, [hash]);
+  } finally { h.storage.dispose(); }
+});
+
+test("artist-only bootstrap and result operations preserve the pool choice across awaits and reuse", async () => {
+  const h = makeTransport();
+  try {
+    const connectingChoice = { artistOnly: true, excludedBaseHashes: ["a".repeat(64)] };
+    const connection = h.storage.connect(connectingChoice);
+    connectingChoice.artistOnly = false;
+    await tick();
+    h.ready();
+    await connection;
+    const bootstrapRequest = h.messages.find(({ message }) => message.request?.action === "bootstrap").message.request;
+    assert.deepEqual(bootstrapRequest.payload, { artistOnly: true, excludedBaseHashes: ["a".repeat(64)] });
+    const originalBytes = Buffer.from([255, 216, 0, 255, 217]);
+    const read = h.storage._readBase64.bind(h.storage);
+    let gate = deferred();
+    let reads = 0;
+    h.storage._readBase64 = async input => { reads++; await gate.promise; return read(input); };
+    const input = { submissionId: "artist-only", artistOnly: true, allowReuse: false,
+      excludedBaseHashes: ["a".repeat(64)], originalFile: { name: "original.jpg", type: "image/jpeg", bytes: originalBytes } };
+    const beginning = h.storage.begin(input);
+    input.artistOnly = false;
+    gate.resolve();
+    await beginning;
+    const beginRequest = h.messages.filter(({ message }) => message.request?.action === "begin").at(-1).message.request;
+    assert.equal(beginRequest.payload.artistOnly, true);
+    assert.equal(beginRequest.payload.allowReuse, false, "pool selection must not opt an original into retention");
+    assert.deepEqual(beginRequest.payload.excludedBaseHashes, ["a".repeat(64)]);
+    assert.deepEqual(Buffer.from(beginRequest.payload.original.base64, "base64"), originalBytes);
+    gate = deferred();
+    const completion = { submissionId: "artist-only", token: "parent-token", artistOnly: true,
+      excludedBaseHashes: ["a".repeat(64)], width: 400, height: 300,
+      resultBlob: { type: "image/jpeg", bytes: Buffer.from([255, 216, 10, 255, 217]) } };
+    const completing = h.storage.complete(completion);
+    completion.artistOnly = false;
+    gate.resolve();
+    await completing;
+    const completeRequest = h.messages.filter(({ message }) => message.request?.action === "complete").at(-1).message.request;
+    assert.equal(completeRequest.payload.artistOnly, true);
+    assert.deepEqual(completeRequest.payload.excludedBaseHashes, ["a".repeat(64)]);
+    assert.equal(reads, 2);
+    await h.storage.begin({ submissionId: "artist-variant", artistOnly: true,
+      reuse: { submissionId: "artist-only", token: "parent-token", sameBase: true } });
+    const variantRequest = h.messages.filter(({ message }) => message.request?.action === "begin").at(-1).message.request;
+    assert.deepEqual(variantRequest.payload, { submissionId: "artist-variant", artistOnly: true,
+      reuse: { submissionId: "artist-only", token: "parent-token", sameBase: true } });
+    assert.equal(reads, 2, "authenticated reuse sends no additional original bytes");
+  } finally { h.storage.dispose(); }
+});
+
+test("the default mixed pool and explicit false preserve earlier payload shapes and consent", async () => {
+  for (const choice of [{}, { artistOnly: false }]) {
+    const h = makeTransport();
+    try {
+      await h.connect(choice);
+      await h.storage.begin({ submissionId: "mixed-pool", allowReuse: true, ...choice,
+        originalFile: { name: "photo.jpg", type: "image/jpeg", bytes: Buffer.from([255, 216, 255, 217]) } });
+      await h.storage.complete({ submissionId: "mixed-pool", token: "token", width: 2, height: 1, ...choice,
+        resultBlob: { type: "image/jpeg", bytes: Buffer.from([255, 216, 255, 217]) } });
+      for (const { message } of h.messages.filter(({ message }) => message.type === "request")) {
+        assert.equal(Object.hasOwn(message.request.payload, "artistOnly"), false);
+      }
+      const beginRequest = h.messages.find(({ message }) => message.request?.action === "begin").message.request;
+      assert.equal(beginRequest.payload.allowReuse, true);
+    } finally { h.storage.dispose(); }
+  }
+});
+
+test("nonboolean artist-only choices reject before any connection, file read or RPC", async () => {
+  for (const artistOnly of [null, 0, 1, "true", "false", {}, [], new Boolean(false)]) {
+    for (const action of ["connect", "begin", "complete"]) {
+      const h = makeTransport();
+      try {
+        let reads = 0;
+        h.storage._readBase64 = async () => { reads++; return "AA=="; };
+        const request = action === "connect" ? { artistOnly }
+          : action === "begin" ? { submissionId: "invalid-pool", artistOnly,
+            originalFile: { name: "photo.jpg", type: "image/jpeg", bytes: Buffer.from([255, 216, 255]) } }
+          : { submissionId: "invalid-pool", token: "token", artistOnly, width: 1, height: 1,
+            resultBlob: { type: "image/jpeg", bytes: Buffer.from([255, 216, 255]) } };
+        let promise;
+        assert.doesNotThrow(() => { promise = h.storage[action](request); });
+        assert.equal(typeof promise?.then, "function");
+        await assert.rejects(promise, error => error.code === "INVALID_SUBMISSION");
+        assert.equal(h.iframes.length, 0);
+        assert.equal(h.messages.length, 0);
+        assert.equal(h.listeners.size, 0);
+        assert.equal(reads, 0);
+      } finally { h.storage.dispose(); }
+    }
+  }
+});
 
 test("storage connects through an external hidden frame and obtains collection status", async () => {
   const harness = makeTransport();

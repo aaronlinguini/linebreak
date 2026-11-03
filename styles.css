@@ -414,9 +414,15 @@ content: ""; creates the pseudo-element with empty content. It's there purely fo
   padding-top: 0;
 }
 
+.base-pool-option {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  font-size: 12px;
+}
+
 .exposure-buttons {
   grid-column: 1;
-  grid-row: 2;
+  grid-row: 3;
 }
 
 .image-toolbar {
@@ -469,7 +475,7 @@ content: ""; creates the pseudo-element with empty content. It's there purely fo
 
 .library-option {
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 3;
   min-width: 0;
   margin: 0;
   padding: 0;

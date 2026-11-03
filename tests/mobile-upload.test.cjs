@@ -21,7 +21,7 @@ const deferred = () => {
 };
 const developingMessage = toolHtml.match(/<p\b[^>]*id="busy-indicator"[^>]*>([^<]+)<\/p>/)[1].trim();
 
-function harness({ configured = true, canRePair = true, forceBlackAndWhite = false, supportsCapture = false, assets,
+function harness({ configured = true, canRePair = true, forceBlackAndWhite = false, supportsCapture = false, assets, localStorage,
   digest = (...args) => webcrypto.subtle.digest(...args),
   realWorkflow = false, storage: storageImpl = {},
   connect = async () => ({ totalEligible: 2 }) } = {}) {
@@ -30,7 +30,7 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
     "upload-label", "camera-label", "download-button", "rotate-button", "retry-button", "status", "error",
     "busy-indicator", "exposure-controls", "upload-instructions", "output-options", "visitor-monochrome", "visitor-colour",
     "camera-picker", "camera-separator", "camera-instructions", "picker-singular", "picker-plural",
-    "upload-again-note"];
+    "upload-again-note", "artist-only"];
   const handlers = new Map();
   const windowHandlers = new Map();
   const elements = new Map(ids.map((id) => [id, {
@@ -40,7 +40,7 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
     getContext() { return { drawImage() {} }; },
     addEventListener(type, fn) { handlers.set(id + ":" + type, fn); }
   }]));
-  const calls = { start: [], connect: 0, rePair: 0, rePairRequests: [], retry: 0, changeMonochrome: [], modeRequests: [],
+  const calls = { start: [], connect: 0, connectRequests: [], rePair: 0, rePairRequests: [], retry: 0, changeMonochrome: [], modeRequests: [],
     load: [], develop: [], assetLoads: [], rotate: 0, downloads: [], revoked: [], draws: [], released: [],
     begin: [], complete: [], dispose: 0 };
   const timers = new Map();
@@ -81,7 +81,7 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
       }; },
       body: { append() {} }
     },
-    window: { addEventListener(type, handler) { windowHandlers.set(type, handler); } },
+    window: { localStorage, addEventListener(type, handler) { windowHandlers.set(type, handler); } },
     URL: {
       createObjectURL(blob) { const url = `blob:result-${urls.size + 1}`; urls.set(url, blob); return url; },
       revokeObjectURL(url) { calls.revoked.push(url); }
@@ -89,7 +89,7 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
     EXPOSURE_CONFIG: { forceBlackAndWhite },
     GoogleDriveStorage: class {
       configured = configured;
-      async connect() { calls.connect++; return connectImpl(); }
+      async connect(request) { calls.connect++; calls.connectRequests.push(request); return connectImpl(request); }
       async begin(request) { calls.begin.push(request); return storageImpl.begin(request); }
       async complete(request) { calls.complete.push(request); return storageImpl.complete(request); }
       dispose() { calls.dispose++; }
@@ -249,6 +249,10 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
       elements.get("allow-reuse").checked = allowReuse;
       elements.get("decline-reuse").checked = !allowReuse;
       return handlers.get(`${allowReuse ? "allow-reuse" : "decline-reuse"}:change`)();
+    },
+    chooseArtistOnly(checked) {
+      elements.get("artist-only").checked = checked;
+      return handlers.get("artist-only:change")();
     },
     toggleMonochrome(checked) {
       elements.get("visitor-monochrome").checked = checked;
@@ -726,6 +730,240 @@ test("an identical preselected base is discarded so Google can choose a differen
   await h.select("participant-input", file);
   assert.equal(h.calls.start[0].choice.previewBase, undefined);
   assert.strictEqual(h.calls.start[0].file, file);
+});
+
+test("own contribution history survives a new page and removes a stale mixed-pool preview", async () => {
+  const key = "line-break.contributions.v1";
+  const saved = new Map([[key, JSON.stringify(["a".repeat(64)])]]);
+  const localStorage = { getItem: key => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value) };
+  const owned = { id: "my-old-photo", name: "old.jpg", mimeType: "image/jpeg", byteLength: 10,
+    path: "assets/base-photos/old.jpg", sha256: "a".repeat(64) };
+  const h = harness({ localStorage, connect: async () => ({ totalEligible: 2, previewBase: owned }),
+    assets: { async chooseBase() { throw new Error("A connected mixed draw must stay a mixed draw."); } } });
+  await flush();
+  assert.deepEqual(Array.from(h.calls.connectRequests[0].excludedBaseHashes), [owned.sha256]);
+  h.chooseSharing(false);
+  const file = makeFile();
+  await h.select("participant-input", file);
+  const ownHash = createHash("sha256").update(Buffer.from(await file.arrayBuffer())).digest("hex");
+  assert.equal(h.calls.start[0].choice.previewBase, undefined);
+  assert.deepEqual(Array.from(h.calls.start[0].choice.excludedBaseHashes), [owned.sha256, ownHash]);
+  assert.equal(h.calls.start[0].choice.artistOnly, false);
+  const returning = harness({ localStorage });
+  await flush();
+  assert.deepEqual(Array.from(returning.calls.connectRequests[0].excludedBaseHashes), [owned.sha256, ownHash]);
+});
+
+test("unchecking artist-only invalidates its bootstrap candidate before a mixed-pool upload", async () => {
+  const mixed = { id: "initial-mixed", name: "mixed.jpg", mimeType: "image/jpeg", base64: "AQID",
+    sha256: "a".repeat(64), byteLength: 3 };
+  const artist = { id: "artist-only-choice", name: "artist.jpg", mimeType: "image/jpeg",
+    path: "assets/base-photos/artist.jpg", sha256: "b".repeat(64), byteLength: 3 };
+  const freshLocal = { name: "fresh-local.jpg", mimeType: "image/jpeg",
+    path: "assets/base-photos/fresh-local.jpg", sha256: "c".repeat(64), byteLength: 3 };
+  const reconnect = deferred();
+  const saving = deferred();
+  const chosen = [];
+  let connections = 0;
+  const h = harness({ connect: request => {
+    const number = ++connections;
+    if (number === 1) return { totalEligible: 2, previewBase: mixed };
+    if (number === 2) {
+      assert.equal(request.artistOnly, true);
+      return { totalEligible: 1, previewBase: artist };
+    }
+    return reconnect.promise;
+  }, assets: { async chooseBase(hash, excluded) { chosen.push({ hash, excluded }); return freshLocal; } } });
+  await flush();
+  h.chooseArtistOnly(true);
+  await flush();
+  assert.deepEqual(h.calls.connectRequests.map(request => request.artistOnly), [false, true]);
+  h.chooseArtistOnly(false);
+  assert.equal(h.calls.connectRequests[2].artistOnly, false);
+  h.blockStart(saving.promise);
+  h.chooseSharing(false);
+  const selecting = h.select("participant-input", makeFile());
+  await h.startReady;
+  assert.equal(chosen.length, 1, "a previous artist-only bootstrap is no longer a mixed-pool candidate");
+  assert.equal(h.calls.start[0].choice.artistOnly, false);
+  assert.strictEqual(h.calls.start[0].choice.previewBase, freshLocal);
+  assert.notStrictEqual(h.calls.start[0].choice.previewBase, artist);
+  h.deliverPreview("preview");
+  const displayed = h.calls.draws[0];
+  reconnect.resolve({ totalEligible: 2, previewBase: mixed });
+  await flush();
+  assert.equal(h.calls.start.length, 1, "the later mixed response must not replace a developing pair");
+  assert.strictEqual(h.calls.start[0].choice.previewBase, freshLocal);
+  assert.strictEqual(h.calls.draws[0], displayed);
+  saving.resolve();
+  await selecting;
+  h.dispatchWindow("pagehide", { persisted: false });
+});
+
+test("pool changes during bootstrap serialize connections and adopt only the latest requested scope", async () => {
+  const gates = [deferred(), deferred(), deferred()];
+  const started = [deferred(), deferred(), deferred()];
+  const candidates = [
+    { id: "old-mixed", name: "old-mixed.jpg", mimeType: "image/jpeg", base64: "AQID", sha256: "a".repeat(64), byteLength: 3 },
+    { id: "stale-artist", name: "stale-artist.jpg", mimeType: "image/jpeg", path: "assets/base-photos/stale-artist.jpg", sha256: "b".repeat(64), byteLength: 3 },
+    { id: "latest-mixed", name: "latest-mixed.jpg", mimeType: "image/jpeg", base64: "AQID", sha256: "c".repeat(64), byteLength: 3 }
+  ];
+  let active = 0;
+  let maximum = 0;
+  let count = 0;
+  const h = harness({ connect: request => {
+    const index = count++;
+    active++;
+    maximum = Math.max(maximum, active);
+    started[index]?.resolve(request);
+    const result = gates[index]?.promise || Promise.resolve({ totalEligible: 2, previewBase: candidates[2] });
+    return result.finally(() => { active--; });
+  } });
+  await started[0].promise;
+  assert.equal(h.calls.connectRequests[0].artistOnly, false);
+  h.chooseArtistOnly(true);
+  assert.equal(h.calls.connect, 1, "changing the scope cannot overlap an active connection");
+  gates[0].resolve({ totalEligible: 2, previewBase: candidates[0] });
+  await started[1].promise;
+  assert.equal(h.calls.connectRequests[1].artistOnly, true);
+  assert.equal(h.calls.start.length, 0);
+  assert.equal(h.elements.get("canvas").hidden, true);
+  h.chooseArtistOnly(false);
+  assert.equal(h.calls.connect, 2);
+  gates[1].resolve({ totalEligible: 1, previewBase: candidates[1] });
+  await started[2].promise;
+  assert.equal(h.calls.connectRequests[2].artistOnly, false);
+  assert.equal(h.calls.start.length, 0);
+  assert.equal(h.calls.draws.length, 0);
+  gates[2].resolve({ totalEligible: 2, previewBase: candidates[2] });
+  await flush();
+  const saving = deferred();
+  h.blockStart(saving.promise);
+  h.chooseSharing(true);
+  const selecting = h.select("participant-input", makeFile());
+  await h.startReady;
+  assert.equal(maximum, 1, "storage.connect calls are serialized even across repeated pool changes");
+  assert.equal(h.calls.start[0].choice.artistOnly, false);
+  assert.strictEqual(h.calls.start[0].choice.previewBase, candidates[2]);
+  assert.notStrictEqual(h.calls.start[0].choice.previewBase, candidates[0]);
+  assert.notStrictEqual(h.calls.start[0].choice.previewBase, candidates[1]);
+  saving.resolve();
+  await selecting;
+  h.dispatchWindow("pagehide", { persisted: false });
+});
+
+test("an exhausted static pool keeps the selected photo and waits for a server mixed-pool pairing", async () => {
+  const original = makeFile();
+  const originalHash = createHash("sha256").update(Buffer.from(await original.arrayBuffer())).digest("hex");
+  const ownedArtistHash = "a".repeat(64);
+  const key = "line-break.contributions.v1";
+  const saved = new Map([[key, JSON.stringify([ownedArtistHash])]]);
+  const localStorage = { getItem: key => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value) };
+  const connecting = deferred();
+  const pairing = deferred();
+  const chosen = [];
+  const serverBase = { id: "eligible-participant", name: "participant.jpg", mimeType: "image/jpeg", base64: "AQID",
+    sha256: "b".repeat(64), byteLength: 3 };
+  const h = harness({ realWorkflow: true, localStorage, connect: () => connecting.promise,
+    assets: { async chooseBase(hash, excluded) {
+      chosen.push({ hash, excluded: Array.from(excluded) });
+      throw Object.assign(new Error("No local photograph remains."), { code: "NO_LOCAL_BASE" });
+    } }, storage: {
+      async begin(request) {
+        await pairing.promise;
+        return { submissionId: request.submissionId, token: "mixed-pair-token", originalId: "transient-original",
+          originalRetained: false, base: serverBase };
+      },
+      async complete(request) {
+        return { submissionId: request.submissionId, saved: true, originalId: "transient-original",
+          resultId: "mixed-result", baseId: serverBase.id, canRePair: true };
+      }
+    } });
+  h.chooseSharing(false);
+  const selecting = h.select("participant-input", original);
+  await h.startReady;
+  assert.deepEqual(chosen, [{ hash: originalHash, excluded: [ownedArtistHash, originalHash] }]);
+  assert.equal(h.calls.start.length, 1);
+  assert.strictEqual(h.calls.start[0].file, original);
+  assert.equal(h.calls.start[0].choice.previewBase, undefined);
+  assert.equal(h.calls.start[0].choice.artistOnly, false);
+  assert.equal(h.calls.start[0].choice.allowReuse, false);
+  assert.deepEqual(Array.from(h.calls.begin[0].excludedBaseHashes), [ownedArtistHash, originalHash]);
+  assert.equal(h.calls.develop.length, 0);
+  assert.equal(h.calls.complete.length, 0);
+  assert.equal(h.elements.get("canvas").hidden, true);
+  assert.equal(h.elements.get("error").hidden, true, "pool exhaustion is not an image-integrity error");
+  assert.equal(h.elements.get("busy-indicator").hidden, false);
+  assertResultControlsLocked(h, true);
+  connecting.resolve({ totalEligible: 1, previewBase: serverBase });
+  await flush();
+  assert.equal(h.calls.start.length, 1);
+  pairing.resolve();
+  await selecting;
+  assert.equal(h.calls.begin.length, 1);
+  assert.equal(h.calls.develop.length, 1);
+  assert.equal(h.calls.complete.length, 1);
+  assert.equal(h.workflow.operation.begin.base.id, serverBase.id);
+  assert.equal(h.workflow.pending, false);
+  assert.equal(h.elements.get("error").hidden, true);
+  assert.equal(h.elements.get("canvas").hidden, false);
+  assertResultControlsLocked(h, false);
+  h.dispatchWindow("pagehide", { persisted: false });
+});
+
+test("an invalid local manifest or asset-integrity failure cannot fall through to a different server pairing", async () => {
+  for (const code of ["INVALID_MANIFEST", "ASSET_INTEGRITY"]) {
+    const connecting = deferred();
+    const h = harness({ connect: () => connecting.promise, assets: {
+      async chooseBase() { throw Object.assign(new Error("Website photograph verification failed."), { code }); }
+    } });
+    h.chooseSharing(false);
+    await h.select("participant-input", makeFile());
+    assert.equal(h.calls.start.length, 0);
+    assert.equal(h.calls.begin.length, 0);
+    assert.equal(h.calls.develop.length, 0);
+    assert.equal(h.elements.get("error").hidden, false);
+    assert.match(h.elements.get("error").textContent, /verification failed/);
+    assert.equal(h.elements.get("canvas").hidden, true);
+    h.dispatchWindow("pagehide", { persisted: false });
+    connecting.resolve({ totalEligible: 1 });
+    await flush();
+    assert.equal(h.calls.start.length, 0);
+  }
+});
+
+test("artist-only pairing freezes independently of either contribution answer and keeps the website fallback", async (t) => {
+  for (const allowReuse of [true, false]) await t.test(String(allowReuse), async () => {
+    const websiteBase = { name: "artist.jpg", mimeType: "image/jpeg", byteLength: 10,
+      path: "assets/base-photos/artist.jpg", sha256: "b".repeat(64) };
+    const participant = { id: "participant", mimeType: "image/jpeg", sha256: "c".repeat(64), byteLength: 10 };
+    const chosen = [];
+    const h = harness({ connect: async () => ({ totalEligible: 2, previewBase: participant }), assets: {
+      async chooseBase(hash, excluded) { chosen.push({ hash, excluded }); return websiteBase; }
+    } });
+    await flush();
+    assert.equal(h.elements.get("artist-only").checked, false);
+    h.chooseArtistOnly(true);
+    h.chooseSharing(allowReuse);
+    const preparation = deferred();
+    h.blockPhoto(preparation.promise);
+    const selecting = h.select("participant-input", makeFile());
+    assert.equal(h.elements.get("artist-only").disabled, true);
+    h.chooseArtistOnly(false);
+    assert.equal(h.elements.get("artist-only").checked, true, "an active selection freezes its base pool");
+    preparation.resolve();
+    await selecting;
+    assert.equal(h.calls.start[0].choice.artistOnly, true);
+    assert.equal(h.calls.start[0].choice.allowReuse, allowReuse);
+    assert.strictEqual(h.calls.start[0].choice.previewBase, websiteBase);
+    assert.equal(chosen.length, 1);
+    assert.ok(chosen[0].excluded.includes(chosen[0].hash));
+    h.click("reset-button");
+    assert.equal(h.elements.get("artist-only").disabled, false);
+    assert.equal(h.elements.get("artist-only").checked, true);
+    assert.equal(h.elements.get("allow-reuse").checked, false);
+    assert.equal(h.elements.get("decline-reuse").checked, false);
+  });
 });
 
 test("public photo choices are distinct and HTML has no inline code", () => {

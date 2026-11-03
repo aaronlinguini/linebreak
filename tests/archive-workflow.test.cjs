@@ -65,6 +65,322 @@ function modeFixture({ monochrome = false, canRePair = true, originalRetained } 
   return { workflow, storage, calls, get idCount() { return serial; } };
 }
 
+function historyFixture() {
+  const calls = [];
+  const assigned = new Map();
+  let serial = 0;
+  let baseSerial = 0;
+  const storage = {
+    begin: async request => {
+      calls.push(["begin", request]);
+      const base = request.reuse?.sameBase
+        ? assigned.get(request.reuse.submissionId)
+        : { id: `base-${++baseSerial}`, mimeType: "image/jpeg",
+          sha256: String.fromCharCode(96 + baseSerial).repeat(64),
+          ...(request.artistOnly ? { path: `assets/base-photos/base-${baseSerial}.jpg`,
+            name: `base-${baseSerial}.jpg`, byteLength: 1234 } : { base64: "AA==" }) };
+      assigned.set(request.submissionId, base);
+      return { ...begin(), submissionId: request.submissionId, token: `token-${request.submissionId}`, base };
+    },
+    complete: async request => {
+      calls.push(["complete", request]);
+      return { ...receipt(), submissionId: request.submissionId,
+        resultId: `result-${request.submissionId}`, baseId: assigned.get(request.submissionId).id, canRePair: true };
+    }
+  };
+  const workflow = new Workflow({ storage, settings,
+    render: async request => { calls.push(["render", request]); return { blob, width: 1200, height: 800 }; },
+    makeId: () => `history-${++serial}` });
+  return { workflow, storage, calls, get idCount() { return serial; } };
+}
+
+test("exposure history is copied, deduplicated and frozen before any upload or render awaits", async () => {
+  const h = historyFixture();
+  const hashes = ["c".repeat(64), "d".repeat(64), "c".repeat(64)];
+  const saving = h.workflow.start(file, { excludedBaseHashes: hashes });
+  const operation = h.workflow.operation;
+  assert.notStrictEqual(operation.excludedBaseHashes, hashes);
+  assert.equal(Object.isFrozen(operation.excludedBaseHashes), true);
+  hashes[0] = "a".repeat(64);
+  hashes.push("b".repeat(64));
+  await saving;
+  assert.deepEqual([...operation.excludedBaseHashes], ["c".repeat(64), "d".repeat(64)]);
+  for (const [, request] of h.calls.filter(([kind]) => ["begin", "complete"].includes(kind))) {
+    assert.deepEqual([...request.excludedBaseHashes], ["c".repeat(64), "d".repeat(64)]);
+  }
+});
+
+test("empty exposure history preserves the earlier begin and complete request shapes", async () => {
+  for (const options of [{}, { excludedBaseHashes: [] }]) {
+    const h = historyFixture();
+    await h.workflow.start(file, options);
+    assert.deepEqual([...h.workflow.operation.excludedBaseHashes], []);
+    for (const [, request] of h.calls.filter(([kind]) => ["begin", "complete"].includes(kind))) {
+      assert.equal(Object.hasOwn(request, "excludedBaseHashes"), false);
+    }
+  }
+});
+
+test("invalid exposure histories cannot start work or replace a saved pairing", async () => {
+  const hash = "c".repeat(64);
+  const invalid = [null, false, hash, {}, new Set([hash]), [null], ["A".repeat(64)], ["a".repeat(63)],
+    ["a".repeat(65)], [new String(hash)], new Array(1), Array(20001).fill(hash)];
+  for (const excludedBaseHashes of invalid) {
+    const fresh = historyFixture();
+    await assert.rejects(fresh.workflow.start(file, { excludedBaseHashes }));
+    assert.equal(fresh.idCount, 0);
+    assert.equal(fresh.workflow.operation, null);
+    assert.equal(fresh.calls.length, 0);
+    const saved = historyFixture();
+    const previous = await saved.workflow.start(file);
+    const count = saved.calls.length;
+    await assert.rejects(saved.workflow.rePair({ excludedBaseHashes }));
+    assert.strictEqual(saved.workflow.operation, previous);
+    assert.equal(saved.idCount, 1);
+    assert.equal(saved.calls.length, count);
+  }
+  const valid = historyFixture();
+  await valid.workflow.start(file, { excludedBaseHashes: Array(20000).fill(hash) });
+  assert.deepEqual([...valid.workflow.operation.excludedBaseHashes], [hash]);
+});
+
+test("upload and archive retries retain the same exposure history, identity and finished JPEG", async () => {
+  const requests = [];
+  let beginCalls = 0;
+  let completeCalls = 0;
+  const h = fixture({ storage: {
+    begin: async request => {
+      requests.push(["begin", request]);
+      if (++beginCalls === 1) throw new Error("original response lost");
+      return { ...begin(), base: { ...begin().base, sha256: "a".repeat(64) } };
+    },
+    complete: async request => {
+      requests.push(["complete", request]);
+      if (++completeCalls === 1) throw new Error("archive response lost");
+      return receipt();
+    }
+  } });
+  const callerHistory = ["c".repeat(64)];
+  await assert.rejects(h.workflow.start(file, { excludedBaseHashes: callerHistory }), /original response lost/);
+  const pending = h.workflow.operation;
+  callerHistory[0] = "a".repeat(64);
+  await assert.rejects(h.workflow.retry(), /archive response lost/);
+  const rendered = pending.result;
+  callerHistory.push("b".repeat(64));
+  await h.workflow.retry();
+  assert.strictEqual(h.workflow.operation, pending);
+  assert.strictEqual(pending.result, rendered);
+  assert.equal(h.calls.filter(([kind]) => kind === "render").length, 1);
+  assert.deepEqual(requests.map(([kind]) => kind), ["begin", "begin", "complete", "complete"]);
+  for (const [, request] of requests) {
+    assert.equal(request.submissionId, id);
+    assert.deepEqual([...request.excludedBaseHashes], ["c".repeat(64)]);
+  }
+  assert.strictEqual(requests[2][1].resultBlob, rendered.blob);
+  assert.strictEqual(requests[3][1].resultBlob, rendered.blob);
+});
+
+test("another pairing inherits its saved history unless the current session supplies a newer snapshot", async () => {
+  const h = historyFixture();
+  const original = await h.workflow.start(file, { excludedBaseHashes: ["d".repeat(64)] });
+  const inherited = await h.workflow.rePair();
+  assert.deepEqual([...inherited.excludedBaseHashes], ["d".repeat(64)]);
+  const latest = ["a".repeat(64), "b".repeat(64), "d".repeat(64)];
+  const saving = h.workflow.rePair({ excludedBaseHashes: latest });
+  latest.push("c".repeat(64));
+  const next = await saving;
+  assert.deepEqual([...next.excludedBaseHashes], ["a".repeat(64), "b".repeat(64), "d".repeat(64)]);
+  assert.deepEqual([...original.excludedBaseHashes], ["d".repeat(64)]);
+  const pairRequests = h.calls.filter(([kind, request]) => kind === "begin" && request.reuse);
+  assert.equal(pairRequests.length, 2);
+  for (const [, request] of pairRequests) {
+    assert.equal(Object.hasOwn(request, "originalFile"), false);
+    assert.equal(Object.hasOwn(request, "preferredBaseSha256"), false);
+  }
+});
+
+test("a saved colour variant inherits history without replacing a base later marked as already seen", async () => {
+  const h = historyFixture();
+  const parent = await h.workflow.start(file);
+  const history = Object.freeze([parent.begin.base.sha256, "d".repeat(64)]);
+  parent.excludedBaseHashes = history;
+  const prepared = { blob, width: 1200, height: 800 };
+  const variant = await h.workflow.changeMonochrome(true, { result: prepared, base: parent.begin.base });
+  assert.equal(variant.begin.base.sha256, parent.begin.base.sha256);
+  assert.strictEqual(variant.result.blob, prepared.blob);
+  assert.deepEqual([...variant.excludedBaseHashes], [...history]);
+  assert.equal(Object.isFrozen(variant.excludedBaseHashes), true);
+  assert.equal(h.calls.filter(([kind]) => kind === "render").length, 1);
+  const requests = h.calls.filter(([kind, request]) => ["begin", "complete"].includes(kind)
+    && request.submissionId === variant.submissionId);
+  assert.equal(requests[0][1].reuse.sameBase, true);
+  assert.equal(Object.hasOwn(requests[0][1], "originalFile"), false);
+  for (const [, request] of requests) assert.deepEqual([...request.excludedBaseHashes], [...history]);
+});
+
+test("an excluded local candidate never starts an upload, preview or archive", async () => {
+  const h = historyFixture();
+  const candidate = previewBase();
+  await assert.rejects(h.workflow.start(file, { previewBase: candidate, excludedBaseHashes: [candidate.sha256] }));
+  assert.equal(h.workflow.operation, null);
+  assert.equal(h.idCount, 0);
+  assert.equal(h.calls.length, 0);
+});
+
+test("an excluded authenticated candidate never reaches rendering or result archiving", async () => {
+  const h = historyFixture();
+  await assert.rejects(h.workflow.start(file, { excludedBaseHashes: ["a".repeat(64)] }));
+  assert.deepEqual(h.calls.map(([kind]) => kind), ["begin"]);
+  assert.equal(h.workflow.operation.begin, null);
+  assert.equal(h.workflow.operation.result, null);
+  assert.equal(h.workflow.operation.receipt, null);
+  assert.equal(h.workflow.pending, true);
+});
+
+test("an excluded re-pairing response cannot replace the saved pair or render another result", async () => {
+  const h = historyFixture();
+  const previous = await h.workflow.start(file);
+  const renderCount = h.calls.filter(([kind]) => kind === "render").length;
+  const completeCount = h.calls.filter(([kind]) => kind === "complete").length;
+  await assert.rejects(h.workflow.rePair({ excludedBaseHashes: ["b".repeat(64)] }));
+  assert.equal(h.calls.filter(([kind]) => kind === "render").length, renderCount);
+  assert.equal(h.calls.filter(([kind]) => kind === "complete").length, completeCount);
+  assert.equal(h.workflow.operation.begin, null);
+  assert.equal(h.workflow.operation.receipt, null);
+  assert.equal(previous.receipt.saved, true);
+  assert.equal(previous.begin.base.sha256, "a".repeat(64));
+});
+
+test("a substituted excluded response cannot archive a safe concurrent local preview", async () => {
+  const preferred = previewBase();
+  const excludedHash = "b".repeat(64);
+  const h = fixture({ storage: {
+    begin: async () => ({ ...begin(), base: { ...preferred, sha256: excludedHash } })
+  } });
+  await assert.rejects(h.workflow.start(file, { previewBase: preferred, excludedBaseHashes: [excludedHash] }));
+  const renderCalls = h.calls.filter(([kind]) => kind === "render");
+  assert.equal(renderCalls.length, 1, "the locally pinned safe preview can render while Google responds");
+  assert.equal(renderCalls[0][1].base.sha256, preferred.sha256);
+  assert.equal(h.calls.some(([kind]) => kind === "complete"), false);
+  assert.equal(h.workflow.operation.begin, null);
+  assert.equal(h.workflow.operation.receipt, null);
+  assert.equal(h.workflow.pending, true);
+});
+
+test("artist-only selection is frozen per operation, inherited by pairing and colour, and can return to a mixed pool", async () => {
+  const h = historyFixture();
+  const options = { allowReuse: true, artistOnly: true, excludedBaseHashes: ["d".repeat(64)] };
+  const saving = h.workflow.start(file, options);
+  options.artistOnly = false;
+  options.allowReuse = false;
+  const first = await saving;
+  assert.equal(first.artistOnly, true);
+  assert.equal(first.allowReuse, true);
+  const second = await h.workflow.rePair();
+  assert.equal(second.artistOnly, true);
+  assert.equal(second.allowReuse, true);
+  const colour = await h.workflow.changeMonochrome(true);
+  assert.equal(colour.artistOnly, true);
+  assert.equal(colour.begin.base.sha256, second.begin.base.sha256);
+  const mixed = await h.workflow.rePair({ artistOnly: false });
+  assert.equal(mixed.artistOnly, false);
+  assert.equal(mixed.allowReuse, true);
+  assert.equal(mixed.settings.monochrome, true);
+  assert.deepEqual([...mixed.excludedBaseHashes], ["d".repeat(64)]);
+  assert.equal(first.artistOnly, true, "a later pool choice must not rewrite a saved operation");
+  const operations = new Map([first, second, colour, mixed].map(operation => [operation.submissionId, operation]));
+  for (const [, request] of h.calls.filter(([kind]) => ["begin", "complete"].includes(kind))) {
+    const operation = operations.get(request.submissionId);
+    if (operation.artistOnly) assert.equal(request.artistOnly, true);
+    else assert.equal(Object.hasOwn(request, "artistOnly"), false);
+  }
+});
+
+test("artist-only pool selection is independent of the original retention answer", async () => {
+  for (const allowReuse of [false, true]) {
+    for (const artistOnly of [false, true]) {
+      const h = historyFixture();
+      const operation = await h.workflow.start(file, { allowReuse, artistOnly });
+      const request = h.calls.find(([kind]) => kind === "begin")[1];
+      assert.equal(operation.allowReuse, allowReuse);
+      assert.equal(operation.artistOnly, artistOnly);
+      assert.equal(request.allowReuse, allowReuse);
+      assert.strictEqual(request.originalFile, file);
+      assert.equal(request.artistOnly === true, artistOnly);
+      if (!artistOnly) assert.equal(Object.hasOwn(request, "artistOnly"), false);
+    }
+  }
+  const h = historyFixture();
+  await h.workflow.start(file);
+  assert.equal(h.workflow.operation.artistOnly, false);
+  for (const [, request] of h.calls.filter(([kind]) => ["begin", "complete"].includes(kind))) {
+    assert.equal(Object.hasOwn(request, "artistOnly"), false);
+  }
+});
+
+test("artist-only selection refuses participant-style local and authenticated candidates before rendering", async () => {
+  const local = fixture();
+  const dynamicPreview = { ...previewBase() };
+  delete dynamicPreview.path;
+  await assert.rejects(local.workflow.start(file, { artistOnly: true, previewBase: dynamicPreview }));
+  assert.equal(local.workflow.operation, null);
+  assert.equal(local.calls.length, 0);
+  const authenticated = fixture();
+  await assert.rejects(authenticated.workflow.start(file, { artistOnly: true }));
+  assert.deepEqual(authenticated.calls.filter(([kind]) => kind !== "stage").map(([kind]) => kind), ["begin"]);
+  assert.equal(authenticated.workflow.operation.begin, null);
+  assert.equal(authenticated.workflow.operation.result, null);
+  assert.equal(authenticated.workflow.operation.receipt, null);
+});
+
+test("nonboolean artist-only choices cannot start work or replace an existing saved operation", async () => {
+  for (const artistOnly of [null, 0, 1, "true", "false", {}, [], new Boolean(false)]) {
+    const fresh = historyFixture();
+    await assert.rejects(fresh.workflow.start(file, { artistOnly }));
+    assert.equal(fresh.idCount, 0);
+    assert.equal(fresh.workflow.operation, null);
+    assert.equal(fresh.calls.length, 0);
+    const saved = historyFixture();
+    const previous = await saved.workflow.start(file, { artistOnly: true });
+    const count = saved.calls.length;
+    await assert.rejects(saved.workflow.rePair({ artistOnly }));
+    assert.strictEqual(saved.workflow.operation, previous);
+    assert.equal(saved.idCount, 1);
+    assert.equal(saved.calls.length, count);
+  }
+});
+
+test("an uncertain artist-only upload and archive retry keep the same pool choice and consent", async () => {
+  const requests = [];
+  let firstUpload = true;
+  let firstArchive = true;
+  const h = fixture({ storage: {
+    begin: async request => {
+      requests.push(["begin", request]);
+      if (firstUpload) { firstUpload = false; throw new Error("lost upload response"); }
+      return { ...begin(), base: previewBase() };
+    },
+    complete: async request => {
+      requests.push(["complete", request]);
+      if (firstArchive) { firstArchive = false; throw new Error("lost archive response"); }
+      return receipt();
+    }
+  } });
+  const choice = { artistOnly: true, allowReuse: false };
+  await assert.rejects(h.workflow.start(file, choice), /lost upload response/);
+  choice.artistOnly = false;
+  choice.allowReuse = true;
+  await assert.rejects(h.workflow.retry(), /lost archive response/);
+  await h.workflow.retry();
+  assert.equal(h.workflow.operation.artistOnly, true);
+  assert.equal(h.workflow.operation.allowReuse, false);
+  assert.deepEqual(requests.map(([kind]) => kind), ["begin", "begin", "complete", "complete"]);
+  for (const [kind, request] of requests) {
+    assert.equal(request.artistOnly, true);
+    if (kind === "begin") assert.equal(request.allowReuse, false);
+  }
+});
+
 test("saves the exact original before developing, then requires a matching archive receipt", async () => {
   const { workflow, calls } = fixture();
   const operation = await workflow.start(file);

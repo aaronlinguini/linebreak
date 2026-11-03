@@ -114,10 +114,13 @@ function exposureApi(request) {
     }
     var payload = request.payload === undefined ? {} : request.payload;
     if (!isObject_(payload)) throw apiError_("INVALID_REQUEST", "The archive request is invalid.");
+    // Validate pairing choices before request accounting or archive setup can write.
+    excludedBaseHashes_(payload.excludedBaseHashes);
+    artistOnly_(payload.artistOnly);
     var data = withLock_(function () {
       guardVisitorRequest_();
       var project = project_();
-      if (request.action === "bootstrap") return bootstrap_(project);
+      if (request.action === "bootstrap") return bootstrap_(project, payload);
       if (request.action === "begin") return begin_(project, payload);
       return complete_(project, payload);
     });
@@ -469,10 +472,12 @@ function refreshArtistSources_(project) {
   return summary;
 }
 
-function bootstrap_(project) {
+function bootstrap_(project, payload) {
+  var excludedHashes = excludedBaseHashes_(payload === undefined ? undefined : payload.excludedBaseHashes);
+  var artistOnly = artistOnly_(payload === undefined ? undefined : payload.artistOnly);
   syncArtistSourcesIfDue_(project);
-  var includeParticipants = includeParticipants_();
-  var sources = eligibleSources_(project, "", includeParticipants);
+  var includeParticipants = !artistOnly && includeParticipants_();
+  var sources = eligibleSources_(project, "", includeParticipants, "", excludedHashes);
   var artistCount = sources.filter(function (source) { return source.kind === "artist"; }).length;
   var preview = sources.length ? previewBase_(project, sources[Math.floor(Math.random() * sources.length)]) : null;
   return {
@@ -487,6 +492,8 @@ function bootstrap_(project) {
 }
 
 function begin_(project, payload) {
+  var excludedHashes = excludedBaseHashes_(payload.excludedBaseHashes);
+  var artistOnly = artistOnly_(payload.artistOnly);
   var submissionId = submissionId_(payload.submissionId);
   if (payload.reuse !== undefined && !isObject_(payload.reuse)) {
     throw apiError_("INVALID_REQUEST", "The previous exposure could not be verified.");
@@ -550,7 +557,9 @@ function begin_(project, payload) {
     if (submission && submission.baseSha256 !== preferredHash) {
       throw apiError_("SUBMISSION_CONFLICT", "This submission already belongs to a different photograph pairing. Retry the original choice.");
     }
-    preferred = findRecord_(eligibleSources_(project, originalHash, includeParticipants_()), "sha256", preferredHash);
+    var pinned = Boolean(submission && submission.baseId);
+    preferred = findRecord_(eligibleSources_(project, originalHash, (!artistOnly || pinned) && includeParticipants_(), "",
+      pinned ? [] : excludedHashes), "sha256", preferredHash);
     if (!preferred) throw apiError_("BASE_UNAVAILABLE", "The chosen photograph is unavailable for this pairing. Please retry the same photo.", Boolean(submission) && !unretainedOriginal_(submission));
   }
   if (!submission) {
@@ -587,7 +596,7 @@ function begin_(project, payload) {
         if (!priorBase) throw apiError_("BASE_UNAVAILABLE", "The previous base photograph is unavailable. Please contact the artist.", true);
         excludedBaseHash = previous.baseSha256 || priorBase.sha256;
       }
-      var candidates = eligibleSources_(project, originalHash, includeParticipants_(), excludedBaseHash);
+      var candidates = eligibleSources_(project, originalHash, !artistOnly && includeParticipants_(), excludedBaseHash, excludedHashes);
       var hadCandidates = candidates.length > 0;
       while (candidates.length && !base) {
         var choice = Math.floor(Math.random() * candidates.length);
@@ -617,6 +626,8 @@ function begin_(project, payload) {
 }
 
 function complete_(project, payload) {
+  var excludedHashes = excludedBaseHashes_(payload.excludedBaseHashes);
+  var artistOnly = artistOnly_(payload.artistOnly);
   var submissionId = submissionId_(payload.submissionId);
   var submission = findRecord_(readRecords_(project.submissions, EXPOSURE_CONFIG_.submissionsHeaders), "submissionId", submissionId);
   if (!submission || !tokenMatches_(submission.token, payload.token)) {
@@ -657,7 +668,7 @@ function complete_(project, payload) {
       shareParticipantOriginal_(project, original);
     }
     var currentBase = findRecord_(readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders), "sourceId", submission.baseId);
-    var alternatives = currentBase ? eligibleSources_(project, submission.originalSha256, includeParticipants_(), submission.baseSha256 || currentBase.sha256) : [];
+    var alternatives = currentBase ? eligibleSources_(project, submission.originalSha256, !artistOnly && includeParticipants_(), submission.baseSha256 || currentBase.sha256, excludedHashes) : [];
     return { submissionId: submissionId, saved: true, resultId: file.getId(), originalId: submission.originalId,
       originalRetained: !unretainedOriginal_(submission),
       baseId: submission.baseId, canRePair: alternatives.length > 0 };
@@ -831,9 +842,29 @@ function readSource_(source) {
   }
 }
 
-function eligibleSources_(project, excludedHash, includeParticipants, excludedBaseHash) {
+function artistOnly_(value) {
+  if (value === undefined) return false;
+  if (typeof value !== "boolean") throw apiError_("INVALID_REQUEST", "The archive request is invalid.");
+  return value;
+}
+
+function excludedBaseHashes_(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 20000) throw apiError_("INVALID_REQUEST", "The archive request is invalid.");
+  var hashes = [], seen = Object.create(null);
+  for (var index = 0; index < value.length; index++) {
+    var hash = value[index];
+    if (typeof hash !== "string" || !/^[0-9a-f]{64}$/.test(hash)) throw apiError_("INVALID_REQUEST", "The archive request is invalid.");
+    if (!seen[hash]) { seen[hash] = true; hashes.push(hash); }
+  }
+  return hashes;
+}
+
+function eligibleSources_(project, excludedHash, includeParticipants, excludedBaseHash, excludedBaseHashes) {
+  var excluded = Object.create(null);
+  (excludedBaseHashes || []).forEach(function (hash) { excluded[hash] = true; });
   var candidates = readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders).filter(function (source) {
-    return isEligible_(source) && source.sha256 !== excludedHash && source.sha256 !== excludedBaseHash &&
+    return isEligible_(source) && !excluded[source.sha256] && source.sha256 !== excludedHash && source.sha256 !== excludedBaseHash &&
       (!project.artistAssets || source.kind !== "artist" || matchesArtistAsset_(project, source)) &&
       (source.kind === "artist" || (includeParticipants && source.kind === "participant"));
   });

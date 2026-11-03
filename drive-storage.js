@@ -46,6 +46,13 @@
     return typeof value === "string" && value.length > 0 && value.length <= 128;
   }
 
+  function excludedHashes(value = []) {
+    if (!Array.isArray(value) || value.length > 20000 || [...value].some(hash => typeof hash !== "string" || !/^[0-9a-f]{64}$/.test(hash))) {
+      throw storageError("INVALID_SUBMISSION", "A submission ID and one original photograph or saved exposure are required.");
+    }
+    return Object.freeze([...new Set(value)]);
+  }
+
   function mimeType(file) {
     if (file.type) return file.type;
     const extension = String(file.name || "").split(".").pop().toLowerCase();
@@ -80,14 +87,20 @@
       return endpoint(this.config.googleScriptUrl) !== null;
     }
 
-    connect() {
+    connect({ excludedBaseHashes = [], artistOnly = false } = {}) {
+      let excluded;
+      try {
+        excluded = excludedHashes(excludedBaseHashes);
+        if (typeof artistOnly !== "boolean") throw storageError("INVALID_SUBMISSION", "A submission ID and one original photograph or saved exposure are required.");
+      }
+      catch (error) { return Promise.reject(error); }
       if (this._disposed) return Promise.reject(storageError("DISPOSED", "The archive connection is closed."));
       if (this._connectPromise) return this._connectPromise;
 
       const alreadyOpen = Boolean(this._source);
       this._connectPromise = (alreadyOpen ? Promise.resolve() : this._open())
         .then(async () => {
-          const data = await this._request("bootstrap", {});
+          const data = await this._request("bootstrap", { ...(excluded.length ? { excludedBaseHashes: excluded } : {}), ...(artistOnly ? { artistOnly: true } : {}) });
           this._bootstrap = data;
           this._connected = true;
           return data;
@@ -100,34 +113,41 @@
       return this._connectPromise;
     }
 
-    async begin({ submissionId, originalFile, allowReuse = false, reuse, preferredBaseSha256 } = {}) {
+    async begin({ submissionId, originalFile, allowReuse = false, reuse, preferredBaseSha256, excludedBaseHashes = [], artistOnly = false } = {}) {
       this._assertActive();
+      const excluded = excludedHashes(excludedBaseHashes);
+      const exclusions = { ...(excluded.length ? { excludedBaseHashes: excluded } : {}), ...(artistOnly ? { artistOnly: true } : {}) };
       if (!validSubmissionId(submissionId) || Boolean(originalFile) === Boolean(reuse) ||
           typeof allowReuse !== "boolean" ||
+          typeof artistOnly !== "boolean" ||
           (preferredBaseSha256 !== undefined && (reuse || typeof preferredBaseSha256 !== "string" || !/^[0-9a-f]{64}$/.test(preferredBaseSha256))) ||
           (reuse && (!validSubmissionId(reuse.submissionId) || typeof reuse.token !== "string" || !reuse.token))) {
         throw storageError("INVALID_SUBMISSION", "A submission ID and one original photograph or saved exposure are required.");
       }
-      if (!this._connected) await this.connect();
-      if (reuse) return this._request("begin", { submissionId, reuse });
+      if (!this._connected) await this.connect({ excludedBaseHashes: excluded, artistOnly });
+      if (reuse) return this._request("begin", { submissionId, reuse, ...exclusions });
       const base64 = await this._readBase64(originalFile);
-      return this._request("begin", { submissionId, allowReuse,
+      return this._request("begin", { submissionId, allowReuse, ...exclusions,
         ...(preferredBaseSha256 !== undefined ? { preferredBaseSha256 } : {}),
         original: { name: originalFile.name || "photograph", mimeType: mimeType(originalFile), base64 } });
     }
 
-    async complete({ submissionId, token, resultBlob, width, height, settings = {} } = {}) {
+    async complete({ submissionId, token, resultBlob, width, height, settings = {}, excludedBaseHashes = [], artistOnly = false } = {}) {
       this._assertActive();
+      const excluded = excludedHashes(excludedBaseHashes);
       if (!validSubmissionId(submissionId) || typeof token !== "string" || !token || !resultBlob ||
+          typeof artistOnly !== "boolean" ||
           !Number.isInteger(width) || width < 1 || !Number.isInteger(height) || height < 1) {
         throw storageError("INVALID_SUBMISSION", "The finished exposure and its submission details are required.");
       }
-      if (!this._connected) await this.connect();
+      if (!this._connected) await this.connect({ excludedBaseHashes: excluded, artistOnly });
       const base64 = await this._readBase64(resultBlob);
       return this._request("complete", {
         submissionId, token,
         result: { name: `${submissionId}.jpg`, mimeType: "image/jpeg", base64 },
         width, height, settings,
+        ...(excluded.length ? { excludedBaseHashes: excluded } : {}),
+        ...(artistOnly ? { artistOnly: true } : {}),
       });
     }
 

@@ -14,28 +14,39 @@ class ExposureArchiveWorkflow {
 
   get pending() { return Boolean(this.operation && !this.operation.receipt); }
 
-  async start(file, { allowReuse = false, monochrome = this.settings.monochrome, previewBase = null } = {}) {
+  excludedHashes(hashes) {
+    if (!Array.isArray(hashes) || hashes.length > 20000 || [...hashes].some(hash => typeof hash !== "string" || !/^[0-9a-f]{64}$/.test(hash))) {
+      throw new Error("The photograph sharing choice is invalid.");
+    }
+    return Object.freeze([...new Set(hashes)]);
+  }
+
+  async start(file, { allowReuse = false, monochrome = this.settings.monochrome, previewBase = null, excludedBaseHashes = [], artistOnly = false } = {}) {
     if (this.busy || this.pending) throw new Error("Finish saving this photograph before adding another.");
     if (typeof allowReuse !== "boolean") throw new Error("The photograph sharing choice is invalid.");
+    if (typeof artistOnly !== "boolean") throw new Error("The photograph sharing choice is invalid.");
     if (typeof monochrome !== "boolean") throw new Error("The black-and-white choice is invalid.");
+    const excluded = this.excludedHashes(excludedBaseHashes);
     if (previewBase && ((!previewBase.id && !previewBase.path) || typeof previewBase.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(previewBase.sha256) ||
         !previewBase.mimeType || !Number.isSafeInteger(previewBase.byteLength) || previewBase.byteLength < 1 ||
-        previewBase.base64 !== undefined)) throw new Error("The preview photograph is invalid.");
+        previewBase.base64 !== undefined || excluded.includes(previewBase.sha256) || (artistOnly && !previewBase.path))) throw new Error("The preview photograph is invalid.");
     // Save these settings with this exposure so retries cannot change them.
     const settings = Object.freeze({ ...this.settings, monochrome });
-    this.operation = { submissionId: this.makeId(), file, allowReuse, settings,
+    this.operation = { submissionId: this.makeId(), file, allowReuse, artistOnly, settings, excludedBaseHashes: excluded,
       reuse: null, previewBase: previewBase ? Object.freeze({ ...previewBase }) : null,
       begin: null, result: null, receipt: null };
     return this.run();
   }
 
-  async rePair({ monochrome = this.operation?.settings.monochrome } = {}) {
+  async rePair({ monochrome = this.operation?.settings.monochrome, excludedBaseHashes = this.operation?.excludedBaseHashes || [], artistOnly = this.operation?.artistOnly ?? false } = {}) {
     if (this.busy || this.pending) throw new Error("Finish saving this photograph before trying another pairing.");
     const previous = this.operation;
     if (!previous?.receipt || !previous.begin?.token) throw new Error("Create and save an exposure first.");
     if (typeof monochrome !== "boolean") throw new Error("The black-and-white choice is invalid.");
+    if (typeof artistOnly !== "boolean") throw new Error("The photograph sharing choice is invalid.");
     if (previous.receipt.canRePair === false) throw new Error("There is no other photograph available to pair right now.");
-    this.operation = { submissionId: this.makeId(), file: previous.file,
+    const excluded = this.excludedHashes(excludedBaseHashes);
+    this.operation = { submissionId: this.makeId(), file: previous.file, artistOnly, excludedBaseHashes: excluded,
       allowReuse: previous.allowReuse, settings: Object.freeze({ ...previous.settings, monochrome }),
       reuse: { submissionId: previous.submissionId, token: previous.begin.token },
       begin: null, result: null, receipt: null };
@@ -64,6 +75,8 @@ class ExposureArchiveWorkflow {
     if (previous.settings.monochrome === monochrome) return previous;
     this.operation = { submissionId: this.makeId(), file: previous.file,
       allowReuse: previous.allowReuse,
+      artistOnly: previous.artistOnly ?? false,
+      excludedBaseHashes: previous.excludedBaseHashes || Object.freeze([]),
       settings: Object.freeze({ ...previous.settings, monochrome }),
       reuse: { submissionId: previous.submissionId, token: previous.begin.token, sameBase: true },
       resultBase: result !== null ? Object.freeze({ ...previous.begin.base }) : null,
@@ -114,9 +127,14 @@ class ExposureArchiveWorkflow {
         try {
           const begin = await this.storage.begin({ submissionId: operation.submissionId,
             ...(operation.reuse ? { reuse: operation.reuse } : { originalFile: operation.file, allowReuse: operation.allowReuse }),
+            ...(operation.excludedBaseHashes?.length ? { excludedBaseHashes: operation.excludedBaseHashes } : {}),
+            ...(operation.artistOnly ? { artistOnly: true } : {}),
             ...(operation.previewBase ? { preferredBaseSha256: operation.previewBase.sha256 } : {}) });
           if (begin.submissionId !== operation.submissionId || !begin.token || !begin.originalId ||
               !begin.base?.id || !begin.base.mimeType || Boolean(begin.base.base64) === Boolean(begin.base.path)) {
+            throw new Error("The collection did not confirm the photograph. Please retry.");
+          }
+          if (!operation.reuse?.sameBase && (operation.excludedBaseHashes?.includes(begin.base.sha256) || (operation.artistOnly && !begin.base.path))) {
             throw new Error("The collection did not confirm the photograph. Please retry.");
           }
           if (operation.previewBase && ["id", "name", "mimeType", "sha256", "byteLength", "path"].some(key =>
@@ -150,7 +168,9 @@ class ExposureArchiveWorkflow {
       const receipt = await this.storage.complete({
         submissionId: operation.submissionId, token: operation.begin.token,
         resultBlob: operation.result.blob, width: operation.result.width,
-        height: operation.result.height, settings: operation.settings
+        height: operation.result.height, settings: operation.settings,
+        ...(operation.excludedBaseHashes?.length ? { excludedBaseHashes: operation.excludedBaseHashes } : {}),
+        ...(operation.artistOnly ? { artistOnly: true } : {})
       });
       if (receipt.saved !== true || receipt.submissionId !== operation.submissionId ||
           receipt.originalId !== operation.begin.originalId || receipt.baseId !== operation.begin.base.id ||

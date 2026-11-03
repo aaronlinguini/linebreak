@@ -1,5 +1,44 @@
 "use strict";
 
+function createExposureContributionHistory({ storage } = {}) {
+  const key = "line-break.contributions.v1";
+  const remembered = new Set();
+  const normalize = hash => typeof hash === "string" && /^[0-9a-f]{64}$/i.test(hash) ? hash.toLowerCase() : null;
+
+  function mergeStored() {
+    let target, serialized;
+    try {
+      target = storage === undefined ? window.localStorage : storage;
+      if (!target || typeof target.getItem !== "function") return null;
+      serialized = target.getItem(key);
+    } catch { return null; }
+    try {
+      const hashes = JSON.parse(serialized);
+      if (Array.isArray(hashes)) for (const value of hashes) {
+        const hash = normalize(value);
+        if (hash) remembered.add(hash);
+      }
+    } catch { /* Keep this page's hashes when browser storage is unavailable or corrupt. */ }
+    return target;
+  }
+
+  return Object.freeze({
+    remember(value) {
+      const hash = normalize(value);
+      if (!hash) throw new Error("The uploaded photograph's fingerprint is invalid.");
+      const target = mergeStored();
+      remembered.add(hash);
+      try { target?.setItem(key, JSON.stringify(Array.from(remembered))); }
+      catch { /* A denied or full browser store must not interrupt development. */ }
+      return hash;
+    },
+    hashes() {
+      mergeStored();
+      return Array.from(remembered);
+    }
+  });
+}
+
 // Add the light from both photos, then limit it to the display range.
 const ExposureMath = (() => {
   const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
@@ -368,7 +407,7 @@ function initializeExposureStudio() {
     exposureControls: byId("exposure-controls"), uploadInstructions: byId("upload-instructions"),
     outputOptions: byId("output-options"), monochrome: byId("visitor-monochrome"),
     colour: byId("visitor-colour"), repeatActions: byId("repeat-actions"),
-    resultActions: byId("result-actions"), allowReuse: byId("allow-reuse"), declineReuse: byId("decline-reuse"),
+    resultActions: byId("result-actions"), allowReuse: byId("allow-reuse"), declineReuse: byId("decline-reuse"), artistOnly: byId("artist-only"),
     newPairing: byId("new-pairing-button"), reset: byId("reset-button"),
     participantInput: byId("participant-input"), cameraInput: byId("participant-camera-input"),
     cameraPicker: byId("camera-picker"), cameraSeparator: byId("camera-separator"),
@@ -386,14 +425,16 @@ function initializeExposureStudio() {
   const developingMessage = ui.busy.textContent;
   const savingMessage = ui.savingNote.textContent.trim();
   const state = { working: false, connecting: false, ready: false, hasResult: false, participant: null,
-    selectedFile: null, selectionChoices: null, queued: false, downloadUrl: null, downloadBlob: null, rePairUnavailable: false,
-    displayedSubmissionId: null, previewing: false, previewBase: null,
+    selectedFile: null, selectedHash: null, selectionChoices: null, queued: false, downloadUrl: null, downloadBlob: null, rePairUnavailable: false,
+    displayedSubmissionId: null, previewing: false, previewBase: null, previewArtistOnly: null,
     pairKey: null, colourResults: new Map(), displayedResult: null,
     desiredMonochrome: PROJECT_SETTINGS.monochrome, colourWorking: false };
   setColourChoice(PROJECT_SETTINGS.monochrome);
   ui.allowReuse.checked = false;
   ui.declineReuse.checked = false;
+  ui.artistOnly.checked = false;
   const { loadPhoto, releasePhoto, develop } = createExposureProcessor();
+  const contributions = createExposureContributionHistory();
   const storage = new GoogleDriveStorage(EXPOSURE_CONFIG);
   let retryTimer = null;
   let retryTarget = null;
@@ -514,6 +555,7 @@ function initializeExposureStudio() {
     ui.resultActions.hidden = !state.hasResult;
     ui.allowReuse.disabled = state.working || selected || pending;
     ui.declineReuse.disabled = ui.allowReuse.disabled;
+    ui.artistOnly.disabled = ui.allowReuse.disabled;
     ui.download.hidden = !state.hasResult;
     ui.rotate.hidden = !state.hasResult;
     ui.download.disabled = !imageReady || state.working || unsaved;
@@ -555,6 +597,7 @@ function initializeExposureStudio() {
     releasePhoto(state.participant);
     state.participant = null;
     state.selectedFile = null;
+    state.selectedHash = null;
     state.selectionChoices = null;
     state.queued = false;
     state.rePairUnavailable = false;
@@ -593,15 +636,17 @@ function initializeExposureStudio() {
       return;
     }
     state.connecting = true;
+    const artistOnly = state.selectionChoices?.artistOnly ?? ui.artistOnly.checked;
     restoreConnectionStatus();
     refreshActions();
     try {
-      const collection = await storage.connect();
+      const collection = await storage.connect({ excludedBaseHashes: contributions.hashes(), artistOnly });
       if (exited) return;
       lastConnectionError = null;
       connectionRetryAttempts = 0;
       state.ready = collection.totalEligible > 0;
-      state.previewBase = collection.previewBase || null;
+      state.previewArtistOnly = artistOnly;
+      state.previewBase = artistOnly === (state.selectionChoices?.artistOnly ?? ui.artistOnly.checked) ? collection.previewBase || null : null;
     } catch (error) {
       if (exited) return;
       state.ready = false;
@@ -614,6 +659,9 @@ function initializeExposureStudio() {
         if (!state.working && !workflow.pending && !state.hasResult) restoreConnectionStatus();
         refreshActions();
       }
+    }
+    if (!exited && artistOnly !== (state.selectionChoices?.artistOnly ?? ui.artistOnly.checked)) {
+      await connectArchive();
     }
     if (!exited) await startSelectedPhoto();
   }
@@ -743,18 +791,23 @@ function initializeExposureStudio() {
     if (!state.ready && (typeof ExposureBaseAssets === "undefined" || typeof ExposureBaseAssets.chooseBase !== "function")) return;
     state.queued = false;
     clearError();
-    const candidate = state.ready ? state.previewBase : null;
+    const candidate = state.ready && state.previewArtistOnly === state.selectionChoices.artistOnly ? state.previewBase : null;
+    const excludedBaseHashes = contributions.hashes();
+    const excluded = new Set(excludedBaseHashes);
+    const artistOnly = state.selectionChoices.artistOnly;
     state.previewBase = null;
     await finishSubmission(async () => {
       let previewBase = candidate;
       if (previewBase || (storage.configured && typeof ExposureBaseAssets !== "undefined")) {
-        const digest = await crypto.subtle.digest("SHA-256", await state.selectedFile.arrayBuffer());
-        const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+        const hash = state.selectedHash;
         // A photo cannot be paired with an identical copy of itself.
-        if (previewBase && hash === previewBase.sha256) previewBase = null;
-        if (!previewBase && !candidate && typeof ExposureBaseAssets !== "undefined") previewBase = await ExposureBaseAssets.chooseBase(hash);
+        if (previewBase && (hash === previewBase.sha256 || excluded.has(previewBase.sha256) || (artistOnly && !previewBase.path))) previewBase = null;
+        if (!previewBase && (!candidate || artistOnly) && typeof ExposureBaseAssets !== "undefined") {
+          try { previewBase = await ExposureBaseAssets.chooseBase(hash, excludedBaseHashes); }
+          catch (error) { if (error.code !== "NO_LOCAL_BASE") throw error; }
+        }
       }
-      return workflow.start(state.selectedFile, Object.freeze({ ...state.selectionChoices, ...(previewBase ? { previewBase } : {}) }));
+      return workflow.start(state.selectedFile, Object.freeze({ ...state.selectionChoices, excludedBaseHashes, ...(previewBase ? { previewBase } : {}) }));
     });
     if (!workflow.pending) connectArchive();
   }
@@ -774,7 +827,7 @@ function initializeExposureStudio() {
     }
     clearError();
     state.selectedFile = file;
-    state.selectionChoices = Object.freeze({ allowReuse: ui.allowReuse.checked, monochrome: ui.monochrome.checked });
+    state.selectionChoices = Object.freeze({ allowReuse: ui.allowReuse.checked, monochrome: ui.monochrome.checked, artistOnly: ui.artistOnly.checked });
     state.queued = true;
     clearResult();
     setWorking(true);
@@ -782,6 +835,9 @@ function initializeExposureStudio() {
       const uploadFile = await prepareParticipantFile(file);
       state.selectedFile = uploadFile;
       state.participant = await loadPhoto(uploadFile);
+      const digest = await crypto.subtle.digest("SHA-256", await uploadFile.arrayBuffer());
+      state.selectedHash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+      contributions.remember(state.selectedHash);
     }
     catch (error) {
       clearSelection();
@@ -809,6 +865,15 @@ function initializeExposureStudio() {
       refreshActions();
     });
   }
+  ui.artistOnly.addEventListener("change", () => {
+    if (ui.artistOnly.disabled) {
+      if (state.selectionChoices) ui.artistOnly.checked = state.selectionChoices.artistOnly;
+      return;
+    }
+    state.previewBase = null;
+    state.previewArtistOnly = null;
+    void connectArchive();
+  });
   for (const [input, monochrome] of [[ui.monochrome, true], [ui.colour, false]]) {
     input.addEventListener("change", async () => {
       if (!input.checked) return;
@@ -825,7 +890,7 @@ function initializeExposureStudio() {
     if (ui.newPairing.disabled || !state.hasResult || state.working || state.colourWorking || workflow.pending ||
         pendingColourResults() || workflow.operation?.receipt?.canRePair !== true) return;
     clearError();
-    await finishSubmission(() => workflow.rePair({ monochrome: state.desiredMonochrome }));
+    await finishSubmission(() => workflow.rePair({ monochrome: state.desiredMonochrome, excludedBaseHashes: contributions.hashes() }));
   });
   ui.reset.addEventListener("click", () => {
     if (ui.reset.disabled || state.working || state.colourWorking || workflow.pending || pendingColourResults()) return;

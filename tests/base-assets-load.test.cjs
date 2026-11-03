@@ -152,6 +152,39 @@ test("concurrent catalog choices share one fetch and return separate immutable d
   assert.equal(h.calls.length, 1);
 });
 
+test("local fallback excludes current and earlier contributions and chooses uniformly among the remaining photos", async () => {
+  const photos = Array.from({ length: 5 }, (_, index) => base(`${index}.jpg`, Uint8Array.from([index, index + 1])));
+  const h = fixture(async () => Response.json({ version: 1, photos }));
+  const history = [photos[1].sha256, photos[3].sha256, photos[1].sha256, "f".repeat(64)];
+  for (const [random, selected] of [[0, 2], [0.499999, 2], [0.5, 4], [0.999999, 4]]) {
+    h.setRandom(random);
+    const choice = await h.assets.chooseBase(photos[0].sha256, history);
+    assert.equal(choice.sha256, photos[selected].sha256);
+    assert.equal(Object.isFrozen(choice), true);
+    assert.equal(choice.id, undefined);
+  }
+  h.setRandom(0);
+  assert.equal((await h.assets.chooseBase(photos[0].sha256, [...history, photos[2].sha256])).sha256,
+    photos[4].sha256, "a new contribution exclusion takes effect even when the manifest is already cached");
+  assert.equal(h.calls.length, 1, "the existing website manifest supplies every disconnected choice without Google or image requests");
+  assert.deepEqual(history, [photos[1].sha256, photos[3].sha256, photos[1].sha256, "f".repeat(64)], "choice must not mutate remembered hashes");
+});
+
+test("local fallback never reuses an excluded contribution when every catalog photo is filtered", async () => {
+  const photos = [base("current.jpg"), base("earlier.jpg", Uint8Array.from([1, 2]))];
+  const h = fixture(async () => Response.json({ version: 1, photos }));
+  await assert.rejects(h.assets.chooseBase(photos[0].sha256, [photos[1].sha256]), /no different website photograph/);
+  assert.equal(h.calls.length, 1, "an empty eligible set cannot cause an image request or a Google fallback");
+});
+
+test("invalid contribution exclusions fail before the local catalog request", async () => {
+  const h = fixture();
+  for (const excluded of [null, "a".repeat(64), {}, [undefined], ["A".repeat(64)], ["a".repeat(63)], [5]]) {
+    await assert.rejects(h.assets.chooseBase("0".repeat(64), excluded), /fingerprint is invalid/);
+  }
+  assert.equal(h.calls.length, 0);
+});
+
 test("invalid original hashes and remote catalog bases fail before fetching", async () => {
   const h = fixture();
   for (const value of [undefined, null, "", "A".repeat(64), "a".repeat(63), [], ["a".repeat(64)]]) {

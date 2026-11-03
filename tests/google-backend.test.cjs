@@ -12,6 +12,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const signed = (bytes) => Array.from(bytes, (value) => value > 127 ? value - 256 : value);
 const jpeg = (marker) => Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, marker, 0xff, 0xd9]);
 const original = (marker, name = `photo-${marker}.jpg`) => ({ name, mimeType: "image/jpeg", base64: jpeg(marker).toString("base64") });
+const photoHash = (marker) => crypto.createHash("sha256").update(jpeg(marker)).digest("hex");
 const submissionId = (number) => `11111111-1111-4111-8111-${String(number).padStart(12, "0")}`;
 function assetFor(backend, sourceId, name = "base.jpg") {
   const source = backend.records("Sources").find(source => source.sourceId === sourceId);
@@ -848,6 +849,364 @@ test("a later participant can pair with an earlier participant, never their iden
   const second = backend.begin(2, 1);
   assert.equal(second.base.id, first.originalId, "the other participant is the only distinct eligible source");
   assert.notEqual(Buffer.from(second.base.base64, "base64").toString("hex"), jpeg(1).toString("hex"));
+});
+
+test("malformed contribution exclusions are rejected before any accounting or archive writes", () => {
+  const invalid = [null, false, {}, "a".repeat(64), [null], [undefined], Array(1),
+    ["A".repeat(64)], ["a".repeat(63)], ["a".repeat(65)], [photoHash(1), "invalid"],
+    Array(20001).fill(photoHash(1))];
+  for (const excludedBaseHashes of invalid) {
+    const backend = makeBackend();
+    for (const action of ["bootstrap", "begin", "complete"]) {
+      const response = backend.api(action, { excludedBaseHashes, submissionId: submissionId(1),
+        original: original(22), token: "untrusted", result: original(90), width: 640, height: 480 });
+      assert.equal(response.error.code, "INVALID_REQUEST");
+      assert.equal(response.error.message, "The archive request is invalid.");
+    }
+    assert.equal(backend.io.propertyReads, 0);
+    assert.equal(backend.io.driveCalls, 0);
+    assert.equal(backend.lock.count, 0);
+    assert.equal(backend.folders.size, 0);
+    assert.equal(backend.files.size, 0);
+    assert.equal(backend.books.size, 0);
+    assert.equal(backend.properties.has("EXPOSURE_REQUEST_WINDOW"), false);
+  }
+});
+
+test("contribution exclusions accept duplicates and preserve the last entry at the protocol bound", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); const other = backend.seed(2); backend.refresh();
+  const repeated = backend.data("bootstrap", { excludedBaseHashes: [photoHash(1), photoHash(1), "f".repeat(64)] });
+  assert.equal(repeated.totalEligible, 1);
+  assert.equal(repeated.previewBase.id, other.getId());
+  const history = Array.from({ length: 19999 }, (_, index) => index.toString(16).padStart(64, "0"));
+  history.push(photoHash(1));
+  const bounded = backend.data("bootstrap", { excludedBaseHashes: history });
+  assert.equal(bounded.totalEligible, 1, "a late history entry cannot be silently truncated");
+  assert.equal(bounded.previewBase.id, other.getId());
+  assert.equal(backend.data("bootstrap").totalEligible, 2, "older clients without history retain their existing pool");
+});
+
+test("bootstrap filters artist and participant contributions before reporting counts and choosing a preview", () => {
+  const backend = makeBackend(); backend.setup();
+  const artists = [backend.seed(1), backend.seed(2), backend.seed(3)]; backend.refresh();
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: artists.map((file, index) => assetFor(backend, file.getId(), `artist-${index + 1}.jpg`)) });
+  const first = backend.begin(1, 22, true); backend.data("complete", backend.completePayload(first));
+  const before = { sources: backend.records("Sources"), submissions: backend.records("Submissions") };
+  vm.runInContext("Math.random = () => 0.75", backend.sandbox);
+  const status = backend.data("bootstrap", { excludedBaseHashes: [photoHash(1), photoHash(22)] });
+  assert.equal(status.totalEligible, 2);
+  assert.equal(status.artistCount, 2);
+  assert.equal(status.participantCount, 0);
+  assert.equal(status.includeParticipantPhotos, true);
+  assert.equal(status.previewBase.id, artists[2].getId());
+  const none = backend.data("bootstrap", { excludedBaseHashes: before.sources.map(source => source.sha256) });
+  assert.equal(none.totalEligible, 0);
+  assert.equal(none.artistCount, 0);
+  assert.equal(none.participantCount, 0);
+  assert.equal(none.previewBase, null);
+  assert.deepEqual(backend.records("Sources"), before.sources, "history never grants or revokes global source eligibility");
+  assert.deepEqual(backend.records("Submissions"), before.submissions);
+});
+
+test("fresh random and preferred pairings cannot select any previously contributed artist or participant hash", () => {
+  const backend = makeBackend(); backend.setup();
+  const one = backend.seed(1), two = backend.seed(2); backend.refresh();
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: [assetFor(backend, one.getId(), "one.jpg"), assetFor(backend, two.getId(), "two.jpg")] });
+  const first = backend.begin(1, 22, true); backend.data("complete", backend.completePayload(first));
+  const count = backend.files.size;
+  for (const hash of [photoHash(1), photoHash(22)]) {
+    const blocked = backend.api("begin", { submissionId: submissionId(2), original: original(23), allowReuse: true,
+      preferredBaseSha256: hash, excludedBaseHashes: [hash] });
+    assert.equal(blocked.error.code, "BASE_UNAVAILABLE");
+    assert.equal(backend.files.size, count, "an excluded preferred preview is rejected before saving a new original");
+    assert.equal(backend.records("Submissions").length, 1);
+  }
+  vm.runInContext("Math.random = () => 0.999999", backend.sandbox);
+  const chosen = backend.data("begin", { submissionId: submissionId(2), original: original(23), allowReuse: false,
+    excludedBaseHashes: [photoHash(1), photoHash(22)] });
+  assert.equal(chosen.base.id, two.getId());
+  assert.equal(chosen.base.path, "assets/base-photos/two.jpg");
+  const none = backend.api("begin", { submissionId: submissionId(3), original: original(24), allowReuse: false,
+    excludedBaseHashes: [photoHash(1), photoHash(2), photoHash(22)] });
+  assert.equal(none.error.code, "NO_BASE");
+  assert.equal(backend.records("Submissions").find(row => row.submissionId === submissionId(3)).baseId, "");
+});
+
+test("new re-pairings combine contribution history with self and immediate-prior-base exclusions", () => {
+  const backend = makeBackend(); backend.setup();
+  const artists = [backend.seed(1), backend.seed(2), backend.seed(3), backend.seed(4)]; backend.refresh();
+  const first = backend.data("begin", { submissionId: submissionId(1), original: original(1), allowReuse: false,
+    preferredBaseSha256: photoHash(2) });
+  backend.data("complete", backend.completePayload(first));
+  vm.runInContext("Math.random = () => 0", backend.sandbox);
+  const reuse = { submissionId: first.submissionId, token: first.token };
+  const next = backend.data("begin", { submissionId: submissionId(2), reuse, excludedBaseHashes: [photoHash(3)] });
+  assert.equal(next.base.id, artists[3].getId(), "self, the preceding base and history each remove one different source");
+  assert.equal(next.originalId, first.originalId);
+  const none = backend.api("begin", { submissionId: submissionId(3), reuse,
+    excludedBaseHashes: [photoHash(1), photoHash(2), photoHash(3), photoHash(4)] });
+  assert.equal(none.error.code, "NO_ALTERNATIVE_BASE");
+  assert.equal(backend.records("Submissions")[0].baseId, first.base.id);
+  assert.equal(backend.folder("Participant").files.length, 0);
+});
+
+test("completion history affects only available next pairings and malformed history cannot archive a result", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.seed(2); backend.refresh();
+  const begun = backend.data("begin", { submissionId: submissionId(1), original: original(22), allowReuse: false,
+    preferredBaseSha256: photoHash(1) });
+  const request = backend.completePayload(begun);
+  const before = { rows: backend.records("Submissions"), usage: backend.usage(), files: backend.files.size,
+    properties: Array.from(backend.properties), sheetWrites: clone(backend.io.sheetWrites) };
+  assert.equal(backend.api("complete", { ...request, excludedBaseHashes: ["INVALID"] }).error.code, "INVALID_REQUEST");
+  assert.deepEqual(backend.records("Submissions"), before.rows);
+  assert.deepEqual(backend.usage(), before.usage);
+  assert.equal(backend.files.size, before.files);
+  assert.deepEqual(Array.from(backend.properties), before.properties);
+  assert.deepEqual(clone(backend.io.sheetWrites), before.sheetWrites);
+  const blocked = backend.data("complete", { ...request, excludedBaseHashes: [photoHash(2)] });
+  assert.equal(blocked.saved, true);
+  assert.equal(blocked.canRePair, false);
+  const row = backend.records("Submissions")[0];
+  const allowed = backend.data("complete", request);
+  assert.equal(allowed.canRePair, true);
+  assert.equal(allowed.resultId, blocked.resultId);
+  assert.deepEqual(backend.records("Submissions")[0], row);
+  assert.equal(backend.folder("Double exposure").files.length, 1);
+});
+
+test("an existing preferred or ordinary retry retains its pinned base when contribution history changes", () => {
+  const backend = makeBackend(); backend.setup(); const one = backend.seed(1), two = backend.seed(2); backend.refresh();
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: [assetFor(backend, one.getId(), "one.jpg"), assetFor(backend, two.getId(), "two.jpg")] });
+  const request = { submissionId: submissionId(1), original: original(22), allowReuse: true,
+    preferredBaseSha256: photoHash(2), excludedBaseHashes: [photoHash(1)] };
+  const begun = backend.data("begin", request);
+  const changed = { ...request, excludedBaseHashes: [photoHash(1), photoHash(2), photoHash(22)] };
+  assert.deepEqual(backend.data("begin", changed), begun);
+  delete changed.preferredBaseSha256;
+  assert.deepEqual(backend.data("begin", changed), begun);
+  assert.equal(backend.folder("Participant").files.length, 1);
+  assert.equal(backend.records("Submissions").length, 1);
+  assert.equal(backend.usage().filter(row => row[2] === "submission").length, 1);
+  assert.equal(backend.records("Submissions")[0].baseSha256, photoHash(2));
+});
+
+test("same-base colour variants retain their authenticated pin even when every base is newly excluded", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.seed(2); backend.refresh();
+  const first = backend.data("begin", { submissionId: submissionId(1), original: original(22), allowReuse: true,
+    preferredBaseSha256: photoHash(2) });
+  backend.data("complete", backend.completePayload(first));
+  const request = { submissionId: submissionId(2), reuse: { submissionId: first.submissionId, token: first.token, sameBase: true },
+    excludedBaseHashes: [photoHash(1), photoHash(2), photoHash(22)] };
+  const variant = backend.data("begin", request);
+  assert.equal(variant.base.id, first.base.id);
+  assert.equal(variant.base.sha256, first.base.sha256);
+  assert.equal(variant.originalId, first.originalId);
+  assert.deepEqual(backend.data("begin", { ...request, excludedBaseHashes: [] }), variant);
+  const result = backend.completePayload(variant, 91); result.settings.monochrome = true;
+  const receipt = backend.data("complete", { ...result, excludedBaseHashes: request.excludedBaseHashes });
+  assert.equal(receipt.saved, true);
+  assert.equal(receipt.canRePair, false);
+  assert.equal(backend.records("Submissions")[1].allowReuse, true);
+  assert.equal(backend.folder("Participant").files.length, 1);
+  assert.equal(backend.folder("Double exposure").files.length, 2);
+});
+
+test("mixed static artists and dynamic participants each receive one uniform chance per eligible unique hash", () => {
+  const backend = makeBackend(); backend.setup();
+  const artists = [backend.seed(1), backend.seed(2), backend.seed(3)];
+  const duplicate = backend.seed(1, "duplicate-artist.jpg"); backend.refresh();
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: artists.map((file, index) => assetFor(backend, file.getId(), `artist-${index + 1}.jpg`)) });
+  const participant = backend.begin(1, 22, true); backend.data("complete", backend.completePayload(participant));
+  const sources = [...backend.books.values()][0].getSheetByName("Sources");
+  const duplicateRow = sources.rows.find(row => row[0] === duplicate.getId());
+  duplicateRow[sources.rows[0].indexOf("eligible")] = true;
+  const expected = [...artists.map(file => file.getId()), participant.originalId];
+  const previews = [], pairings = [];
+  for (let index = 0; index < expected.length; index++) {
+    vm.runInContext(`Math.random = () => ${(index + 0.5) / expected.length}`, backend.sandbox);
+    const status = backend.data("bootstrap", { excludedBaseHashes: [] });
+    assert.equal(status.totalEligible, 4);
+    assert.equal(status.artistCount, 3);
+    assert.equal(status.participantCount, 1);
+    previews.push(status.previewBase.id);
+    const selected = backend.data("begin", { submissionId: submissionId(index + 2), original: original(index + 30),
+      allowReuse: false, excludedBaseHashes: [] });
+    pairings.push(selected.base.id);
+    assert.equal(Boolean(selected.base.path), index < artists.length);
+    assert.equal(Boolean(selected.base.base64), index === artists.length);
+  }
+  assert.deepEqual(previews, expected, "equal random intervals select every unique hash once, rather than splitting probability by group");
+  assert.deepEqual(pairings, expected);
+});
+
+test("artist-only mode rejects non-boolean values before request accounting or archive writes", () => {
+  for (const artistOnly of [null, 0, 1, "true", "false", [], {}, new Boolean(true)]) {
+    const backend = makeBackend();
+    for (const action of ["bootstrap", "begin", "complete"]) {
+      const response = backend.api(action, { artistOnly, submissionId: submissionId(1), original: original(22),
+        token: "untrusted", result: original(90), width: 640, height: 480 });
+      assert.equal(response.error.code, "INVALID_REQUEST");
+      assert.equal(response.error.message, "The archive request is invalid.");
+    }
+    assert.equal(backend.io.propertyReads, 0);
+    assert.equal(backend.io.driveCalls, 0);
+    assert.equal(backend.lock.count, 0);
+    assert.equal(backend.folders.size, 0);
+    assert.equal(backend.files.size, 0);
+    assert.equal(backend.books.size, 0);
+    assert.equal(backend.properties.has("EXPOSURE_REQUEST_WINDOW"), false);
+  }
+});
+
+test("artist-only bootstrap applies contribution history without globally disabling participant sources", () => {
+  const backend = makeBackend(); backend.setup();
+  backend.seed(1); const two = backend.seed(2); backend.refresh();
+  const participant = backend.begin(1, 22, true); backend.data("complete", backend.completePayload(participant));
+  const before = backend.records("Sources");
+  const onlyArtists = backend.data("bootstrap", { artistOnly: true, excludedBaseHashes: [photoHash(1)] });
+  assert.equal(onlyArtists.totalEligible, 1);
+  assert.equal(onlyArtists.artistCount, 1);
+  assert.equal(onlyArtists.participantCount, 0);
+  assert.equal(onlyArtists.includeParticipantPhotos, false);
+  assert.equal(onlyArtists.previewBase.id, two.getId());
+  const mixed = backend.data("bootstrap", { artistOnly: false });
+  assert.equal(mixed.totalEligible, 3);
+  assert.equal(mixed.artistCount, 2);
+  assert.equal(mixed.participantCount, 1);
+  assert.equal(mixed.includeParticipantPhotos, true);
+  assert.equal(backend.data("bootstrap").totalEligible, 3, "older clients keep mixed selection by default");
+  const none = backend.data("bootstrap", { artistOnly: true, excludedBaseHashes: [photoHash(1), photoHash(2)] });
+  assert.equal(none.totalEligible, 0, "available participant photos cannot fill an artist-only empty pool");
+  assert.equal(none.previewBase, null);
+  assert.deepEqual(backend.records("Sources"), before);
+  assert.equal(backend.properties.has("INCLUDE_PARTICIPANT_PHOTOS"), false);
+});
+
+test("fresh artist-only requests reject participant preferences before original writes and draw only artist bases", () => {
+  const backend = makeBackend(); backend.setup();
+  const one = backend.seed(1), two = backend.seed(2); backend.refresh();
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: [assetFor(backend, one.getId(), "one.jpg"), assetFor(backend, two.getId(), "two.jpg")] });
+  const participant = backend.begin(1, 22, true); backend.data("complete", backend.completePayload(participant));
+  const before = { files: backend.files.size, usage: backend.usage(), submissions: backend.records("Submissions") };
+  const rejected = backend.api("begin", { submissionId: submissionId(2), original: original(23), allowReuse: true,
+    preferredBaseSha256: photoHash(22), artistOnly: true });
+  assert.equal(rejected.error.code, "BASE_UNAVAILABLE");
+  assert.equal(backend.files.size, before.files);
+  assert.deepEqual(backend.usage(), before.usage);
+  assert.deepEqual(backend.records("Submissions"), before.submissions);
+  vm.runInContext("Math.random = () => 0.999999", backend.sandbox);
+  const artist = backend.data("begin", { submissionId: submissionId(2), original: original(23), allowReuse: false,
+    artistOnly: true, excludedBaseHashes: [photoHash(1)] });
+  assert.equal(artist.base.id, two.getId());
+  assert.equal(artist.base.path, "assets/base-photos/two.jpg");
+  const mixed = backend.data("begin", { submissionId: submissionId(3), original: original(24), allowReuse: false, artistOnly: false });
+  assert.equal(mixed.base.id, participant.originalId);
+  assert.equal(mixed.base.base64, jpeg(22).toString("base64"));
+});
+
+test("artist-only selection leaves Yes retention and No nonretention independent", () => {
+  for (const allowReuse of [true, false]) {
+    const backend = makeBackend(); backend.setup(); backend.seed(1); backend.seed(2); backend.refresh();
+    const begun = backend.data("begin", { submissionId: submissionId(1), original: original(22), allowReuse,
+      artistOnly: true, preferredBaseSha256: photoHash(1) });
+    const receipt = backend.data("complete", { ...backend.completePayload(begun), artistOnly: true });
+    assert.equal(receipt.saved, true);
+    assert.equal(receipt.originalRetained, allowReuse);
+    assert.equal(backend.records("Submissions")[0].allowReuse, allowReuse);
+    assert.equal(backend.folder("Participant").files.length, allowReuse ? 1 : 0);
+    const source = backend.records("Sources").find(row => row.sha256 === photoHash(22));
+    if (allowReuse) {
+      assert.equal(source.kind, "participant");
+      assert.equal(source.eligible, true);
+      const anotherVisitor = backend.data("begin", { submissionId: submissionId(2), original: original(23), allowReuse: false,
+        artistOnly: false, preferredBaseSha256: photoHash(22) });
+      assert.equal(anotherVisitor.base.id, begun.originalId, "an artist-only visitor's Yes original still joins other mixed draws");
+    } else {
+      assert.equal(source, undefined);
+      assert.equal(begun.originalId, "unretained:" + photoHash(22));
+    }
+    assert.equal(backend.data("bootstrap", { artistOnly: true }).participantCount, 0);
+    assert.equal(backend.data("bootstrap", { artistOnly: false }).participantCount, allowReuse ? 1 : 0);
+  }
+});
+
+test("artist-only re-pairing and completion alternatives cannot fall back to participant bases", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); const secondArtist = backend.seed(2); backend.refresh();
+  const participant = backend.begin(1, 22, true); backend.data("complete", backend.completePayload(participant));
+  const first = backend.data("begin", { submissionId: submissionId(2), original: original(23), allowReuse: false,
+    artistOnly: true, preferredBaseSha256: photoHash(1) });
+  const request = { ...backend.completePayload(first, 91), excludedBaseHashes: [photoHash(2)] };
+  const onlyArtists = backend.data("complete", { ...request, artistOnly: true });
+  assert.equal(onlyArtists.canRePair, false);
+  const row = backend.records("Submissions")[1];
+  const mixed = backend.data("complete", { ...request, artistOnly: false });
+  assert.equal(mixed.canRePair, true);
+  assert.equal(mixed.resultId, onlyArtists.resultId);
+  assert.deepEqual(backend.records("Submissions")[1], row);
+  const reuse = { submissionId: first.submissionId, token: first.token };
+  const none = backend.api("begin", { submissionId: submissionId(3), reuse, artistOnly: true, excludedBaseHashes: [photoHash(2)] });
+  assert.equal(none.error.code, "NO_ALTERNATIVE_BASE");
+  vm.runInContext("Math.random = () => 0.999999", backend.sandbox);
+  const next = backend.data("begin", { submissionId: submissionId(4), reuse, artistOnly: true });
+  assert.equal(next.base.id, secondArtist.getId());
+  assert.notEqual(next.base.id, participant.originalId);
+});
+
+test("participant pins survive artist-only mode changes on retries and same-base colour variants", () => {
+  const backend = makeBackend(); backend.setup(); backend.seed(1); backend.seed(2); backend.refresh();
+  const participant = backend.begin(1, 22, true); backend.data("complete", backend.completePayload(participant));
+  const request = { submissionId: submissionId(2), original: original(23), allowReuse: false,
+    artistOnly: false, preferredBaseSha256: photoHash(22) };
+  const begun = backend.data("begin", request);
+  assert.equal(begun.base.id, participant.originalId);
+  const history = [photoHash(1), photoHash(2), photoHash(22)];
+  const changed = { ...request, artistOnly: true, excludedBaseHashes: history };
+  assert.deepEqual(backend.data("begin", changed), begun);
+  delete changed.preferredBaseSha256;
+  assert.deepEqual(backend.data("begin", changed), begun);
+  backend.data("complete", { ...backend.completePayload(begun, 91), artistOnly: true });
+  const variantRequest = { submissionId: submissionId(3), reuse: { submissionId: begun.submissionId, token: begun.token, sameBase: true },
+    artistOnly: true, excludedBaseHashes: history };
+  const variant = backend.data("begin", variantRequest);
+  assert.equal(variant.base.id, begun.base.id);
+  assert.equal(variant.base.sha256, begun.base.sha256);
+  assert.deepEqual(backend.data("begin", { ...variantRequest, artistOnly: false, excludedBaseHashes: [] }), variant);
+  const result = backend.completePayload(variant, 92); result.settings.monochrome = true;
+  assert.equal(backend.data("complete", { ...result, artistOnly: true, excludedBaseHashes: history }).canRePair, false);
+  assert.equal(backend.records("Submissions")[1].allowReuse, false);
+  assert.equal(backend.records("Submissions")[2].allowReuse, false);
+  assert.equal(backend.folder("Participant").files.length, 1, "no second original is saved by changing pool modes");
+});
+
+test("artist-only selection remains uniform per unique artist hash with participant sources present", () => {
+  const backend = makeBackend(); backend.setup();
+  const artists = [backend.seed(1), backend.seed(2), backend.seed(3)]; backend.refresh();
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: artists.map((file, index) => assetFor(backend, file.getId(), `artist-${index + 1}.jpg`)) });
+  const participant = backend.begin(1, 22, true); backend.data("complete", backend.completePayload(participant));
+  const previews = [], pairings = [];
+  for (let index = 0; index < artists.length; index++) {
+    vm.runInContext(`Math.random = () => ${(index + 0.5) / artists.length}`, backend.sandbox);
+    const status = backend.data("bootstrap", { artistOnly: true });
+    assert.equal(status.totalEligible, 3);
+    assert.equal(status.artistCount, 3);
+    assert.equal(status.participantCount, 0);
+    previews.push(status.previewBase.id);
+    const selected = backend.data("begin", { submissionId: submissionId(index + 2), original: original(index + 30),
+      allowReuse: false, artistOnly: true });
+    pairings.push(selected.base.id);
+    assert.ok(selected.base.path);
+    assert.equal(selected.base.base64, undefined);
+  }
+  const expected = artists.map(file => file.getId());
+  assert.deepEqual(previews, expected);
+  assert.deepEqual(pairings, expected);
+  for (let index = 0; index < 2; index++) {
+    vm.runInContext(`Math.random = () => ${(index + 0.5) / 2}`, backend.sandbox);
+    assert.equal(backend.data("bootstrap", { artistOnly: true, excludedBaseHashes: [photoHash(2)] }).previewBase.id,
+      artists[index * 2].getId());
+  }
+  vm.runInContext("Math.random = () => 0.999999", backend.sandbox);
+  assert.equal(backend.data("bootstrap", { artistOnly: false }).previewBase.id, participant.originalId);
 });
 
 test("retrying the same upload and archive operation creates no extra copies", () => {

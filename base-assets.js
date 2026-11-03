@@ -155,13 +155,17 @@ const ExposureBaseAssets = (() => {
     } finally { clearTimeout(timer); }
   }
 
-  async function chooseBase(originalHash) {
+  async function chooseBase(originalHash, excludedBaseHashes = []) {
     if (typeof originalHash !== "string" || !/^[0-9a-f]{64}$/.test(originalHash)) {
       throw new Error("The uploaded photograph's fingerprint is invalid.");
     }
+    if (!Array.isArray(excludedBaseHashes) || [...excludedBaseHashes].some(hash => typeof hash !== "string" || !/^[0-9a-f]{64}$/.test(hash))) {
+      throw new Error("The uploaded photograph's fingerprint is invalid.");
+    }
+    const excluded = new Set([originalHash, ...excludedBaseHashes]);
     if (!catalogPromise) catalogPromise = readCatalog().catch(error => { catalogPromise = null; throw error; });
-    const photos = (await catalogPromise).filter(photo => photo.sha256 !== originalHash);
-    if (!photos.length) throw new Error("There is no different website photograph available for this pairing.");
+    const photos = (await catalogPromise).filter(photo => !excluded.has(photo.sha256));
+    if (!photos.length) throw Object.assign(new Error("There is no different website photograph available for this pairing."), { code: "NO_LOCAL_BASE" });
     return Object.freeze({ ...photos[Math.floor(Math.random() * photos.length)] });
   }
 
