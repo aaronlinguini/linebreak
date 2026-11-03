@@ -62,7 +62,7 @@ test("the real Part 2 notes retain their gallery positions rather than counting 
 
 test("all main reflections are available without images, carousel controls, or hidden slides", () => {
   const html = renderReflections(realPages());
-  for (const heading of ["Forming a Sketch with Temporally Ambiguous Photos", "Before processing the photos", "After processing the photos", "Apparitions"]) {
+  for (const heading of ["Sketching with Temporally Ambiguous Photos", "Before processing the photos", "After processing the photos", "Apparitions"]) {
     assert.ok(html.includes(heading), `${heading}: main reflection included`);
   }
   assert.doesNotMatch(html, /<(?:img|picture|figure|button)\b/i);
