@@ -15,7 +15,7 @@
         let clean = attributes.replace(/\s+aria-current\s*=\s*(["']).*?\1/gi, "");
         if (/\bdata-reflections-link\b/.test(clean) && /^experiment-(?:1|2-part-[12]|3)\.html$/.test(page)) {
           clean = clean.replace(/\bhref\s*=\s*(["'])(.*?)\1/i, `href="reflections.html#${page.replace(/\.html$/, "")}"`);
-          label = "Read this experiment’s reflections — text-only view";
+          label = "Read this experiment’s reflections in text-only view";
         }
         const target = clean.match(/\bhref\s*=\s*(["'])(.*?)\1/i)?.[2];
         return `<a${clean}${target === page ? ' aria-current="page"' : ""}>${label}</a>`;
