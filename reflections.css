@@ -33,8 +33,8 @@
 }
 
 .home-qr {
-  margin: 0;
-  padding-bottom: 48px;
+  grid-column: 1 / -1;
+  margin: 8px 0 0;
   text-align: center;
 }
 
