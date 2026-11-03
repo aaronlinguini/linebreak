@@ -51,3 +51,44 @@ if (gallery) {
     controls.hidden = false;
   }
 }
+
+(() => {
+  function initializeReflectionReference() {
+    const layout = document.querySelector('.experiment-layout');
+    const gallery = layout?.querySelector(':scope > .experiment-gallery');
+    const introduction = layout?.querySelector(':scope > .experiment-introduction');
+    const heading = document.querySelector('.site-header > h1');
+    const reference = document.querySelector('[data-reflections-reference]');
+    if (!gallery || !introduction || !heading || !reference) return false;
+
+    const titleRow = document.createElement('div');
+    titleRow.className = 'experiment-title-row';
+    heading.before(titleRow);
+    titleRow.append(heading);
+    let frame = 0;
+
+    function positionReference() {
+      frame = 0;
+      const stacked = introduction.getBoundingClientRect().top >= gallery.getBoundingClientRect().bottom - 1;
+      const destination = stacked ? introduction : titleRow;
+      if (reference.parentElement === destination) return;
+      const focused = reference.contains(document.activeElement) ? document.activeElement : null;
+      if (stacked) introduction.prepend(reference);
+      else titleRow.append(reference);
+      focused?.focus({ preventScroll: true });
+    }
+
+    function schedulePosition() {
+      if (!frame) frame = requestAnimationFrame(positionReference);
+    }
+
+    const observer = new ResizeObserver(schedulePosition);
+    for (const element of [layout, gallery, introduction]) observer.observe(element);
+    schedulePosition();
+    return true;
+  }
+
+  if (!initializeReflectionReference()) {
+    document.addEventListener('site-header-ready', initializeReflectionReference, { once: true });
+  }
+})();

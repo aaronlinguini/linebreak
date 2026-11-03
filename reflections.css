@@ -1,3 +1,7 @@
+.image-description-note {
+  color: var(--muted);
+}
+
 .home-panel > nav > .home-project-action {
   padding-inline-start: 0;
   text-align: center;

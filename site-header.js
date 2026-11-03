@@ -13,12 +13,17 @@
       if (!showExperiments) return "";
       return nav.replace(/<a\b([^>]*)>([\s\S]*?)<\/a\s*>/gi, (_, attributes, label) => {
         let clean = attributes.replace(/\s+aria-current\s*=\s*(["']).*?\1/gi, "");
-        if (/\bdata-reflections-link\b/.test(clean) && /^experiment-(?:1|2-part-[12]|3)\.html$/.test(page)) {
+        const reflectionReference = /\bdata-reflections-link\b/.test(clean) && /^experiment-(?:1|2-part-[12]|3)\.html$/.test(page);
+        if (reflectionReference && page !== "experiment-2-part-2.html") return "";
+        if (reflectionReference) {
           clean = clean.replace(/\bhref\s*=\s*(["'])(.*?)\1/i, `href="reflections.html#${page.replace(/\.html$/, "")}"`);
-          label = "Read this experiment’s reflections in text-only view";
+          label = "here, in the text-only view";
         }
         const target = clean.match(/\bhref\s*=\s*(["'])(.*?)\1/i)?.[2];
-        return `<a${clean}${target === page ? ' aria-current="page"' : ""}>${label}</a>`;
+        const link = `<a${clean}${target === page ? ' aria-current="page"' : ""}>${label}</a>`;
+        if (!reflectionReference) return link;
+        const content = `Some reflections on this page will only appear only below particular image groups, so you need to move through the gallery in order to access them. You may also read them ${link}.`;
+        return `<span class="reflection-view-reference" data-reflections-reference>${content}</span>`;
       });
     });
     if (page === "index.html") {
@@ -54,6 +59,7 @@
       if (element.tagName === "META") element.setAttribute("content", name);
       else element.textContent = name;
     }
+    document.dispatchEvent(new CustomEvent("site-header-ready"));
   }
 
   loadHeader().catch(error => console.error(error));

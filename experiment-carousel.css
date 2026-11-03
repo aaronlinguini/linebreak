@@ -52,11 +52,48 @@
   --carousel-width: calc(var(--carousel-height) * 0.70);
 }
 
-.page-nav .reflection-view-link {
+.page-nav > .reflection-view-reference {
   flex-basis: 100%;
-  justify-content: flex-end;
-  text-align: right;
+  margin-inline-start: auto;
+}
+
+.experiment-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px 32px;
+}
+
+.experiment-title-row > h1 {
+  flex: none;
+}
+
+.reflection-view-reference {
+  display: block;
+  min-width: 0;
+  max-width: 70ch;
   color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: right;
+}
+
+.reflection-view-reference .reflection-view-link {
+  display: inline;
+  color: inherit;
+  font-size: inherit;
+  text-underline-offset: 5px;
+}
+
+.experiment-title-row > .reflection-view-reference {
+  flex: 1 1 0;
+  margin-inline-start: auto;
+}
+
+.experiment-introduction > .reflection-view-reference {
+  max-width: none;
+  margin-bottom: 12px;
+  text-align: left;
 }
 
 .experiment-memory-two {
