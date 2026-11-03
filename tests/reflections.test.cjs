@@ -50,14 +50,14 @@ test("the reading view follows all four experiment pages in their existing order
 });
 
 test("the real Part 2 notes retain their gallery positions rather than counting individual photos", () => {
-  const html = renderReflections(realPages());
+  const pages = realPages();
+  const html = renderReflections(pages);
   assert.deepEqual([...html.matchAll(/<h3\b[^>]*>\s*Image group (\d+\/\d+)\s*<\/h3>/g)].map(match => match[1]),
     ["1/8", "2/8", "4/8", "7/8", "8/8"]);
-  assert.ok(html.includes("Initially, I thought this was a landscape oriented photo"));
-  assert.ok(html.includes("In the process of deciphering these photos for myself"));
-  assert.ok(html.includes("the least personal, I guess?"));
-  assert.ok(html.includes("<strong>Some of the more complex photos,</strong> particularly my <strong>double exposures</strong>"));
-  assert.ok(html.includes("And then the blank photos, things that aren’t visible at all"));
+  const notes = [...pages.get("experiment-2-part-2.html")
+    .matchAll(/<div\b[^>]*class="experiment-photo-note"[^>]*>([\s\S]*?)<\/div>/g)];
+  assert.equal(notes.length, 5);
+  for (const [, note] of notes) assert.ok(html.includes(note.trim()));
 });
 
 test("all main reflections are available without images, carousel controls, or hidden slides", () => {
