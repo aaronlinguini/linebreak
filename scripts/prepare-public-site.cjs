@@ -7,6 +7,7 @@ const { createHash } = require("node:crypto");
 const { spawnSync } = require("node:child_process");
 const { parse } = require("./vendor/es-module-lexer/lexer.cjs");
 const { renderSiteHeader, siteNameFromTemplate } = require("../site-header.js");
+const { embedReflections } = require("../reflections.js");
 
 const ORIGINAL_PUBLIC_FILES = Object.freeze([
   "index.html", "styles.css", "scripts.js", "project-config.js",
@@ -28,13 +29,14 @@ const HEIC_PUBLIC_FILES = Object.freeze([
 const PREBUILT_PUBLIC_FILES = Object.freeze([...STATIC_PUBLIC_FILES, ...HEIC_PUBLIC_FILES]);
 const MARKED_PUBLIC_FILES = Object.freeze([...PREBUILT_PUBLIC_FILES, ".nojekyll"]);
 const GALLERY_FILES = Object.freeze(["experiment-carousel.css", "experiment-carousel.js"]);
+const REFLECTION_FILES = Object.freeze(["reflections.css", "reflections.js"]);
 const OWNER_STUDIO_FILES = Object.freeze([
   "local-test.js", "local-test.css", "film-renderer.js", "tone-adjustments.js", "owner-studio.js"
 ]);
 const HEADER_TEMPLATE = "includes/site-header.html";
 const HEADER_SCRIPT = "site-header.js";
 const NON_HTML_PUBLIC_FILES = Object.freeze([
-  ...MARKED_PUBLIC_FILES.filter(name => !name.endsWith(".html")), ...GALLERY_FILES, HEADER_SCRIPT, ...OWNER_STUDIO_FILES
+  ...MARKED_PUBLIC_FILES.filter(name => !name.endsWith(".html")), ...GALLERY_FILES, ...REFLECTION_FILES, HEADER_SCRIPT, ...OWNER_STUDIO_FILES
 ]);
 function publicSourceFiles(root) {
   const pages = fs.readdirSync(root).filter(name => !name.startsWith(".") && /\.html$/i.test(name) && name !== "local-test.html").sort();
@@ -291,6 +293,7 @@ function validatePreviousOutput(destination) {
   });
   const galleryCoreFiles = NON_HTML_PUBLIC_FILES.filter(name =>
     (name !== HEADER_SCRIPT || expectsHeaderScript || entries.includes(HEADER_SCRIPT))
+    && (!REFLECTION_FILES.includes(name) || pages.includes("reflections.html"))
     && (!OWNER_STUDIO_FILES.includes(name) || expectsOwnerStudio));
   const coreFiles = hasGallery ? [...galleryCoreFiles, ...pages] : entries.includes(".nojekyll") ? MARKED_PUBLIC_FILES
     : entries.includes("heic-input.js") || entries.includes("vendor") ? PREBUILT_PUBLIC_FILES : STATIC_PUBLIC_FILES;
@@ -374,8 +377,13 @@ function preparePublicSite(root = path.resolve(__dirname, "..")) {
   const publicFiles = new Set(contents.keys());
   const template = readRegularFile(root, HEADER_TEMPLATE).toString("utf8");
   validateHtml(template, HEADER_TEMPLATE, publicFiles);
+  const sourcePages = new Map([...contents].filter(([page]) => page.endsWith(".html"))
+    .map(([page, content]) => [page, content.toString("utf8")]));
   for (const [name, bytes] of contents) {
-    if (name.endsWith(".html")) contents.set(name, Buffer.from(embedSiteHeader(bytes.toString("utf8"), name, template)));
+    if (name.endsWith(".html")) {
+      const html = embedReflections(bytes.toString("utf8"), sourcePages);
+      contents.set(name, Buffer.from(embedSiteHeader(html, name, template)));
+    }
   }
   for (const [name, bytes] of contents) {
     if (name.endsWith(".html")) validateHtml(bytes.toString("utf8"), name, publicFiles);

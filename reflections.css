@@ -1,0 +1,53 @@
+.reflections-page main {
+  max-width: 70ch;
+  margin-inline: auto;
+  padding-block: 28px 72px;
+  font-size: 15px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+.reflections-page a:not(.skip-link) {
+  color: var(--foreground);
+  text-underline-offset: 5px;
+}
+
+.reflections-page h1,
+.reflections-page h2,
+.reflections-page h3 {
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.reflections-page h2 {
+  margin: 0 0 12px;
+  font-size: 20px;
+}
+
+.reflections-page h3 {
+  margin: 32px 0 16px;
+  font-size: 17px;
+}
+
+.reflections-contents {
+  margin-block: 28px 48px;
+}
+
+.reflections-contents ul {
+  padding-left: 24px;
+}
+
+.reflections-contents a {
+  display: inline-block;
+  padding-block: 8px;
+}
+
+.reflection-experiment {
+  margin-top: 56px;
+  padding-top: 28px;
+  border-top: 1px solid #444;
+}
+
+.reflections-page [id] {
+  scroll-margin-top: 24px;
+}

@@ -271,6 +271,8 @@ Save the template and refresh each Live Server page to see the changes. During p
 
 ### Editing experiment content
 
+**Read all reflections** opens `reflections.html`, a continuous text view linked from the home page and experiment navigation. Edit reflections in the experiment HTML as usual. The text view copies the main reflections and nonempty image notes automatically, preserving paragraphs and emphasis. Image-group labels follow the gallery's numbered positions, including groups containing several photos; they do not count individual images. Publication embeds the complete text in the page, so reading it does not require JavaScript. Live Server uses `reflections.js` to load the same content locally. Its layout is in `reflections.css`.
+
 Open `index.html` with Live Server to work on the home page and follow its links to the experiment pages. To fill an experiment page:
 
 Memory has separate Part 1 and Part 2 links under its home-page label. Edit each part in its matching HTML file; both use photographs from `images/experiment-2/`. The local parts replace `experiment-2.html`; earlier publication records below retain that release's filename.

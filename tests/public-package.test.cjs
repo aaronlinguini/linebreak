@@ -9,6 +9,7 @@ const { createHash } = require("node:crypto");
 const { spawnSync } = require("node:child_process");
 const { PUBLIC_FILES, OWNER_STUDIO_FILES, OUTPUT_DIRECTORY, preparePublicSite } = require("../scripts/prepare-public-site.cjs");
 const { ASSET_ROOT, buildOwnerStudio } = require("../scripts/build-owner-studio.cjs");
+const { REFLECTION_PAGES, embedReflections } = require("../reflections.js");
 
 const project = path.resolve(__dirname, "..");
 const catalogueFile = "assets/base-photos.json";
@@ -17,6 +18,7 @@ const galleryFiles = ["experiment-carousel.css", "experiment-carousel.js"];
 const memoryPartFiles = ["experiment-2-part-1.html", "experiment-2-part-2.html"];
 const headerTemplate = "includes/site-header.html";
 const headerScript = "site-header.js";
+const reflectionFiles = ["reflections.css", "reflections.js", "reflections.html"];
 const heicFiles = ["heic-input.js", "vendor/heic-to/heic-to.js", "vendor/heic-to/LICENSE",
   "vendor/heic-to/NOTICE.txt", "vendor/heic-to/SOURCES.tar.gz"];
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1]);
@@ -68,7 +70,7 @@ function restoreSingleMemoryPage(destination) {
 }
 
 function removeGalleryOutput(destination) {
-  for (const name of [...galleryFiles, galleryCatalogueFile, headerScript, ...OWNER_STUDIO_FILES, "images"]) {
+  for (const name of [...galleryFiles, ...reflectionFiles, galleryCatalogueFile, headerScript, ...OWNER_STUDIO_FILES, "images"]) {
     fs.rmSync(path.join(destination, name), { recursive: true, force: true });
   }
   restoreSingleMemoryPage(destination);
@@ -76,6 +78,7 @@ function removeGalleryOutput(destination) {
 
 function oldExpectedFiles(root) {
   return [...expectedFiles(root).filter(name => !galleryFiles.includes(name) && !memoryPartFiles.includes(name)
+    && !reflectionFiles.includes(name)
     && name !== galleryCatalogueFile && name !== headerScript && !OWNER_STUDIO_FILES.includes(name)
     && !name.startsWith("images/")), "experiment-2.html"].sort();
 }
@@ -121,6 +124,10 @@ function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+function reflectionPages(root) {
+  return new Map(REFLECTION_PAGES.map(page => [page, fs.readFileSync(path.join(root, page), "utf8")]));
+}
+
 function assetReferences(files, page) {
   const html = files[page].toString("utf8").replace(/<!--[\s\S]*?-->/g, "");
   return [...html.matchAll(/\b(?:src|href)\s*=\s*["']([^"']+)["']/gi)]
@@ -161,7 +168,7 @@ function withoutGeneratedHeader(bytes) {
 
 test("publication contains site code, selected artist photos and referenced gallery images while excluding private support files", (t) => {
   assert.deepEqual([...PUBLIC_FILES].sort(), [
-    "styles.css", "scripts.js", "project-config.js", headerScript,
+    "styles.css", "scripts.js", "project-config.js", headerScript, "reflections.css", "reflections.js",
     "archive-workflow.js", "drive-storage.js", "drive-bridge.js", "artist-import.js", "artist-import.css",
     ...fs.readdirSync(project).filter(name => !name.startsWith(".") && /\.html$/i.test(name) && name !== "local-test.html"),
     "base-assets.js", catalogueFile,
@@ -191,7 +198,8 @@ test("publication contains site code, selected artist photos and referenced gall
     if (name === galleryCatalogueFile) continue;
     const source = fs.readFileSync(path.join(root, name));
     if (name.endsWith(".html") || name === "scripts.js" || name === "heic-input.js") {
-      assert.equal(withoutGeneratedHeader(actual), withoutGeneratedHeader(source), `${name}: only shared headers, metadata, and cache labels may change`);
+      assert.equal(withoutGeneratedHeader(actual), withoutGeneratedHeader(embedReflections(source.toString("utf8"), reflectionPages(root))),
+        `${name}: only shared headers, reflections, metadata, and cache labels may change`);
     } else assert.deepEqual(actual, source, `${name}: contents must be copied unchanged`);
   }
   assert.equal(fs.existsSync(path.join(destination, "images", "experiment-1", "additional-gallery.jpg")), false);
@@ -215,6 +223,39 @@ test("content labels are deterministic and preparation never edits the source fi
   for (const [name, bytes] of Object.entries(originals)) {
     assert.deepEqual(fs.readFileSync(path.join(root, name)), bytes, `${name}: source must remain editable and unchanged`);
   }
+});
+
+test("publication includes every reflection without scripts and rebuilds it from edited gallery prose", (t) => {
+  const root = fixture(t);
+  const destination = preparePublicSite(root);
+  const filename = path.join(destination, "reflections.html");
+  const before = fs.readFileSync(filename, "utf8");
+  assert.match(before, /data-reflections-rendered/);
+  assert.match(before, /Image group 7\/8/);
+  assert.match(before, /<strong>Some of the more complex photos,<\/strong>/);
+  assert.doesNotMatch(before, /<(?:img|figure|button)\b|\bdata-carousel\b/);
+  const source = path.join(root, "experiment-2-part-2.html");
+  fs.writeFileSync(source, fs.readFileSync(source, "utf8").replace("Initially, I thought", "An edited reflection: I thought"));
+  preparePublicSite(root);
+  const after = fs.readFileSync(filename, "utf8");
+  assert.match(after, /An edited reflection: I thought/);
+  assert.doesNotMatch(after, /Initially, I thought/);
+});
+
+test("a complete gallery from before the text view upgrades while missing current text-view assets are rejected", (t) => {
+  const root = fixture(t);
+  const destination = preparePublicSite(root);
+  fs.unlinkSync(path.join(destination, "reflections.js"));
+  const incomplete = snapshot(root);
+  assert.throws(() => preparePublicSite(root), /missing required files|unexpected files/);
+  assert.deepEqual(snapshot(root), incomplete);
+  for (const name of ["reflections.css", "reflections.html"]) fs.unlinkSync(path.join(destination, name));
+  const filename = path.join(destination, galleryCatalogueFile);
+  const manifest = JSON.parse(fs.readFileSync(filename));
+  manifest.pages = manifest.pages.filter(page => page !== "reflections.html");
+  fs.writeFileSync(filename, JSON.stringify(manifest));
+  preparePublicSite(root);
+  assert.deepEqual(Object.keys(snapshot(root)).sort(), expectedFiles(root));
 });
 
 test("private owner-template labels match the actual public assets without publishing either owner page", (t) => {
@@ -256,7 +297,7 @@ test("editing the one shared header updates static page headers, current navigat
     assert.ok(html.includes(`data-site-name>${name}</a>`), `${page}: shared brand name`);
     assert.match(html, /<a\b[^>]*href="\.\/"[^>]*\bdata-site-name/, `${page}: clean homepage address`);
     assert.match(html, /class="site-divider" data-divider-note="changed"/, `${page}: shared divider markup`);
-    const main = source.match(/<main\b[\s\S]*?<\/main>/)?.[0];
+    const main = embedReflections(source, reflectionPages(root)).match(/<main\b[\s\S]*?<\/main>/)?.[0];
     if (main) assert.ok(html.includes(main), `${page}: page content must remain unchanged`);
     const navigation = html.match(/<nav\b[^>]*\bdata-experiment-navigation\b[^>]*>[\s\S]*?<\/nav>/)?.[0];
     if (source.includes('data-site-header="experiments"')) {
