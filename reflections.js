@@ -94,6 +94,10 @@
       return [page, await response.text()];
     }));
     slot.innerHTML = renderReflections(new Map(pages));
+    let id;
+    try { id = decodeURIComponent(location.hash.slice(1)); }
+    catch { return; }
+    if (id) document.getElementById(id)?.scrollIntoView({ block: "start" });
   }
   loadReflections().catch(error => {
     slot.textContent = "Reflections could not be loaded. Please reload this page.";
