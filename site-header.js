@@ -22,7 +22,7 @@
         const target = clean.match(/\bhref\s*=\s*(["'])(.*?)\1/i)?.[2];
         const link = `<a${clean}${target === page ? ' aria-current="page"' : ""}>${label}</a>`;
         if (!reflectionReference) return link;
-        const content = `Some reflections on this page will only appear only below particular image groups, so you need to move through the gallery in order to access them. You may also read them ${link}.`;
+        const content = `Some reflections on this page will only appear below specific images, so you will need to move through the gallery in order to access them. You may also read them ${link}.`;
         return `<span class="reflection-view-reference" data-reflections-reference>${content}</span>`;
       });
     });
