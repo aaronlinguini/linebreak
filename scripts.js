@@ -407,7 +407,7 @@ function initializeExposureStudio() {
     exposureControls: byId("exposure-controls"), uploadInstructions: byId("upload-instructions"),
     outputOptions: byId("output-options"), monochrome: byId("visitor-monochrome"),
     colour: byId("visitor-colour"), repeatActions: byId("repeat-actions"),
-    resultActions: byId("result-actions"), allowReuse: byId("allow-reuse"), declineReuse: byId("decline-reuse"), artistOnly: byId("artist-only"),
+    resultActions: byId("result-actions"), allowReuse: byId("allow-reuse"), declineReuse: byId("decline-reuse"), artistOnly: byId("artist-only"), sharedLibrary: byId("shared-library"),
     newPairing: byId("new-pairing-button"), reset: byId("reset-button"),
     participantInput: byId("participant-input"), cameraInput: byId("participant-camera-input"),
     cameraPicker: byId("camera-picker"), cameraSeparator: byId("camera-separator"),
@@ -433,6 +433,7 @@ function initializeExposureStudio() {
   ui.allowReuse.checked = false;
   ui.declineReuse.checked = false;
   ui.artistOnly.checked = false;
+  ui.sharedLibrary.checked = true;
   const { loadPhoto, releasePhoto, develop } = createExposureProcessor();
   const contributions = createExposureContributionHistory();
   const storage = new GoogleDriveStorage(EXPOSURE_CONFIG);
@@ -556,6 +557,7 @@ function initializeExposureStudio() {
     ui.allowReuse.disabled = state.working || selected || pending;
     ui.declineReuse.disabled = ui.allowReuse.disabled;
     ui.artistOnly.disabled = ui.allowReuse.disabled;
+    ui.sharedLibrary.disabled = ui.allowReuse.disabled;
     ui.download.hidden = !state.hasResult;
     ui.rotate.hidden = !state.hasResult;
     ui.download.disabled = !imageReady || state.working || unsaved;
@@ -865,15 +867,21 @@ function initializeExposureStudio() {
       refreshActions();
     });
   }
-  ui.artistOnly.addEventListener("change", () => {
-    if (ui.artistOnly.disabled) {
-      if (state.selectionChoices) ui.artistOnly.checked = state.selectionChoices.artistOnly;
-      return;
-    }
-    state.previewBase = null;
-    state.previewArtistOnly = null;
-    void connectArchive();
-  });
+  for (const input of [ui.artistOnly, ui.sharedLibrary]) {
+    input.addEventListener("change", () => {
+      if (input.disabled) {
+        if (state.selectionChoices) {
+          ui.artistOnly.checked = state.selectionChoices.artistOnly;
+          ui.sharedLibrary.checked = !state.selectionChoices.artistOnly;
+        }
+        return;
+      }
+      if (!input.checked) return;
+      state.previewBase = null;
+      state.previewArtistOnly = null;
+      void connectArchive();
+    });
+  }
   for (const [input, monochrome] of [[ui.monochrome, true], [ui.colour, false]]) {
     input.addEventListener("change", async () => {
       if (!input.checked) return;

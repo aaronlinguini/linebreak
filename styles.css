@@ -415,14 +415,27 @@ content: ""; creates the pseudo-element with empty content. It's there purely fo
 }
 
 .base-pool-option {
-  grid-column: 1 / -1;
+  grid-column: 2;
   grid-row: 2;
-  font-size: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.base-pool-choice {
+  display: flex;
+  flex: 1 1 230px;
+  min-width: 0;
 }
 
 .exposure-buttons {
   grid-column: 1;
-  grid-row: 3;
+  grid-row: 2;
+  min-width: 0;
 }
 
 .image-toolbar {
@@ -474,7 +487,7 @@ content: ""; creates the pseudo-element with empty content. It's there purely fo
 }
 
 .library-option {
-  grid-column: 2;
+  grid-column: 1 / -1;
   grid-row: 3;
   min-width: 0;
   margin: 0;
@@ -528,7 +541,8 @@ content: ""; creates the pseudo-element with empty content. It's there purely fo
   border: 0;
 }
 
-.upload-label {
+.upload-label,
+.pool-choice-label {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -540,9 +554,21 @@ content: ""; creates the pseudo-element with empty content. It's there purely fo
   transition: border-color .15s, background .15s;
 }
 
-.upload-label:hover {
+.upload-label:hover,
+.pool-choice-label:hover {
   border-color: var(--foreground);
   background: #121212;
+}
+
+.pool-choice-label {
+  width: 100%;
+  color: var(--muted);
+}
+
+.base-pool-choice input:checked + label {
+  border-color: var(--foreground);
+  background: #121212;
+  color: var(--foreground);
 }
 
 .file-input:focus-visible + label {
@@ -693,6 +719,7 @@ content: ""; creates the pseudo-element with empty content. It's there purely fo
   }
 
   .exposure-buttons,
+  .base-pool-option,
   .library-option {
     grid-column: auto;
     grid-row: auto;

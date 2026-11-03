@@ -30,7 +30,7 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
     "upload-label", "camera-label", "download-button", "rotate-button", "retry-button", "status", "error",
     "busy-indicator", "exposure-controls", "upload-instructions", "output-options", "visitor-monochrome", "visitor-colour",
     "camera-picker", "camera-separator", "camera-instructions", "picker-singular", "picker-plural",
-    "upload-again-note", "artist-only"];
+    "upload-again-note", "artist-only", "shared-library"];
   const handlers = new Map();
   const windowHandlers = new Map();
   const elements = new Map(ids.map((id) => [id, {
@@ -252,7 +252,8 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
     },
     chooseArtistOnly(checked) {
       elements.get("artist-only").checked = checked;
-      return handlers.get("artist-only:change")();
+      elements.get("shared-library").checked = !checked;
+      return handlers.get(`${checked ? "artist-only" : "shared-library"}:change`)();
     },
     toggleMonochrome(checked) {
       elements.get("visitor-monochrome").checked = checked;
