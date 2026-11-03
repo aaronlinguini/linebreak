@@ -428,7 +428,7 @@ content: ""; creates the pseudo-element with empty content. It's there purely fo
 
 .base-pool-choice {
   display: flex;
-  flex: 1 1 230px;
+  flex: 0 1 auto;
   min-width: 0;
 }
 
@@ -554,21 +554,28 @@ content: ""; creates the pseudo-element with empty content. It's there purely fo
   transition: border-color .15s, background .15s;
 }
 
-.upload-label:hover,
-.pool-choice-label:hover {
+.upload-label:hover {
   border-color: var(--foreground);
   background: #121212;
 }
 
 .pool-choice-label {
-  width: 100%;
+  min-height: 32px;
+  padding: 5px 9px;
+  border-color: #333;
   color: var(--muted);
+  font-size: 11px;
+}
+
+.pool-choice-label:hover {
+  border-color: #777;
+  background: #101010;
 }
 
 .base-pool-choice input:checked + label {
-  border-color: var(--foreground);
-  background: #121212;
-  color: var(--foreground);
+  border-color: #777;
+  background: #101010;
+  color: #aaa;
 }
 
 .file-input:focus-visible + label {
