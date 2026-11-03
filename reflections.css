@@ -1,3 +1,17 @@
+.home-panel > nav > .home-project-action {
+  padding-inline-start: 0;
+  text-align: center;
+}
+
+.home-panel .home-project-action a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #444;
+  padding: 8px 12px;
+  text-decoration: none;
+}
+
 .home-reflections-link {
   display: flex;
   align-items: center;
