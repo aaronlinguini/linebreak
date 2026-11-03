@@ -25,16 +25,6 @@
     <main id="workspace" class="workspace" aria-busy="false">
       <div id="exposure-controls" class="exposure-controls">
         <p id="upload-instructions" class="upload-instructions">Use the <span id="picker-singular">button</span><span id="picker-plural" hidden>buttons</span> below to select a photo from your library<span id="camera-instructions" hidden> or take a photo with your camera</span>. The photo that you provide will be combined with another image to create a double exposure. You may choose whether you want your upload to be added to the library of base photos upon which new double exposures can be made.</p>
-        <fieldset class="base-pool-option" aria-label="Base library">
-          <div class="file-picker base-pool-choice">
-            <input id="shared-library" class="file-input" type="radio" name="base-library" value="shared" checked>
-            <label class="pool-choice-label" for="shared-library">Pair my photo with the shared base library</label>
-          </div>
-          <div class="file-picker base-pool-choice">
-            <input id="artist-only" class="file-input" type="radio" name="base-library" value="artist">
-            <label class="pool-choice-label" for="artist-only">Only pair my photo with Aaron's original base library</label>
-          </div>
-        </fieldset>
         <fieldset class="library-option" aria-describedby="library-note">
           <legend class="library-question">Add your photo to the shared library for future double exposures?</legend>
           <div class="library-choices">
@@ -48,6 +38,16 @@
             </label>
           </div>
           <p id="library-note" class="library-note">Choose Yes or No before selecting or taking a photo.</p>
+        </fieldset>
+        <fieldset class="base-pool-option" aria-label="Base library">
+          <div class="file-picker base-pool-choice">
+            <input id="artist-only" class="file-input" type="radio" name="base-library" value="artist">
+            <label class="pool-choice-label" for="artist-only">Only pair my photo with Aaron's original base library</label>
+          </div>
+          <div class="file-picker base-pool-choice">
+            <input id="shared-library" class="file-input" type="radio" name="base-library" value="shared" checked>
+            <label class="pool-choice-label" for="shared-library">Use full shared library</label>
+          </div>
         </fieldset>
 
         <div class="exposure-buttons">
