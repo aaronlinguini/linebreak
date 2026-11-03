@@ -1,3 +1,8 @@
+.home-reflections-link {
+  margin: 16px 0 0;
+  padding-left: 16px;
+}
+
 .reflections-page main {
   max-width: 70ch;
   margin-inline: auto;

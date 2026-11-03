@@ -52,6 +52,10 @@
   --carousel-width: calc(var(--carousel-height) * 0.70);
 }
 
+.page-nav .reflection-view-link {
+  flex-basis: 100%;
+}
+
 .experiment-memory-two {
   --comparison-gap: 16px;
   --photo-note-inset: 8px;

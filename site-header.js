@@ -11,10 +11,14 @@
     siteNameFromTemplate(template);
     let html = template.replace(/<nav\b(?=[^>]*\bdata-experiment-navigation\b)[^>]*>[\s\S]*?<\/nav\s*>/gi, (nav) => {
       if (!showExperiments) return "";
-      return nav.replace(/<a\b([^>]*)>/gi, (_, attributes) => {
-        const target = attributes.match(/\bhref\s*=\s*(["'])(.*?)\1/i)?.[2];
-        const clean = attributes.replace(/\s+aria-current\s*=\s*(["']).*?\1/gi, "");
-        return `<a${clean}${target === page ? ' aria-current="page"' : ""}>`;
+      return nav.replace(/<a\b([^>]*)>([\s\S]*?)<\/a\s*>/gi, (_, attributes, label) => {
+        let clean = attributes.replace(/\s+aria-current\s*=\s*(["']).*?\1/gi, "");
+        if (/\bdata-reflections-link\b/.test(clean) && /^experiment-(?:1|2-part-[12]|3)\.html$/.test(page)) {
+          clean = clean.replace(/\bhref\s*=\s*(["'])(.*?)\1/i, `href="reflections.html#${page.replace(/\.html$/, "")}"`);
+          label = "Read this experiment’s reflections — text-only view";
+        }
+        const target = clean.match(/\bhref\s*=\s*(["'])(.*?)\1/i)?.[2];
+        return `<a${clean}${target === page ? ' aria-current="page"' : ""}>${label}</a>`;
       });
     });
     if (page === "index.html") {
