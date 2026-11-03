@@ -32,6 +32,26 @@
   flex: none;
 }
 
+.home-qr {
+  margin: 0;
+  padding-bottom: 48px;
+  text-align: center;
+}
+
+.home-qr figcaption {
+  margin-bottom: 16px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.home-qr img {
+  display: block;
+  width: 200px;
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
+}
+
 .reflections-page main {
   max-width: 70ch;
   margin-inline: auto;
