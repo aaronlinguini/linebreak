@@ -87,6 +87,18 @@
       return endpoint(this.config.googleScriptUrl) !== null;
     }
 
+    async studio(action, payload) {
+      this._assertActive();
+      if (!["status", "save"].includes(action) || !payload || typeof payload !== "object") {
+        throw storageError("INVALID_SUBMISSION", "The personal archive request is invalid.");
+      }
+      if (!this._source) {
+        try { await this._open(); }
+        catch (error) { this._disconnect(error); throw error; }
+      }
+      return this._request(action, payload);
+    }
+
     connect({ excludedBaseHashes = [], artistOnly = false } = {}) {
       let excluded;
       try {

@@ -1074,18 +1074,22 @@ test("Home links resolve and static pages do not start the archive", () => {
   const header = fs.readFileSync(path.join(root, "includes", "site-header.html"), "utf8");
   assert.match(home, /<a\b[^>]*href="double-exposure\.html"[^>]*>/i);
   assert.match(header, /<a\b[^>]*href="\.\/"[^>]*>\s*[^<\s]/i);
-  for (const page of ["", "index.html", "double-exposure.html", "experiment-1.html", "experiment-2-part-1.html", "experiment-2-part-2.html", "experiment-3.html"]) {
+  for (const page of ["", "index.html", "double-exposure.html", "studio.html", "experiment-1.html", "experiment-2-part-1.html", "experiment-2-part-2.html", "experiment-3.html"]) {
     const homeLink = header.match(/<a\b[^>]*href="([^"]+)"[^>]*\bdata-site-name/)[1];
     assert.equal(new URL(homeLink, `https://aaronlinguini.github.io/linebreak/${page}`).href,
       "https://aaronlinguini.github.io/linebreak/");
   }
   assert.match(tool, /<div\b[^>]*\bdata-site-header(?:\s|=|>)/i);
   assert.match(tool, /<script\b[^>]*src="site-header\.js"[^>]*defer/i);
+  const studio = fs.readFileSync(path.join(root, "studio.html"), "utf8");
+  assert.match(studio, /<div\b[^>]*\bdata-site-header(?:\s|=|>)/i);
+  assert.match(studio, /<script\b[^>]*src="site-header\.js"[^>]*defer/i);
+  assert.match(studio, /<body\b[^>]*\bdata-owner-studio="true"/i);
   for (const [, reference] of (home + header).replace(/<!--[\s\S]*?-->/g, "").matchAll(/<a\b[^>]*href="([^"#?]+\.html)(?:[?#][^"]*)?"/gi)) {
     assert.ok(fs.existsSync(path.join(root, reference)), `Home link resolves: ${reference}`);
   }
   const pages = [home];
-  for (const filename of fs.readdirSync(root).filter((name) => name.endsWith(".html") && !["index.html", "double-exposure.html", "local-test.html"].includes(name))) {
+  for (const filename of fs.readdirSync(root).filter((name) => name.endsWith(".html") && !["index.html", "double-exposure.html", "local-test.html", "studio.html"].includes(name))) {
     const experiment = fs.readFileSync(path.join(root, filename), "utf8");
     assert.match(experiment, /<div\b[^>]*\bdata-site-header(?:\s|=|>)/i);
     assert.match(experiment, /<script\b[^>]*src="site-header\.js"[^>]*defer/i);
@@ -1521,8 +1525,11 @@ test("a second-pairing failure before its preview retains the saved image until 
   await flush();
   h.chooseSharing(false);
   await h.select("participant-input", makeFile());
+  const displayedUrl = [...h.urls.keys()][0];
+  const savedBlob = h.workflow.operation.result.blob;
   await h.click("download-button");
-  const originalUrl = h.calls.downloads.at(-1).href;
+  const originalDownload = h.calls.downloads.at(-1);
+  assert.strictEqual(h.urls.get(originalDownload.href), savedBlob);
   h.failRePair(Object.assign(new Error("This submission could not be verified."), { originalSaved: true, code: "INVALID_TOKEN" }));
   await h.click("new-pairing-button");
   assert.equal(h.workflow.pending, true);
@@ -1537,7 +1544,8 @@ test("a second-pairing failure before its preview retains the saved image until 
   assert.equal(h.calls.develop.length, 0);
   assert.equal(h.calls.changeMonochrome.length, 0);
   await h.click("download-button");
-  assert.equal(h.calls.downloads.at(-1).href, originalUrl);
+  assert.equal(h.calls.downloads.length, 1);
+  assert.strictEqual(h.urls.get(h.calls.downloads.at(-1).href), savedBlob);
   assert.deepEqual(h.calls.revoked, []);
   assert.equal(h.elements.get("retry-button").hidden, false);
   await h.click("retry-button");
@@ -1547,7 +1555,7 @@ test("a second-pairing failure before its preview retains the saved image until 
   assert.equal(h.elements.get("canvas").width, 800);
   assert.equal(h.elements.get("canvas").height, 600);
   assert.equal(h.calls.draws.length, 2);
-  assert.deepEqual(h.calls.revoked, [originalUrl]);
+  assert.deepEqual(h.calls.revoked, [displayedUrl]);
   assert.equal(h.elements.get("status").textContent, "");
 });
 
@@ -1766,8 +1774,10 @@ test("rotation updates the finished preview and download without creating anothe
   await h.select("participant-input", makeFile());
   const archivedResult = h.workflow.operation.result;
   const archivedBlob = archivedResult.blob;
+  const displayedUrl = [...h.urls.keys()][0];
   await h.click("download-button");
   const originalUrl = h.calls.downloads.at(-1).href;
+  assert.strictEqual(h.urls.get(originalUrl), archivedBlob);
   let resume;
   h.blockRotation(new Promise((resolve) => { resume = resolve; }));
   const rotating = h.click("rotate-button");
@@ -1785,8 +1795,8 @@ test("rotation updates the finished preview and download without creating anothe
   const download = h.calls.downloads.at(-1);
   assert.notEqual(download.href, originalUrl);
   assert.equal(h.urls.get(download.href).rotated, 1);
-  assert.equal(download.filename, "double-exposure-first.jpg");
-  assert.deepEqual(h.calls.revoked, [originalUrl]);
+  assert.equal(download.filename, "original-current-double-exposure-program-first.jpg");
+  assert.deepEqual(h.calls.revoked, [displayedUrl]);
   assert.equal(h.calls.start.length, 1);
   assert.equal(h.calls.rePair, 0);
   assert.equal(h.workflow.operation.result, archivedResult);
@@ -1801,8 +1811,10 @@ test("a failed rotation preserves the previous download and does not offer an ar
   await flush();
   h.chooseSharing(false);
   await h.select("participant-input", makeFile());
+  const savedBlob = h.workflow.operation.result.blob;
   await h.click("download-button");
   const originalUrl = h.calls.downloads.at(-1).href;
+  assert.strictEqual(h.urls.get(originalUrl), savedBlob);
   h.failRotation(new Error("Rotation could not finish."));
   await h.click("rotate-button");
   assert.equal(h.elements.get("error").textContent, "Rotation could not finish.");
@@ -1812,7 +1824,8 @@ test("a failed rotation preserves the previous download and does not offer an ar
   assert.equal(h.elements.get("canvas").width, 600);
   assert.equal(h.elements.get("canvas").height, 400);
   await h.click("download-button");
-  assert.equal(h.calls.downloads.at(-1).href, originalUrl);
+  assert.notEqual(h.calls.downloads.at(-1).href, originalUrl);
+  assert.strictEqual(h.urls.get(h.calls.downloads.at(-1).href), savedBlob);
   assert.deepEqual(h.calls.revoked, []);
   assert.equal(h.calls.start.length, 1);
   assert.equal(h.calls.rePair, 0);

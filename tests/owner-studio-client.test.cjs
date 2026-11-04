@@ -203,8 +203,8 @@ test("settled reference and trial JPEGs save automatically, without uploading so
   const h = harness();
   await flush();
   const original = new Blob(["private input original"], { type: "image/png" });
-  const reference = output("reference", { original, participant: original });
-  const trial = output("trial", { original, base: original });
+  const reference = output("reference", { original, participant: original, program: "original-current" });
+  const trial = output("trial", { original, base: original, program: "experimental-film-sim" });
   h.publish({ reference, trial });
   assert.equal(h.status, "Saving to your folder…");
   await h.advance(799);
@@ -212,6 +212,7 @@ test("settled reference and trial JPEGs save automatically, without uploading so
   await h.advance(1);
   await h.until(() => h.saves.length === 1);
   assert.deepEqual(h.saves[0].request.payload, {
+    program: "original-current",
     image: { name: reference.filename, mimeType: "image/jpeg", base64: Buffer.from(await reference.blob.arrayBuffer()).toString("base64") },
     width: 640, height: 480
   });
@@ -219,6 +220,7 @@ test("settled reference and trial JPEGs save automatically, without uploading so
   await h.until(() => h.saves.length === 2);
   assert.equal(h.status, "Saving to your folder…");
   assert.deepEqual(h.saves[1].request.payload, {
+    program: "experimental-film-sim",
     image: { name: trial.filename, mimeType: "image/jpeg", base64: Buffer.from(await trial.blob.arrayBuffer()).toString("base64") },
     width: 640, height: 480
   });

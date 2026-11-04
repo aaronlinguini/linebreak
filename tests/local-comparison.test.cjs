@@ -10,7 +10,7 @@ const root = path.resolve(__dirname, "..");
 const source = fs.readFileSync(path.join(root, "local-test.js"), "utf8");
 const html = fs.readFileSync(path.join(root, "local-test.html"), "utf8");
 
-function harness({ colour = false } = {}) {
+function harness({ colour = false, supportsCapture = false } = {}) {
   const elements = new Map(), listeners = new Map(), timers = new Map();
   const renders = [], processing = [], rotations = [], downloads = [];
   const urls = new Map(), revoked = [], pageListeners = new Map(), encodings = [];
@@ -53,6 +53,10 @@ function harness({ colour = false } = {}) {
       addEventListener(type, handler) { listeners.set(`${id}:${type}`, handler); }, setAttribute() {}
     };
     elements.set(id, id.endsWith("canvas") ? canvas(element) : element);
+  }
+  if (supportsCapture) {
+    elements.get("test-base-camera").capture = "environment";
+    elements.get("test-participant-camera").capture = "environment";
   }
   const selected = [...html.matchAll(/<option\b[^>]*>/g)].map(([tag]) => tag).find((tag) => /\bselected\b/.test(tag));
   elements.get("test-renderer").value = selected?.match(/\bvalue="([^"]+)"/)?.[1] ?? "";
@@ -166,6 +170,10 @@ test("personal saves capture the exact completed download JPEG without reading o
   const reference = h.editor.snapshot("reference");
   assert.equal(Object.isFrozen(trial), true);
   assert.deepEqual([trial.width, trial.height], [6, 4]);
+  assert.equal(trial.program, "experimental-film-sim");
+  assert.equal(reference.program, "original-current");
+  assert.match(trial.filename, /^experimental-film-sim-/);
+  assert.match(reference.filename, /^original-current-double-exposure-program-/);
   await h.fire("test-download", "click");
   assert.equal(trial.blob, h.urls.get(h.downloads.at(-1).href));
   await h.fire("test-reference-download", "click");
@@ -241,9 +249,9 @@ test("trial settings affect only the trial, and downloads identify the completed
   assert.equal(recipe.sources.base.workingWidth, 600);
 
   await h.fire("test-download", "click");
-  assert.match(h.downloads.at(-1).filename, /^double-exposure-balanced-base-minus0\.5EV-second-0EV-bw-\d+\.jpg$/);
+  assert.match(h.downloads.at(-1).filename, /^experimental-film-sim-balanced-base-minus0\.5EV-second-0EV-bw-\d+\.jpg$/);
   await h.fire("test-reference-download", "click");
-  assert.match(h.downloads.at(-1).filename, /^double-exposure-linear-base-0EV-second-0EV-bw-\d+\.jpg$/);
+  assert.match(h.downloads.at(-1).filename, /^original-current-double-exposure-program-linear-base-0EV-second-0EV-bw-\d+\.jpg$/);
 });
 
 test("contrast changes only the trial and the saved additive settings match the reference recipe", async () => {
@@ -604,6 +612,14 @@ test("separate native-camera inputs leave the existing photo-library choices ava
     assert.match(tag, /accept="image\/jpeg"/);
     assert.match(tag, /capture="environment"/);
     assert.match(html, new RegExp(`<label\\b[^>]*for="${id}"[^>]*>Take (?:base|second) photo<\\/label>`));
+  }
+});
+
+test("camera pickers appear only when the browser supports capture", () => {
+  for (const supportsCapture of [false, true]) {
+    const h = harness({ supportsCapture });
+    assert.equal(h.elements.get("test-base-camera-picker").hidden, !supportsCapture);
+    assert.equal(h.elements.get("test-participant-camera-picker").hidden, !supportsCapture);
   }
 });
 

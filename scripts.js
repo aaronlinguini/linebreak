@@ -364,38 +364,16 @@ async function prepareParticipantFile(file, loadHeic = () => import("./heic-inpu
   return normalizeHeic(file);
 }
 
-async function saveExposureImage(blob, url, filename) {
-  let fallbackUrl;
-  const mobile = typeof navigator !== "undefined" && (
-    navigator.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod/.test(navigator.userAgent || "") ||
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
-  );
-  if (mobile && blob && typeof File === "function" &&
-      typeof navigator.canShare === "function" && typeof navigator.share === "function") {
-    let shareData;
-    try {
-      const file = new File([blob], filename, { type: "image/jpeg" });
-      if (navigator.canShare({ files: [file] })) shareData = { files: [file] };
-    } catch { /* Unsupported file sharing uses the download link. */ }
-    if (shareData) {
-      try {
-        await navigator.share(shareData);
-        return;
-      } catch (error) {
-        if (error?.name === "AbortError") return;
-        fallbackUrl = URL.createObjectURL(blob);
-      }
-    }
-  }
+function saveExposureImage(blob, url, filename) {
+  const downloadUrl = blob ? URL.createObjectURL(blob) : url;
   const link = document.createElement("a");
-  link.href = fallbackUrl || url;
+  link.href = downloadUrl;
   link.download = filename;
   document.body.append(link);
   try { link.click(); }
   finally {
     link.remove();
-    // Keep the fallback alive while the browser starts reading its download.
-    if (fallbackUrl) setTimeout(() => URL.revokeObjectURL(fallbackUrl), 60000);
+    if (blob) setTimeout(() => URL.revokeObjectURL(downloadUrl), 60000);
   }
 }
 
@@ -948,7 +926,8 @@ function initializeExposureStudio() {
   });
   ui.download.addEventListener("click", () => {
     if (ui.download.disabled || !state.downloadUrl) return;
-    return saveExposureImage(state.downloadBlob, state.downloadUrl, `double-exposure-${state.displayedSubmissionId}.jpg`);
+    return saveExposureImage(state.downloadBlob, state.downloadUrl,
+      `original-current-double-exposure-program-${state.displayedSubmissionId}.jpg`);
   });
   window.addEventListener("beforeunload", (event) => {
     if (workflow.pending || state.colourWorking || pendingColourResults()) { event.preventDefault(); event.returnValue = ""; }

@@ -16,7 +16,7 @@ function exposureBridgeClient_() {
   // Send messages to the website, outside Google's extra frames.
   const host = window.top;
   if (!host || host === window) return;
-  const allowedActions = new Set(["bootstrap", "begin", "complete"]);
+  const allowedActions = new Set(["bootstrap", "begin", "complete", "status", "save"]);
   const seen = new Set();
   let acknowledged = false;
   let readyTimer;
@@ -61,7 +61,7 @@ function exposureBridgeClient_() {
       return;
     }
     try {
-      google.script.run
+      const runner = google.script.run
         .withSuccessHandler((response) => {
           if (!response || typeof response !== "object" || typeof response.ok !== "boolean") {
             failure(message.id, "INVALID_RESPONSE", "The archive returned an unreadable response.");
@@ -70,8 +70,12 @@ function exposureBridgeClient_() {
           }
         })
         .withFailureHandler((error) => failure(message.id, "RPC_FAILURE",
-          error && typeof error.message === "string" ? error.message : "The archive could not finish this request."))
-        .exposureApi({ action: request.action, payload: request.payload });
+          error && typeof error.message === "string" ? error.message : "The archive could not finish this request."));
+      if (request.action === "status" || request.action === "save") {
+        runner.studioApi({ action: request.action, payload: request.payload });
+      } else {
+        runner.exposureApi({ action: request.action, payload: request.payload });
+      }
     } catch (error) {
       failure(message.id, "RPC_FAILURE", error && error.message ? error.message : "The archive request could not be sent.");
     }

@@ -3,6 +3,8 @@
 (() => {
   if (document.body.dataset.ownerStudio !== "true") return;
   const editor = window.LocalExposureTest;
+  const storage = typeof google === "undefined" || !google.script?.run
+    ? new GoogleDriveStorage(EXPOSURE_CONFIG) : null;
   const byId = id => document.getElementById(id);
   const ui = { feedback: byId("studio-save-feedback"), status: byId("studio-save-status"),
     error: byId("studio-save-error"), retry: byId("studio-save-retry"), folder: byId("studio-save-folder") };
@@ -26,6 +28,7 @@
     ui.retry.disabled = state.running || state.connecting;
   }
   function rpc(action, payload) {
+    if (storage) return storage.studio(action, payload);
     return new Promise((resolve, reject) => {
       let finished = false;
       const timer = setTimeout(() => finish(false, Object.assign(new Error("Request timed out."), { code: "REQUEST_TIMEOUT" })), 60000);
@@ -83,7 +86,7 @@
     }
   }
   async function prepare(snapshot) {
-    const { blob, filename, width, height } = snapshot;
+    const { blob, filename, width, height, program } = snapshot;
     if (blob.type !== "image/jpeg" || blob.size < 1 || blob.size > state.maximum) {
       throw Object.assign(new Error("The JPEG cannot be saved."), { code: "INVALID_IMAGE" });
     }
@@ -99,7 +102,7 @@
       reader.onerror = () => reject(Object.assign(new Error("The JPEG could not be read."), { code: "INVALID_IMAGE" }));
       reader.readAsDataURL(blob);
     });
-    return { hash, payload: { image: { name: filename, mimeType: "image/jpeg", base64 }, width, height } };
+    return { hash, payload: { program, image: { name: filename, mimeType: "image/jpeg", base64 }, width, height } };
   }
   async function saveNext() {
     if (state.disposed || !state.ready || state.running || state.error || state.retryTimer !== null) return;
@@ -175,6 +178,7 @@
     state.candidates.clear();
     state.queue.clear();
     state.active = null;
+    storage?.dispose();
   });
   void connect();
 })();

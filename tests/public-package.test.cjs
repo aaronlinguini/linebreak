@@ -70,7 +70,7 @@ function restoreSingleMemoryPage(destination) {
 }
 
 function removeGalleryOutput(destination) {
-  for (const name of [...galleryFiles, ...reflectionFiles, galleryCatalogueFile, headerScript, ...OWNER_STUDIO_FILES, "images"]) {
+  for (const name of [...galleryFiles, ...reflectionFiles, galleryCatalogueFile, headerScript, ...OWNER_STUDIO_FILES, "studio.html", "images"]) {
     fs.rmSync(path.join(destination, name), { recursive: true, force: true });
   }
   restoreSingleMemoryPage(destination);
@@ -79,7 +79,7 @@ function removeGalleryOutput(destination) {
 function oldExpectedFiles(root) {
   return [...expectedFiles(root).filter(name => !galleryFiles.includes(name) && !memoryPartFiles.includes(name)
     && !reflectionFiles.includes(name)
-    && name !== galleryCatalogueFile && name !== headerScript && !OWNER_STUDIO_FILES.includes(name)
+    && name !== galleryCatalogueFile && name !== headerScript && name !== "studio.html" && !OWNER_STUDIO_FILES.includes(name)
     && !name.startsWith("images/")), "experiment-2.html"].sort();
 }
 

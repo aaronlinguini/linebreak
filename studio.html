@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#050505">
+    <title>Double exposure studio</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="local-test.css">
+    <script src="site-header.js" defer></script>
+    <script src="project-config.js" defer></script>
+    <script src="drive-storage.js" defer></script>
+    <script src="scripts.js" defer></script>
+    <script src="film-renderer.js" defer></script>
+    <script src="tone-adjustments.js" defer></script>
+    <script src="local-test.js" defer></script>
+    <script src="owner-studio.js" defer></script>
+  </head>
+  <body class="local-test" data-owner-studio="true">
+    <header class="site-header">
+      <div data-site-header></div>
+      <h1>Double exposure studio</h1>
+    </header>
+
+    <main id="test-workspace" class="workspace" aria-busy="false">
+      <div class="actions">
+        <div class="photo-picker-group" role="group" aria-label="Base photograph">
+          <div class="file-picker">
+            <input id="test-base" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="test-note">
+            <label class="upload-label" for="test-base">Choose your base photo</label>
+          </div>
+          <div id="test-base-camera-picker" class="file-picker" hidden>
+            <input id="test-base-camera" class="file-input" type="file" accept="image/jpeg" capture="environment" aria-describedby="test-note">
+            <label class="upload-label" for="test-base-camera">Take base photo</label>
+          </div>
+        </div>
+        <div class="photo-picker-group" role="group" aria-label="Second photograph">
+          <div class="file-picker">
+            <input id="test-participant" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="test-note">
+            <label class="upload-label" for="test-participant">Choose a second photo</label>
+          </div>
+          <div id="test-participant-camera-picker" class="file-picker" hidden>
+            <input id="test-participant-camera" class="file-input" type="file" accept="image/jpeg" capture="environment" aria-describedby="test-note">
+            <label class="upload-label" for="test-participant-camera">Take second photo</label>
+          </div>
+        </div>
+      </div>
+
+      <div id="studio-save-feedback" class="feedback" hidden>
+        <p id="studio-save-status" class="status" role="status" aria-live="polite"></p>
+        <p id="studio-save-error" class="error" role="alert" hidden></p>
+        <button id="studio-save-retry" class="save-button" type="button" hidden>Retry saving</button>
+        <a id="studio-save-folder" class="save-button" target="_blank" rel="noopener noreferrer" hidden>My double exposures</a>
+      </div>
+
+      <div class="editor-layout">
+        <section class="comparison-panel reference-panel" aria-labelledby="reference-title">
+          <h2 id="reference-title">Original/current double exposure program · contrast 12 · 0 / 0 EV</h2>
+          <div class="image-stage">
+            <p id="test-reference-empty" class="empty-state">Choose two photographs.</p>
+            <canvas id="test-reference-canvas" width="1" height="1" hidden aria-label="Original/current double exposure program at contrast 12 and zero exposure compensation"></canvas>
+          </div>
+          <button id="test-reference-download" class="save-button" type="button" hidden disabled>Save to device</button>
+        </section>
+        <div class="trial-editor">
+          <section class="comparison-panel trial-panel" aria-labelledby="trial-title">
+            <h2 id="trial-title">Experimental film sim · reduced overlap · 20% · contrast 12</h2>
+            <div class="image-stage">
+              <p id="test-empty" class="empty-state">Choose two photographs.</p>
+              <canvas id="test-canvas" width="1" height="1" hidden aria-label="Experimental film sim double exposure"></canvas>
+              <p id="test-busy" class="busy-indicator" hidden>Developing…</p>
+            </div>
+            <div class="comparison-actions">
+              <button id="test-download" class="save-button" type="button" hidden disabled>Save to device</button>
+              <button id="test-rotate" class="save-button" type="button" hidden disabled aria-label="Rotate trial 90 degrees clockwise">Rotate 90°</button>
+            </div>
+          </section>
+          <aside class="editor-controls" aria-label="Image editing controls">
+            <section id="test-tone-panel" class="tone-panel" aria-labelledby="test-tone-title">
+              <h2 id="test-tone-title">Tone adjustments</h2>
+              <p id="test-tone-help" class="control-help">Adjusts the finished trial only. Positive brightens; negative darkens. All five at zero keep the original result. Whites adjusts the brightest tones, including white; Blacks adjusts near-black tones.</p>
+              <div class="tone-control-grid">
+                <div class="exposure-control">
+                  <label for="test-shadows">Shadows <output id="test-shadows-value" for="test-shadows">0</output></label>
+                  <input id="test-shadows" type="range" min="-100" max="100" step="1" value="0" aria-describedby="test-tone-help">
+                </div>
+                <div class="exposure-control">
+                  <label for="test-highlights">Highlights <output id="test-highlights-value" for="test-highlights">0</output></label>
+                  <input id="test-highlights" type="range" min="-100" max="100" step="1" value="0" aria-describedby="test-tone-help">
+                </div>
+                <div class="exposure-control">
+                  <label for="test-mids">Mids <output id="test-mids-value" for="test-mids">0</output></label>
+                  <input id="test-mids" type="range" min="-100" max="100" step="1" value="0" aria-describedby="test-tone-help">
+                </div>
+                <div class="exposure-control">
+                  <label for="test-whites">Whites <output id="test-whites-value" for="test-whites">0</output></label>
+                  <input id="test-whites" type="range" min="-100" max="100" step="1" value="0" aria-describedby="test-tone-help">
+                </div>
+                <div class="exposure-control">
+                  <label for="test-blacks">Blacks <output id="test-blacks-value" for="test-blacks">0</output></label>
+                  <input id="test-blacks" type="range" min="-100" max="100" step="1" value="0" aria-describedby="test-tone-help">
+                </div>
+              </div>
+              <button id="test-tones-reset" class="save-button" type="button">Reset tones</button>
+            </section>
+            <div class="test-controls">
+              <div class="renderer-control">
+                <label for="test-renderer">Experimental treatment</label>
+                <select id="test-renderer">
+                  <option value="balanced" selected>Reduced overlap (trial)</option>
+                  <option value="linear">Original/current addition + contrast</option>
+                  <option value="revised">Revised smooth</option>
+                  <option value="smooth">Saved smooth exposure</option>
+                  <option value="film">Earlier film curve</option>
+                </select>
+              </div>
+              <div id="test-balance-control" class="exposure-control">
+                <label for="test-balance">Haze reduction <output id="test-balance-value" for="test-balance">20%</output></label>
+                <input id="test-balance" type="range" min="0" max="100" step="5" value="20" aria-describedby="test-balance-help">
+                <p id="test-balance-help" class="control-help">0%: saved addition. Higher: less overlapping light in shadows, midtones and highlights; black still reveals the other photo.</p>
+              </div>
+              <div id="test-contrast-control" class="exposure-control">
+                <label for="test-contrast">Contrast <output id="test-contrast-value" for="test-contrast">12</output></label>
+                <input id="test-contrast" type="range" min="0" max="30" step="1" value="12">
+              </div>
+              <div class="exposure-control">
+                <label for="test-base-exposure">Base exposure <output id="test-base-value" for="test-base-exposure">0 EV</output></label>
+                <input id="test-base-exposure" type="range" min="-3" max="2" step="0.5" value="0">
+              </div>
+              <div class="exposure-control">
+                <label for="test-participant-exposure">Second exposure <output id="test-participant-value" for="test-participant-exposure">0 EV</output></label>
+                <input id="test-participant-exposure" type="range" min="-3" max="2" step="0.5" value="0">
+              </div>
+              <label class="monochrome-control" for="test-monochrome">
+                <input id="test-monochrome" type="checkbox"> Black and white
+              </label>
+              <button id="test-reset" class="save-button" type="button">Reset trial</button>
+              <button id="test-settings-download" class="save-button" type="button" hidden disabled>Download settings</button>
+            </div>
+          </aside>
+        </div>
+      </div>
+
+      <div class="feedback">
+        <p id="test-status" class="status" role="status" aria-live="polite">Choose a base photo and a second photo.</p>
+        <p id="test-error" class="error" role="alert" hidden></p>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <p id="test-note" class="privacy-note">Finished versions are saved automatically to your private folder. Use Save to device for a local copy. The photographs you choose stay on your device.</p>
+    </footer>
+  </body>
+</html>

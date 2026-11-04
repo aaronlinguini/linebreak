@@ -5,7 +5,7 @@ function studioPage_(siteUrl) {
   html = html.split("__STUDIO_ASSET_ROOT__").join(escapeHtml_(siteUrl));
   return HtmlService.createHtmlOutput(html)
     .addMetaTag("viewport", "width=device-width, initial-scale=1")
-    .setTitle("Double exposure · local test");
+    .setTitle("Double exposure studio");
 }
 
 function studioApi(request) {
@@ -22,7 +22,8 @@ function studioApi(request) {
     if (request.action === "status") {
       if (Object.keys(payload).length) throw apiError_("INVALID_REQUEST", "The personal archive request is invalid.");
     } else {
-      if (Object.keys(payload).some(function (key) { return ["image", "width", "height"].indexOf(key) < 0; }) ||
+      if (Object.keys(payload).some(function (key) { return ["program", "image", "width", "height"].indexOf(key) < 0; }) ||
+          payload.program !== undefined && ["original-current", "experimental-film-sim"].indexOf(payload.program) < 0 ||
           !isObject_(payload.image) || Object.keys(payload.image).some(function (key) { return ["name", "mimeType", "base64"].indexOf(key) < 0; }) ||
           typeof payload.image.name === "string" && /[\\/]/.test(payload.image.name)) {
         throw apiError_("INVALID_REQUEST", "The personal archive request is invalid.");
@@ -33,7 +34,7 @@ function studioApi(request) {
     var data = withLock_(function () {
       var folder = studioFolder_();
       if (request.action === "status") return { folderUrl: folder.getUrl(), maxResultBytes: EXPOSURE_CONFIG_.maxResultBytes };
-      return saveStudioResult_(folder, image, dimensions);
+      return saveStudioResult_(folder, image, dimensions, payload.program);
     });
     return { ok: true, data: data };
   } catch (error) {
@@ -58,8 +59,10 @@ function studioFolder_() {
   return setupFolder_(ArchiveDrive.getFolderById(rootId), properties, key, "Personal_double_exposures");
 }
 
-function saveStudioResult_(folder, image, dimensions) {
-  var filename = "personal-result-" + image.hash + ".jpg";
+function saveStudioResult_(folder, image, dimensions, program) {
+  var prefix = program === "original-current" ? "original-current-double-exposure-program"
+    : program === "experimental-film-sim" ? "experimental-film-sim" : "personal-result";
+  var filename = prefix + "-" + image.hash + ".jpg";
   var files = folder.getFilesByName(filename);
   var duplicate = files.hasNext();
   var file = duplicate ? files.next() : folder.createFile(Utilities.newBlob(image.bytes, image.mimeType, filename));

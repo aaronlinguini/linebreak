@@ -7,7 +7,7 @@ const { PUBLIC_FILES, addContentVersions, validateHtml, validateJavaScript, read
 const SOURCE_PAGE = "local-test.html";
 const DESTINATION = "google-apps-script/Studio.html";
 const ASSET_ROOT = "__STUDIO_ASSET_ROOT__";
-const PRIVATE_NOTE = "Finished versions are saved automatically to your private folder. The photographs you choose stay on your device.";
+const PRIVATE_NOTE = "Finished versions are saved automatically to your private folder. Use Save to device for a local copy. The photographs you choose stay on your device.";
 
 function ownerStudioSource(source, assets) {
   if ((source.match(/<body\b/gi) || []).length !== 1 || /\bdata-owner-studio\b/i.test(source)) {

@@ -506,6 +506,22 @@ test("reconnecting a healthy frame refreshes the collection without rebuilding i
   harness.storage.dispose();
 });
 
+test("studio status and save use the existing frame without visitor bootstrap", async () => {
+  const harness = makeTransport();
+  const status = harness.storage.studio("status", {});
+  await tick();
+  harness.ready();
+  assert.deepEqual(plain(await status), { accepted: {} });
+  const image = { name: "personal-result.jpg", mimeType: "image/jpeg", base64: "abc=" };
+  assert.deepEqual(plain(await harness.storage.studio("save", { image, width: 10, height: 10 })),
+    { accepted: { image, width: 10, height: 10 } });
+  assert.deepEqual(harness.messages.filter(({ message }) => message.type === "request")
+    .map(({ message }) => message.request.action), ["status", "save"]);
+  assert.equal(harness.iframes.length, 1);
+  await assert.rejects(harness.storage.studio("begin", {}), error => error.code === "INVALID_SUBMISSION");
+  harness.storage.dispose();
+});
+
 test("configuration accepts only actual deployed Google Apps Script URLs", async () => {
   for (const url of ["", "http://script.google.com/macros/s/example/exec", "https://script.google.com.attacker.example/macros/s/example/exec", "https://script.google.com/macros/s/example/dev", "https://user:password@script.google.com/macros/s/example/exec"]) {
     const harness = makeTransport();
@@ -535,7 +551,10 @@ function makeBridge(source = websiteBridgeSource) {
     document: { querySelector(selector) { return { content: selector.includes("parent-origin") ? parentOrigin : channel }; } },
     google: { script: { run: {
       withSuccessHandler(success) {
-        return { withFailureHandler(failure) { return { exposureApi(request) { calls.push({ request: plain(request), success, failure }); } }; } };
+        return { withFailureHandler(failure) { return {
+          exposureApi(request) { calls.push({ method: "exposureApi", request: plain(request), success, failure }); },
+          studioApi(request) { calls.push({ method: "studioApi", request: plain(request), success, failure }); }
+        }; } };
       }
     } } },
     setInterval(callback) { intervals.add(callback); return callback; },
@@ -585,6 +604,15 @@ test(`${variant}: the bridge limits actions and returns RPC responses to their o
   assert.equal(response.origin, bridge.parentOrigin);
   assert.equal(response.message.id, "upload-1");
   assert.deepEqual(response.message.response, { ok: true, data: { originalId: "source-one" } });
+});
+
+test(`${variant}: studio requests go to the owner-checked API`, () => {
+  const bridge = makeBridge(source); bridge.emit({ type: "ack" });
+  bridge.emit({ type: "request", id: "studio-status", request: { action: "status", payload: {} } });
+  bridge.emit({ type: "request", id: "studio-save", request: { action: "save", payload: { width: 10, height: 10 } } });
+  assert.deepEqual(bridge.calls.map(call => call.method), ["studioApi", "studioApi"]);
+  bridge.calls[0].success({ ok: false, error: { code: "OWNER_REQUIRED" } });
+  assert.equal(bridge.messages.at(-1).message.response.error.code, "OWNER_REQUIRED");
 });
 
 test(`${variant}: Google RPC failure produces an error response and never a saved acknowledgement`, () => {

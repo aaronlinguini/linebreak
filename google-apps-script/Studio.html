@@ -8,11 +8,11 @@
     <link rel="stylesheet" href="__STUDIO_ASSET_ROOT__styles.css?v=3ea3dab5fe481758c402fe934ebab43269e168fa3640406880a868b1a48d69ad">
     <link rel="stylesheet" href="__STUDIO_ASSET_ROOT__local-test.css?v=5d505a5770c604933150bbc6d355ca30ca6877196d08e463b28d2a44bff21514">
     <script src="__STUDIO_ASSET_ROOT__project-config.js?v=1cae4a83578235faa9473e239dd69621bfc8c1a2346bfd85e87f87e38a2bd7d3" defer></script>
-    <script src="__STUDIO_ASSET_ROOT__scripts.js?v=31cd4144fd53699d256bad4cb11adb7cef89e55e3307d915d43d3c4911d70077" defer></script>
+    <script src="__STUDIO_ASSET_ROOT__scripts.js?v=f27c86c8f4035c94003990f8b82dfd396b1e6be5aa24b164e42e85cafd4b45ef" defer></script>
     <script src="__STUDIO_ASSET_ROOT__film-renderer.js?v=1fb2ead535a5383836f22a468b23a8603476e980d5c10ffe8f4acd4bb81e9c33" defer></script>
     <script src="__STUDIO_ASSET_ROOT__tone-adjustments.js?v=dc6bb706e7e94664b2e5a4ae9d045d4f87c4e2ac3cd42f4100d7fce7b7930a6c" defer></script>
-    <script src="__STUDIO_ASSET_ROOT__local-test.js?v=6f271587261acade678e6345f5f81037fcf9d63a683c46be00325e318fd59029" defer></script>
-    <script src="__STUDIO_ASSET_ROOT__owner-studio.js?v=bc0303d55069c7a792fb7089a30d7f525a3189de643852c832df7415a6e2f8b3" defer></script>
+    <script src="__STUDIO_ASSET_ROOT__local-test.js?v=ac5136ed26f6c5c3e67d390003affba8587d8778dc0292cabd95a22f90710a06" defer></script>
+    <script src="__STUDIO_ASSET_ROOT__owner-studio.js?v=ebe3f091ea9a7d74f2d337330a66594fe128ff532bafbdc59e07555586a9e8f4" defer></script>
   </head>
   <body data-owner-studio="true" class="local-test">
     <header class="site-header">
@@ -26,7 +26,7 @@
             <input id="test-base" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="test-note">
             <label class="upload-label" for="test-base">Choose your base photo</label>
           </div>
-          <div class="file-picker">
+          <div id="test-base-camera-picker" class="file-picker" hidden>
             <input id="test-base-camera" class="file-input" type="file" accept="image/jpeg" capture="environment" aria-describedby="test-note">
             <label class="upload-label" for="test-base-camera">Take base photo</label>
           </div>
@@ -36,7 +36,7 @@
             <input id="test-participant" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="test-note">
             <label class="upload-label" for="test-participant">Choose a second photo</label>
           </div>
-          <div class="file-picker">
+          <div id="test-participant-camera-picker" class="file-picker" hidden>
             <input id="test-participant-camera" class="file-input" type="file" accept="image/jpeg" capture="environment" aria-describedby="test-note">
             <label class="upload-label" for="test-participant-camera">Take second photo</label>
           </div>
@@ -52,23 +52,23 @@
 
       <div class="editor-layout">
         <section class="comparison-panel reference-panel" aria-labelledby="reference-title">
-          <h2 id="reference-title">Saved Current · contrast 12 · 0 / 0 EV</h2>
+          <h2 id="reference-title">Original/current double exposure program · contrast 12 · 0 / 0 EV</h2>
           <div class="image-stage">
             <p id="test-reference-empty" class="empty-state">Choose two photographs.</p>
-            <canvas id="test-reference-canvas" width="1" height="1" hidden aria-label="Saved Current double exposure at contrast 12 and zero exposure compensation"></canvas>
+            <canvas id="test-reference-canvas" width="1" height="1" hidden aria-label="Original/current double exposure program at contrast 12 and zero exposure compensation"></canvas>
           </div>
-          <button id="test-reference-download" class="save-button" type="button" hidden disabled>Download saved version</button>
+          <button id="test-reference-download" class="save-button" type="button" hidden disabled>Save to device</button>
         </section>
         <div class="trial-editor">
           <section class="comparison-panel trial-panel" aria-labelledby="trial-title">
-            <h2 id="trial-title">Trial · reduced overlap · 20% · contrast 12</h2>
+            <h2 id="trial-title">Experimental film sim · reduced overlap · 20% · contrast 12</h2>
             <div class="image-stage">
               <p id="test-empty" class="empty-state">Choose two photographs.</p>
-              <canvas id="test-canvas" width="1" height="1" hidden aria-label="Adjustable trial double exposure"></canvas>
+              <canvas id="test-canvas" width="1" height="1" hidden aria-label="Experimental film sim double exposure"></canvas>
               <p id="test-busy" class="busy-indicator" hidden>Developing…</p>
             </div>
             <div class="comparison-actions">
-              <button id="test-download" class="save-button" type="button" hidden disabled>Download trial</button>
+              <button id="test-download" class="save-button" type="button" hidden disabled>Save to device</button>
               <button id="test-rotate" class="save-button" type="button" hidden disabled aria-label="Rotate trial 90 degrees clockwise">Rotate 90°</button>
             </div>
           </section>
@@ -102,10 +102,10 @@
             </section>
             <div class="test-controls">
               <div class="renderer-control">
-                <label for="test-renderer">Trial treatment</label>
+                <label for="test-renderer">Experimental treatment</label>
                 <select id="test-renderer">
                   <option value="balanced" selected>Reduced overlap (trial)</option>
-                  <option value="linear">Saved Current + contrast</option>
+                  <option value="linear">Original/current addition + contrast</option>
                   <option value="revised">Revised smooth</option>
                   <option value="smooth">Saved smooth exposure</option>
                   <option value="film">Earlier film curve</option>
@@ -145,7 +145,7 @@
     </main>
 
     <footer class="site-footer">
-      <p id="test-note" class="privacy-note">Finished versions are saved automatically to your private folder. The photographs you choose stay on your device.</p>
+      <p id="test-note" class="privacy-note">Finished versions are saved automatically to your private folder. Use Save to device for a local copy. The photographs you choose stay on your device.</p>
     </footer>
   </body>
 </html>

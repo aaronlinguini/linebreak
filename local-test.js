@@ -1,6 +1,5 @@
 "use strict";
 
-// Artist-only comparison page: the main site keeps its existing renderer.
 function initializeLocalExposureTest() {
   const byId = (id) => document.getElementById(id);
   const ui = {
@@ -9,6 +8,7 @@ function initializeLocalExposureTest() {
     empty: byId("test-empty"), busy: byId("test-busy"),
     base: byId("test-base"), participant: byId("test-participant"),
     baseCamera: byId("test-base-camera"), participantCamera: byId("test-participant-camera"),
+    baseCameraPicker: byId("test-base-camera-picker"), participantCameraPicker: byId("test-participant-camera-picker"),
     download: byId("test-download"), referenceDownload: byId("test-reference-download"),
     rotate: byId("test-rotate"),
     settingsDownload: byId("test-settings-download"),
@@ -46,6 +46,8 @@ function initializeLocalExposureTest() {
   };
   const outputListeners = new Set();
   const controls = [ui.base, ui.participant, ui.baseCamera, ui.participantCamera, ui.renderer, ui.baseExposure, ui.participantExposure, ui.contrast, ui.balance, ui.monochrome, ui.reset, ui.tonesReset, ui.rotate, ...toneInputs];
+  ui.baseCameraPicker.hidden = !("capture" in ui.baseCamera);
+  ui.participantCameraPicker.hidden = !("capture" in ui.participantCamera);
   ui.monochrome.checked = PROJECT_SETTINGS.monochrome;
 
   function evLabel(value) {
@@ -74,7 +76,7 @@ function initializeLocalExposureTest() {
     const balance = settings.renderer === "balanced" ? ` · ${settings.balanceStrength}%` : "";
     const tones = settings.tones && Object.values(settings.tones).some((value) => value !== 0) ? " · tones adjusted" : "";
     const rotation = rotationDegrees ? ` · rotated ${rotationDegrees}°` : "";
-    ui.trialTitle.textContent = `Trial · ${names[settings.renderer]}${balance}${contrast} · ${evLabel(settings.baseExposure)} / ${evLabel(settings.participantExposure)}${tones}${rotation}`;
+    ui.trialTitle.textContent = `Experimental film sim · ${names[settings.renderer]}${balance}${contrast} · ${evLabel(settings.baseExposure)} / ${evLabel(settings.participantExposure)}${tones}${rotation}`;
   }
   function settingsFor(renderer, baseExposure, participantExposure, contrast = 0, balanceStrength = 0) {
     return {
@@ -341,10 +343,11 @@ function initializeLocalExposureTest() {
     link.click();
     link.remove();
   }
-  function resultFilename(record) {
+  function resultFilename(record, kind) {
     const ev = (value) => `${value < 0 ? "minus" : value > 0 ? "plus" : ""}${Math.abs(value)}`;
     const stamp = state.completed.generatedAt.replace(/\D/g, "");
-    return `double-exposure-${record.renderer}-base-${ev(record.settings.baseExposure)}EV-second-${ev(record.settings.participantExposure)}EV-${record.settings.monochrome ? "bw" : "colour"}-${stamp}.jpg`;
+    const program = kind === "reference" ? "original-current-double-exposure-program" : "experimental-film-sim";
+    return `${program}-${record.renderer}-base-${ev(record.settings.baseExposure)}EV-second-${ev(record.settings.participantExposure)}EV-${record.settings.monochrome ? "bw" : "colour"}-${stamp}.jpg`;
   }
 
   ui.base.addEventListener("change", () => choosePhoto("base", ui.base));
@@ -420,10 +423,10 @@ function initializeLocalExposureTest() {
     return changeSettings();
   });
   ui.download.addEventListener("click", () => {
-    if (state.completed && !state.exportPending) download(state.resultUrl, resultFilename(state.completed.trial));
+    if (state.completed && !state.exportPending) download(state.resultUrl, resultFilename(state.completed.trial, "trial"));
   });
   ui.referenceDownload.addEventListener("click", () => {
-    if (state.completed) download(state.referenceUrl, resultFilename(state.completed.reference));
+    if (state.completed) download(state.referenceUrl, resultFilename(state.completed.reference, "reference"));
   });
   ui.settingsDownload.addEventListener("click", () => {
     if (state.completed && !state.exportPending) download(state.settingsUrl, `double-exposure-comparison-${state.completed.generatedAt.replace(/\D/g, "")}-settings.json`);
@@ -445,7 +448,8 @@ function initializeLocalExposureTest() {
       const blob = kind === "reference" ? state.referenceBlob : state.resultBlob;
       const record = kind === "reference" ? state.completed.reference : state.completed.trial;
       return blob && record ? Object.freeze({ blob, width: record.width, height: record.height,
-        filename: resultFilename(record) }) : null;
+        program: kind === "reference" ? "original-current" : "experimental-film-sim",
+        filename: resultFilename(record, kind) }) : null;
     },
     subscribe(listener) {
       outputListeners.add(listener);

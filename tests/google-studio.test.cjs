@@ -10,7 +10,8 @@ const crypto = require("node:crypto");
 const root = path.resolve(__dirname, "..");
 const jpeg = (marker = 7) => Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, marker, 0xff, 0xd9]);
 const image = (marker = 7, name = "trial.jpg") => ({ name, mimeType: "image/jpeg", base64: jpeg(marker).toString("base64") });
-const payload = (marker = 7) => ({ image: image(marker), width: 1200, height: 800 });
+const payload = (marker = 7, program) => ({ image: image(marker), width: 1200, height: 800,
+  ...(program === undefined ? {} : { program }) });
 const clone = value => JSON.parse(JSON.stringify(value));
 
 function makeStudio({ activeEmail = "owner@example.test", effectiveEmail = "owner@example.test", projectOwnerEmail = "owner@example.test" } = {}) {
@@ -138,7 +139,7 @@ test("only the configured project owner can request studio status or save a resu
 test("the owner-only studio route loads its template with configured external assets and default framing", () => {
   const studio = makeStudio();
   const page = studio.sandbox.doGet({ parameter: { view: "studio" } });
-  assert.equal(page.title, "Double exposure · local test");
+  assert.equal(page.title, "Double exposure studio");
   assert.deepEqual(page.metaTags, [{ name: "viewport", content: "width=device-width, initial-scale=1" }]);
   assert.equal(page.frameMode, undefined);
   assert.match(page.getContent(), /https:\/\/artist\.example\/exposures\/owner-studio\.css/);
@@ -283,6 +284,21 @@ test("repeated and renamed results reuse the same verified personal file", () =>
   assert.equal(studio.io.indexCalls, 0);
 });
 
+test("program names distinguish identical JPEGs while retries still reuse each file", () => {
+  const studio = makeStudio();
+  const original = studio.api("save", payload(7, "original-current"));
+  const experimental = studio.api("save", payload(7, "experimental-film-sim"));
+  assert.equal(original.ok, true);
+  assert.equal(experimental.ok, true);
+  assert.notEqual(original.data.fileUrl, experimental.data.fileUrl);
+  const names = studio.folder().files.map(file => file.blob.name);
+  assert.match(names[0], /^original-current-double-exposure-program-[a-f0-9]{64}\.jpg$/);
+  assert.match(names[1], /^experimental-film-sim-[a-f0-9]{64}\.jpg$/);
+  assert.equal(studio.api("save", payload(7, "original-current")).data.duplicate, true);
+  assert.equal(studio.api("save", payload(7, "experimental-film-sim")).data.duplicate, true);
+  assert.equal(studio.io.fileWrites, 2);
+});
+
 test("a lost response after a Drive write recovers the existing JPEG without another copy", () => {
   const studio = makeStudio();
   studio.failures.afterCreate = true;
@@ -354,6 +370,8 @@ test("studio requests accept no caller-selected IDs, URLs, paths or recipe sidec
     ...["folderId", "fileId", "url", "path", "settings"].map(key => ({ action: "save", payload: { ...payload(), [key]: "untrusted" } })),
     { action: "save", payload: { ...payload(), image: { ...image(), fileId: "unrelated-file" } } },
     { action: "save", payload: { ...payload(), image: image(7, "../participant_uploads/result.jpg") } },
+    { action: "save", payload: payload(7, "other-program") },
+    { action: "save", payload: payload(7, null) },
     { action: "save", payload: [] }
   ];
   for (const request of cases) {

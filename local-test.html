@@ -25,7 +25,7 @@
             <input id="test-base" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="test-note">
             <label class="upload-label" for="test-base">Choose your base photo</label>
           </div>
-          <div class="file-picker">
+          <div id="test-base-camera-picker" class="file-picker" hidden>
             <input id="test-base-camera" class="file-input" type="file" accept="image/jpeg" capture="environment" aria-describedby="test-note">
             <label class="upload-label" for="test-base-camera">Take base photo</label>
           </div>
@@ -35,7 +35,7 @@
             <input id="test-participant" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="test-note">
             <label class="upload-label" for="test-participant">Choose a second photo</label>
           </div>
-          <div class="file-picker">
+          <div id="test-participant-camera-picker" class="file-picker" hidden>
             <input id="test-participant-camera" class="file-input" type="file" accept="image/jpeg" capture="environment" aria-describedby="test-note">
             <label class="upload-label" for="test-participant-camera">Take second photo</label>
           </div>
@@ -51,23 +51,23 @@
 
       <div class="editor-layout">
         <section class="comparison-panel reference-panel" aria-labelledby="reference-title">
-          <h2 id="reference-title">Saved Current · contrast 12 · 0 / 0 EV</h2>
+          <h2 id="reference-title">Original/current double exposure program · contrast 12 · 0 / 0 EV</h2>
           <div class="image-stage">
             <p id="test-reference-empty" class="empty-state">Choose two photographs.</p>
-            <canvas id="test-reference-canvas" width="1" height="1" hidden aria-label="Saved Current double exposure at contrast 12 and zero exposure compensation"></canvas>
+            <canvas id="test-reference-canvas" width="1" height="1" hidden aria-label="Original/current double exposure program at contrast 12 and zero exposure compensation"></canvas>
           </div>
-          <button id="test-reference-download" class="save-button" type="button" hidden disabled>Download saved version</button>
+          <button id="test-reference-download" class="save-button" type="button" hidden disabled>Save to device</button>
         </section>
         <div class="trial-editor">
           <section class="comparison-panel trial-panel" aria-labelledby="trial-title">
-            <h2 id="trial-title">Trial · reduced overlap · 20% · contrast 12</h2>
+            <h2 id="trial-title">Experimental film sim · reduced overlap · 20% · contrast 12</h2>
             <div class="image-stage">
               <p id="test-empty" class="empty-state">Choose two photographs.</p>
-              <canvas id="test-canvas" width="1" height="1" hidden aria-label="Adjustable trial double exposure"></canvas>
+              <canvas id="test-canvas" width="1" height="1" hidden aria-label="Experimental film sim double exposure"></canvas>
               <p id="test-busy" class="busy-indicator" hidden>Developing…</p>
             </div>
             <div class="comparison-actions">
-              <button id="test-download" class="save-button" type="button" hidden disabled>Download trial</button>
+              <button id="test-download" class="save-button" type="button" hidden disabled>Save to device</button>
               <button id="test-rotate" class="save-button" type="button" hidden disabled aria-label="Rotate trial 90 degrees clockwise">Rotate 90°</button>
             </div>
           </section>
@@ -101,10 +101,10 @@
             </section>
             <div class="test-controls">
               <div class="renderer-control">
-                <label for="test-renderer">Trial treatment</label>
+                <label for="test-renderer">Experimental treatment</label>
                 <select id="test-renderer">
                   <option value="balanced" selected>Reduced overlap (trial)</option>
-                  <option value="linear">Saved Current + contrast</option>
+                  <option value="linear">Original/current addition + contrast</option>
                   <option value="revised">Revised smooth</option>
                   <option value="smooth">Saved smooth exposure</option>
                   <option value="film">Earlier film curve</option>
