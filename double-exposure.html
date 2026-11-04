@@ -26,7 +26,7 @@
       <div id="exposure-controls" class="exposure-controls">
         <p id="upload-instructions" class="upload-instructions">Use the <span id="picker-singular">button</span><span id="picker-plural" hidden>buttons</span> below to select a photo from your library<span id="camera-instructions" hidden> or take a photo with your camera</span>. The photo that you provide will be combined with another image to create a double exposure. You may choose whether you want your upload to be added to the library of base photos upon which new double exposures can be made.</p>
         <fieldset class="library-option" aria-describedby="library-note">
-          <legend class="library-question">Add your photo to the shared library for future double exposures?</legend>
+          <legend class="library-question"><span id="next-photo-note" class="next-photo-note" hidden>For your next new photo</span>Add your photo to the shared library for future double exposures?</legend>
           <div class="library-choices">
             <label class="checkbox-label library-choice" for="allow-reuse">
               <input id="allow-reuse" type="radio" name="original-sharing" value="yes" required>
@@ -40,7 +40,7 @@
           <p id="library-note" class="library-note">Choose Yes or No before selecting or taking a photo.</p>
         </fieldset>
 
-        <div class="exposure-buttons">
+        <div id="upload-actions" class="exposure-buttons">
           <div id="source-actions" class="actions source-actions">
             <div class="file-picker">
               <input id="participant-input" class="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif" aria-describedby="archive-note" disabled>

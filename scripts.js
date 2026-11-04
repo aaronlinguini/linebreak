@@ -405,6 +405,7 @@ function initializeExposureStudio() {
     workspace: byId("workspace"), canvas: byId("canvas"),
     resultEmpty: byId("result-empty"), sourceActions: byId("source-actions"),
     exposureControls: byId("exposure-controls"), uploadInstructions: byId("upload-instructions"),
+    uploadActions: byId("upload-actions"), nextPhotoNote: byId("next-photo-note"),
     outputOptions: byId("output-options"), monochrome: byId("visitor-monochrome"),
     colour: byId("visitor-colour"), repeatActions: byId("repeat-actions"),
     resultActions: byId("result-actions"), allowReuse: byId("allow-reuse"), declineReuse: byId("decline-reuse"), artistOnly: byId("artist-only"), sharedLibrary: byId("shared-library"),
@@ -425,7 +426,7 @@ function initializeExposureStudio() {
   const developingMessage = ui.busy.textContent;
   const savingMessage = ui.savingNote.textContent.trim();
   const state = { working: false, connecting: false, ready: false, hasResult: false, participant: null,
-    selectedFile: null, selectedHash: null, selectionChoices: null, queued: false, downloadUrl: null, downloadBlob: null, rePairUnavailable: false,
+    selectedFile: null, selectedHash: null, selectionChoices: null, nextPhotoConsent: undefined, poolChoice: false, queued: false, downloadUrl: null, downloadBlob: null, rePairUnavailable: false,
     displayedSubmissionId: null, previewing: false, previewBase: null, previewArtistOnly: null,
     pairKey: null, colourResults: new Map(), displayedResult: null,
     desiredMonochrome: PROJECT_SETTINGS.monochrome, colourWorking: false };
@@ -547,22 +548,26 @@ function initializeExposureStudio() {
       input.disabled = state.working || selected || pending || !sharingChoiceMade();
     }
     ui.sourceActions.hidden = selected || state.hasResult;
+    ui.uploadActions.hidden = ui.sourceActions.hidden;
     ui.uploadInstructions.hidden = selected;
-    ui.exposureControls.hidden = selected || state.hasResult || pending;
+    ui.exposureControls.hidden = false;
+    ui.exposureControls.classList.toggle("has-selection", selected);
+    ui.nextPhotoNote.hidden = state.nextPhotoConsent === undefined;
     ui.outputOptions.hidden = false;
     ui.monochrome.disabled = state.working || state.colourWorking || unsaved || (selected && (!imageReady || !visiblePairIsCurrent()));
     ui.colour.disabled = ui.monochrome.disabled;
     ui.repeatActions.hidden = !state.hasResult && !(selected && !processing && !pending);
     ui.resultActions.hidden = !state.hasResult;
-    ui.allowReuse.disabled = state.working || selected || pending;
+    ui.allowReuse.disabled = processing || unsaved || (selected && state.nextPhotoConsent === undefined);
     ui.declineReuse.disabled = ui.allowReuse.disabled;
-    ui.artistOnly.disabled = ui.allowReuse.disabled;
-    ui.sharedLibrary.disabled = ui.allowReuse.disabled;
+    ui.artistOnly.disabled = processing || unsaved || (selected && !completed);
+    ui.sharedLibrary.disabled = ui.artistOnly.disabled;
     ui.download.hidden = !state.hasResult;
     ui.rotate.hidden = !state.hasResult;
     ui.download.disabled = !imageReady || state.working || unsaved;
     ui.rotate.disabled = !state.hasResult || state.working || state.colourWorking || unsaved;
-    ui.newPairing.hidden = !state.hasResult || state.rePairUnavailable || (!unsaved && workflow.operation?.receipt?.canRePair !== true);
+    const changedPool = ui.artistOnly.checked !== (workflow.operation?.artistOnly ?? false);
+    ui.newPairing.hidden = !state.hasResult || state.rePairUnavailable || (!unsaved && !changedPool && workflow.operation?.receipt?.canRePair !== true);
     ui.newPairing.disabled = !completed || processing;
     ui.reset.disabled = processing || unsaved;
     ui.retry.disabled = state.working || state.connecting;
@@ -595,20 +600,22 @@ function initializeExposureStudio() {
     refreshActions();
   }
 
-  function clearSelection() {
+  function clearSelection({ keepNextPhotoChoices = false } = {}) {
+    const consent = keepNextPhotoChoices ? state.nextPhotoConsent : undefined;
     releasePhoto(state.participant);
     state.participant = null;
     state.selectedFile = null;
     state.selectedHash = null;
     state.selectionChoices = null;
+    state.nextPhotoConsent = undefined;
     state.queued = false;
     state.rePairUnavailable = false;
     if (retryTarget !== "connection") clearRetryTimer();
     lastSaveError = null;
     retryAttempts = 0;
     if (lastConnectionError && retryTimer === null && !state.connecting) scheduleRetry(lastConnectionError, true);
-    ui.allowReuse.checked = false;
-    ui.declineReuse.checked = false;
+    ui.allowReuse.checked = consent === true;
+    ui.declineReuse.checked = consent === false;
     clearResult();
     restoreConnectionStatus();
   }
@@ -721,6 +728,11 @@ function initializeExposureStudio() {
       state.ready = true;
       state.rePairUnavailable = false;
       presentResult(operation);
+      if (state.nextPhotoConsent === undefined) {
+        state.nextPhotoConsent = null;
+        ui.allowReuse.checked = false;
+        ui.declineReuse.checked = false;
+      }
       confirmed = true;
       announce("");
     } catch (error) {
@@ -857,12 +869,16 @@ function initializeExposureStudio() {
   for (const input of [ui.allowReuse, ui.declineReuse]) {
     input.addEventListener("change", () => {
       if (input.disabled) {
-        if (state.selectionChoices) {
+        if (state.nextPhotoConsent !== undefined) {
+          ui.allowReuse.checked = state.nextPhotoConsent === true;
+          ui.declineReuse.checked = state.nextPhotoConsent === false;
+        } else if (state.selectionChoices) {
           ui.allowReuse.checked = state.selectionChoices.allowReuse;
           ui.declineReuse.checked = !state.selectionChoices.allowReuse;
         }
         return;
       }
+      if (state.nextPhotoConsent !== undefined) state.nextPhotoConsent = ui.allowReuse.checked;
       restoreConnectionStatus();
       refreshActions();
     });
@@ -870,16 +886,17 @@ function initializeExposureStudio() {
   for (const input of [ui.artistOnly, ui.sharedLibrary]) {
     input.addEventListener("change", () => {
       if (input.disabled) {
-        if (state.selectionChoices) {
-          ui.artistOnly.checked = state.selectionChoices.artistOnly;
-          ui.sharedLibrary.checked = !state.selectionChoices.artistOnly;
-        }
+        ui.artistOnly.checked = state.poolChoice;
+        ui.sharedLibrary.checked = !state.poolChoice;
         return;
       }
       if (!input.checked) return;
+      state.poolChoice = ui.artistOnly.checked;
       state.previewBase = null;
       state.previewArtistOnly = null;
-      void connectArchive();
+      state.rePairUnavailable = false;
+      refreshActions();
+      if (!state.selectedFile) void connectArchive();
     });
   }
   for (const [input, monochrome] of [[ui.monochrome, true], [ui.colour, false]]) {
@@ -896,14 +913,14 @@ function initializeExposureStudio() {
   }
   ui.newPairing.addEventListener("click", async () => {
     if (ui.newPairing.disabled || !state.hasResult || state.working || state.colourWorking || workflow.pending ||
-        pendingColourResults() || workflow.operation?.receipt?.canRePair !== true) return;
+        pendingColourResults() || (ui.artistOnly.checked === (workflow.operation?.artistOnly ?? false) && workflow.operation?.receipt?.canRePair !== true)) return;
     clearError();
-    await finishSubmission(() => workflow.rePair({ monochrome: state.desiredMonochrome, excludedBaseHashes: contributions.hashes() }));
+    await finishSubmission(() => workflow.rePair({ monochrome: state.desiredMonochrome, excludedBaseHashes: contributions.hashes(), artistOnly: ui.artistOnly.checked }));
   });
   ui.reset.addEventListener("click", () => {
     if (ui.reset.disabled || state.working || state.colourWorking || workflow.pending || pendingColourResults()) return;
     clearError();
-    clearSelection();
+    clearSelection({ keepNextPhotoChoices: true });
   });
   ui.retry.addEventListener("click", async () => {
     if (state.working || state.connecting) return;

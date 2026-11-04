@@ -65,7 +65,7 @@ function modeFixture({ monochrome = false, canRePair = true, originalRetained } 
   return { workflow, storage, calls, get idCount() { return serial; } };
 }
 
-function historyFixture() {
+function historyFixture({ canRePair = true } = {}) {
   const calls = [];
   const assigned = new Map();
   let serial = 0;
@@ -85,7 +85,7 @@ function historyFixture() {
     complete: async request => {
       calls.push(["complete", request]);
       return { ...receipt(), submissionId: request.submissionId,
-        resultId: `result-${request.submissionId}`, baseId: assigned.get(request.submissionId).id, canRePair: true };
+        resultId: `result-${request.submissionId}`, baseId: assigned.get(request.submissionId).id, canRePair };
     }
   };
   const workflow = new Workflow({ storage, settings,
@@ -293,6 +293,91 @@ test("artist-only selection is frozen per operation, inherited by pairing and co
     const operation = operations.get(request.submissionId);
     if (operation.artistOnly) assert.equal(request.artistOnly, true);
     else assert.equal(Object.hasOwn(request, "artistOnly"), false);
+  }
+});
+
+test("an exhausted pool allows another scope while same-scope pairing stays unavailable", async () => {
+  for (const artistOnly of [false, true]) {
+    const h = historyFixture({ canRePair: false });
+    const first = await h.workflow.start(file, { artistOnly, allowReuse: true });
+    const count = h.calls.length;
+    await assert.rejects(h.workflow.rePair(), /no other photograph/);
+    assert.strictEqual(h.workflow.operation, first);
+    assert.equal(h.calls.length, count);
+
+    const next = await h.workflow.rePair({ artistOnly: !artistOnly });
+    assert.equal(next.artistOnly, !artistOnly);
+    assert.equal(next.allowReuse, first.allowReuse);
+    assert.strictEqual(next.file, first.file);
+    assert.notEqual(next.begin.base.sha256, first.begin.base.sha256);
+    assert.equal(first.artistOnly, artistOnly);
+    const pairingRequest = h.calls.filter(([kind]) => kind === "begin")[1][1];
+    assert.equal(pairingRequest.artistOnly === true, !artistOnly);
+    assert.equal(Object.hasOwn(pairingRequest, "originalFile"), false);
+    assert.equal(Object.hasOwn(pairingRequest, "allowReuse"), false);
+    await assert.rejects(h.workflow.rePair(), /no other photograph/);
+
+    const colour = await h.workflow.changeMonochrome(true);
+    assert.equal(colour.artistOnly, next.artistOnly);
+    assert.equal(colour.allowReuse, next.allowReuse);
+    assert.equal(colour.begin.base.sha256, next.begin.base.sha256);
+    const colourRequest = h.calls.filter(([kind]) => kind === "begin")[2][1];
+    assert.equal(colourRequest.reuse.sameBase, true);
+  }
+});
+
+test("a switched-pool pairing retries its frozen scope and receipt despite an exhausted parent pool", async () => {
+  for (const artistOnly of [false, true]) {
+    const h = historyFixture({ canRePair: false });
+    const previous = await h.workflow.start(file, { artistOnly, allowReuse: false });
+    const beginRequest = h.storage.begin;
+    const completeRequest = h.storage.complete;
+    const attempts = [];
+    let pinned;
+    let loseBegin = true;
+    let loseReceipt = true;
+    h.storage.begin = async request => {
+      attempts.push(["begin", request]);
+      pinned ||= await beginRequest(request);
+      if (loseBegin) { loseBegin = false; throw new Error("lost switched-pool begin response"); }
+      return pinned;
+    };
+    h.storage.complete = async request => {
+      attempts.push(["complete", request]);
+      const saved = await completeRequest(request);
+      if (loseReceipt) { loseReceipt = false; throw new Error("lost switched-pool receipt"); }
+      return saved;
+    };
+
+    const choice = { artistOnly: !artistOnly };
+    await assert.rejects(h.workflow.rePair(choice), /lost switched-pool begin response/);
+    const operation = h.workflow.operation;
+    choice.artistOnly = artistOnly;
+    assert.equal(operation.artistOnly, !artistOnly);
+    assert.equal(operation.allowReuse, previous.allowReuse);
+    assert.equal(h.workflow.pending, true);
+    await assert.rejects(h.workflow.rePair({ artistOnly }), /Finish saving/);
+    await assert.rejects(h.workflow.changeMonochrome(true), /Finish saving/);
+    await assert.rejects(h.workflow.retry(), /lost switched-pool receipt/);
+    assert.strictEqual(await h.workflow.retry(), operation);
+    assert.equal(h.workflow.pending, false);
+    assert.deepEqual(attempts.map(([kind]) => kind), ["begin", "begin", "complete", "complete"]);
+    for (const [kind, request] of attempts) {
+      assert.equal(request.submissionId, operation.submissionId);
+      assert.equal(request.artistOnly === true, !artistOnly);
+      if (kind === "begin") {
+        assert.equal(request.reuse.submissionId, previous.submissionId);
+        assert.equal(request.reuse.token, previous.begin.token);
+        assert.equal(Object.hasOwn(request, "allowReuse"), false);
+        assert.equal(Object.hasOwn(request, "originalFile"), false);
+      } else {
+        assert.strictEqual(request.resultBlob, operation.result.blob);
+      }
+    }
+    assert.equal(operation.begin.base.sha256, pinned.base.sha256);
+    assert.equal(operation.allowReuse, false);
+    assert.equal(previous.artistOnly, artistOnly);
+    assert.equal(previous.receipt.canRePair, false);
   }
 });
 

@@ -111,7 +111,6 @@ test("the local asynchronous header supplies the same existing reference after i
 
 test("only Part2 receives the requested header notice and its text-view destination", () => {
   const template = fs.readFileSync(path.join(root, "includes/site-header.html"), "utf8");
-  const notice = "Some reflections on this page will only appear only below particular image groups, so you need to move through the gallery in order to access them. You may also read them here, in the text-only view.";
   for (const page of ["experiment-1.html", "experiment-2-part-1.html", "experiment-2-part-2.html", "experiment-3.html"]) {
     const html = renderSiteHeader(template, { page, showExperiments: true });
     if (page !== "experiment-2-part-2.html") {
@@ -125,6 +124,6 @@ test("only Part2 receives the requested header notice and its text-view destinat
     assert.equal(links.length, 1);
     assert.ok(links[0][1].includes(`href="reflections.html#${page.replace(/\.html$/, "")}"`));
     assert.equal(links[0][2], "here, in the text-only view");
-    assert.equal(reference.replace(/<[^>]*>/g, ""), notice);
+    assert.ok(reference.slice(0, reference.indexOf("<a")).trim(), "the editable notice precedes the text-view link");
   }
 });

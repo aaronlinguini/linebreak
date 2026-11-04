@@ -414,6 +414,16 @@ content: ""; creates the pseudo-element with empty content. It's there purely fo
   padding-top: 0;
 }
 
+.exposure-controls.has-selection {
+  grid-template-columns: 1fr;
+}
+
+.exposure-controls.has-selection .library-option,
+.exposure-controls.has-selection .base-pool-option {
+  grid-column: 1;
+  grid-row: auto;
+}
+
 .base-pool-option {
   grid-column: 1 / -1;
   grid-row: 3;
@@ -500,6 +510,13 @@ content: ""; creates the pseudo-element with empty content. It's there purely fo
   margin-bottom: 8px;
   padding: 0;
   font-size: 14px;
+}
+
+.next-photo-note {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .library-choices {

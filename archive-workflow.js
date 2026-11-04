@@ -44,7 +44,7 @@ class ExposureArchiveWorkflow {
     if (!previous?.receipt || !previous.begin?.token) throw new Error("Create and save an exposure first.");
     if (typeof monochrome !== "boolean") throw new Error("The black-and-white choice is invalid.");
     if (typeof artistOnly !== "boolean") throw new Error("The photograph sharing choice is invalid.");
-    if (previous.receipt.canRePair === false) throw new Error("There is no other photograph available to pair right now.");
+    if (previous.receipt.canRePair === false && artistOnly === (previous.artistOnly ?? false)) throw new Error("There is no other photograph available to pair right now.");
     const excluded = this.excludedHashes(excludedBaseHashes);
     this.operation = { submissionId: this.makeId(), file: previous.file, artistOnly, excludedBaseHashes: excluded,
       allowReuse: previous.allowReuse, settings: Object.freeze({ ...previous.settings, monochrome }),

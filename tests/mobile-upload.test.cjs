@@ -30,7 +30,7 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
     "upload-label", "camera-label", "download-button", "rotate-button", "retry-button", "status", "error",
     "busy-indicator", "exposure-controls", "upload-instructions", "output-options", "visitor-monochrome", "visitor-colour",
     "camera-picker", "camera-separator", "camera-instructions", "picker-singular", "picker-plural",
-    "upload-again-note", "artist-only", "shared-library"];
+    "upload-again-note", "artist-only", "shared-library", "upload-actions", "next-photo-note"];
   const handlers = new Map();
   const windowHandlers = new Map();
   const elements = new Map(ids.map((id) => [id, {
@@ -105,9 +105,9 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
         calls.start.push({ file, choice, workflow: this });
         this.pending = true;
         const base = choice.previewBase || baseFor("first-base");
-        this.operation = { submissionId: "first", file, allowReuse: choice.allowReuse,
+        this.operation = { submissionId: calls.start.length === 1 ? "first" : `first-${calls.start.length}`, file, allowReuse: choice.allowReuse, artistOnly: choice.artistOnly ?? false,
           settings: { ...defaultSettings, monochrome: choice.monochrome }, base,
-          previewBase: choice.previewBase || null, begin: { base, token: "first-token" },
+          previewBase: choice.previewBase || null, begin: { base, token: "first-token", originalId: `original-${calls.start.length}` },
           result: { blob: { type: "image/jpeg", size: 10, monochrome: choice.monochrome }, width: 600, height: 400, preparedCanvas: {} },
           receipt: null };
         startReady.resolve(this.operation);
@@ -117,13 +117,14 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
         this.pending = false;
         return this.operation;
       }
-      async rePair({ monochrome = this.operation.settings.monochrome } = {}) {
+      async rePair({ monochrome = this.operation.settings.monochrome, artistOnly = this.operation.artistOnly ?? false } = {}) {
+        const previous = this.operation;
         calls.rePair++;
-        calls.rePairRequests.push({ monochrome });
+        calls.rePairRequests.push({ monochrome, artistOnly });
         this.pending = true;
         const base = baseFor("second-base");
-        this.operation = { submissionId: "second", settings: { ...this.operation.settings, monochrome }, base,
-          begin: { base, token: "second-token" },
+        this.operation = { ...previous, submissionId: `second-${calls.rePair}`, artistOnly, settings: { ...previous.settings, monochrome }, base,
+          begin: { base, token: "second-token", originalId: previous.begin.originalId },
           result: { blob: { type: "image/jpeg", size: 10, monochrome }, width: 800, height: 600, preparedCanvas: {} },
           receipt: null };
         if (rePairGate) await rePairGate;
@@ -133,11 +134,13 @@ function harness({ configured = true, canRePair = true, forceBlackAndWhite = fal
         return this.operation;
       }
       async changeMonochrome(monochrome, { result, base = this.operation.begin.base } = {}) {
+        const previous = this.operation;
         calls.changeMonochrome.push(monochrome);
         calls.modeRequests.push({ monochrome, result, base });
         this.pending = true;
-        this.operation = { submissionId: `mode-${calls.changeMonochrome.length}`, base, begin: { base, token: "mode-token" },
-          settings: { ...this.operation.settings, monochrome },
+        this.operation = { ...previous, submissionId: `mode-${calls.changeMonochrome.length}`, base,
+          begin: { base, token: "mode-token", originalId: previous.begin.originalId },
+          settings: { ...previous.settings, monochrome },
           result: result || { blob: { type: "image/jpeg", size: 10, monochrome }, width: 600, height: 400, preparedCanvas: {} },
           receipt: null };
         if (monochromeGate) await monochromeGate;
@@ -447,6 +450,10 @@ test("all result controls stay locked through original saving and cannot queue a
   await h.workflow.previewReady;
   const operation = h.workflow.operation;
   assert.equal(operation.begin, null, "the preview can appear before Google confirms the original");
+  assert.equal(h.elements.get("exposure-controls").hidden, false);
+  for (const id of ["upload-instructions", "source-actions", "upload-actions"]) assert.equal(h.elements.get(id).hidden, true);
+  assert.equal(h.elements.get("next-photo-note").hidden, true);
+  for (const id of ["allow-reuse", "decline-reuse", "artist-only", "shared-library"]) assert.equal(h.elements.get(id).disabled, true);
   assertResultControlsLocked(h, true);
   assert.equal(h.elements.get("upload-again-note").hidden, false);
   assert.equal(h.elements.get("upload-again-note").textContent,
@@ -467,6 +474,11 @@ test("all result controls stay locked through original saving and cannot queue a
   completing.resolve();
   await selecting;
   assertResultControlsLocked(h, false);
+  assert.equal(h.elements.get("exposure-controls").hidden, false);
+  assert.equal(h.elements.get("next-photo-note").hidden, false);
+  assert.equal(h.elements.get("allow-reuse").checked, false);
+  assert.equal(h.elements.get("decline-reuse").checked, false);
+  for (const id of ["allow-reuse", "decline-reuse", "artist-only", "shared-library"]) assert.equal(h.elements.get(id).disabled, false);
   assert.equal(h.calls.begin.length, 1, "disabled clicks must not start another pairing after saving");
   assert.equal(h.elements.get("upload-again-note").hidden, true);
   assert.equal(h.elements.get("status").textContent, "");
@@ -1106,7 +1118,7 @@ test("the visitor colour radios start from the artist default and freeze either 
       assert.equal(h.calls.start.length, 1);
       assert.equal(h.calls.start[0].choice.monochrome, visitorChoice);
       assert.equal(h.elements.get("output-options").hidden, false, "a saved exposure retains its colour-mode control");
-      assert.equal(h.elements.get("exposure-controls").hidden, true);
+      assert.equal(h.elements.get("exposure-controls").hidden, false);
       assert.equal(checkbox.disabled, false);
       assert.equal(h.elements.get("visitor-colour").checked, !visitorChoice);
       assert.equal(h.elements.get("visitor-colour").disabled, false);
@@ -1178,7 +1190,7 @@ test("an unanswered sharing question blocks both pickers and direct file-change 
   assert.equal(h.calls.start[0].choice.allowReuse, false);
 });
 
-test("each sharing answer stays frozen through preparation, variants and another pairing", async () => {
+test("each original sharing answer stays frozen through preparation, variants and another pairing", async () => {
   for (const allowReuse of [false, true]) {
     const h = harness();
     await flush();
@@ -1199,10 +1211,121 @@ test("each sharing answer stays frozen through preparation, variants and another
     assert.equal(h.calls.start.length, 1, "variants and pairings must not upload another original");
     assert.equal(h.calls.changeMonochrome.length, 1);
     assert.equal(h.calls.rePair, 1);
-    assert.equal(h.elements.get("allow-reuse").checked, allowReuse);
-    assert.equal(h.elements.get("decline-reuse").checked, !allowReuse);
-    assert.equal(h.elements.get("exposure-controls").hidden, true, "the saved original must not be asked again");
+    assert.equal(h.workflow.operation.allowReuse, allowReuse);
+    assert.equal(h.elements.get("allow-reuse").checked, false);
+    assert.equal(h.elements.get("decline-reuse").checked, false);
+    assert.equal(h.elements.get("exposure-controls").hidden, false);
+    assert.equal(h.elements.get("next-photo-note").hidden, false, "the visible question now applies to the next original");
   }
+});
+
+test("next-photo consent survives saved variants, another pairing and reset, then freezes independently for the next original", async () => {
+  for (const originalConsent of [false, true]) {
+    const variantSaving = deferred(), variantStarted = deferred();
+    let completions = 0;
+    const h = realArchiveHarness({ onComplete(options, receipt) {
+      if (++completions === 2) {
+        variantStarted.resolve();
+        return variantSaving.promise.then(() => receipt);
+      }
+      return receipt;
+    } });
+    await flush();
+    h.chooseSharing(originalConsent);
+    const firstFile = makeFile();
+    await h.select("participant-input", firstFile);
+    const original = h.workflow.operation;
+    assert.equal(h.elements.get("allow-reuse").checked, false);
+    assert.equal(h.elements.get("decline-reuse").checked, false);
+    assert.equal(h.elements.get("next-photo-note").hidden, false);
+    assert.equal(h.elements.get("exposure-controls").hidden, false);
+
+    const draftConsent = !originalConsent;
+    h.chooseSharing(draftConsent);
+    h.chooseArtistOnly(true);
+    const changing = h.toggleMonochrome(true);
+    await variantStarted.promise;
+    for (const id of ["allow-reuse", "decline-reuse", "artist-only", "shared-library"]) assert.equal(h.elements.get(id).disabled, true);
+    h.chooseSharing(originalConsent);
+    h.chooseArtistOnly(false);
+    assert.equal(h.elements.get("allow-reuse").checked, draftConsent, "a pending variant restores the next-photo draft, not the original's answer");
+    assert.equal(h.elements.get("artist-only").checked, true, "a pending variant restores the desired next pairing pool");
+    assert.equal(h.workflow.operation.allowReuse, originalConsent);
+    assert.equal(h.workflow.operation.artistOnly, false, "same-base colour work keeps its archived pool choice");
+    assert.equal(h.calls.begin[1].reuse.sameBase, true);
+    variantSaving.resolve();
+    await changing;
+    assert.equal(h.elements.get("allow-reuse").checked, draftConsent, "another receipt cannot clear the draft again");
+    await h.click("new-pairing-button");
+    assert.equal(h.workflow.operation.artistOnly, true);
+    assert.equal(h.workflow.operation.allowReuse, originalConsent);
+    assert.equal(h.workflow.operation.begin.originalId, original.begin.originalId);
+    assert.equal(h.elements.get("allow-reuse").checked, draftConsent);
+    assert.equal(h.elements.get("decline-reuse").checked, !draftConsent);
+    assert.equal(h.calls.start.length, 1);
+
+    h.click("reset-button");
+    assert.equal(h.elements.get("source-actions").hidden, false);
+    assert.equal(h.elements.get("upload-actions").hidden, false);
+    assert.equal(h.elements.get("upload-instructions").hidden, false);
+    assert.equal(h.elements.get("next-photo-note").hidden, true);
+    assert.equal(h.elements.get("allow-reuse").checked, draftConsent);
+    assert.equal(h.elements.get("decline-reuse").checked, !draftConsent);
+    assert.equal(h.elements.get("participant-input").disabled, false, "the explicitly chosen next-photo answer enables its picker");
+    const preparation = deferred();
+    h.blockPhoto(preparation.promise);
+    const nextFile = new File([Uint8Array.from([4, 5, 6])], "next.jpg", { type: "image/jpeg" });
+    const selecting = h.select("participant-input", nextFile);
+    h.chooseSharing(originalConsent);
+    h.chooseArtistOnly(false);
+    assert.equal(h.elements.get("allow-reuse").checked, draftConsent);
+    assert.equal(h.elements.get("artist-only").checked, true);
+    preparation.resolve();
+    await selecting;
+    assert.strictEqual(h.calls.start[1].file, nextFile);
+    assert.equal(h.calls.start[1].choice.allowReuse, draftConsent);
+    assert.equal(h.calls.start[1].choice.artistOnly, true);
+    assert.notEqual(h.workflow.operation.begin.originalId, original.begin.originalId);
+    assert.equal(h.elements.get("allow-reuse").checked, false, "the next original's first receipt clears only its subsequent-photo draft");
+    assert.equal(h.elements.get("decline-reuse").checked, false);
+    assert.equal(h.elements.get("next-photo-note").hidden, false);
+    assert.equal(h.calls.begin.filter(request => request.originalFile).length, 2);
+  }
+});
+
+test("changing the saved result's pool can escape a cached no-alternatives receipt and a previous failed pool", async () => {
+  let pairAttempts = 0;
+  const h = realArchiveHarness({
+    onBegin(options) {
+      if (options.reuse && !options.reuse.sameBase && ++pairAttempts === 1) {
+        throw Object.assign(new Error("No alternative photograph is currently available."), { code: "NO_ALTERNATIVE_BASE" });
+      }
+    },
+    onComplete(options, receipt) { return { ...receipt, canRePair: false }; }
+  });
+  await flush();
+  h.chooseSharing(true);
+  await h.select("participant-input", makeFile());
+  const original = h.workflow.operation;
+  assert.equal(h.elements.get("new-pairing-button").hidden, true);
+  h.chooseSharing(false);
+  h.chooseArtistOnly(true);
+  assert.equal(h.elements.get("new-pairing-button").hidden, false);
+  assert.equal(h.elements.get("new-pairing-button").disabled, false);
+  await h.click("new-pairing-button");
+  assert.equal(pairAttempts, 1);
+  assert.strictEqual(h.workflow.operation, original, "a failed new pool retains the saved original result");
+  assert.equal(h.elements.get("new-pairing-button").hidden, true);
+  h.chooseArtistOnly(false);
+  h.chooseArtistOnly(true);
+  assert.equal(h.elements.get("new-pairing-button").hidden, false, "choosing a pool clears its previous no-alternatives suppression");
+  await h.click("new-pairing-button");
+  assert.equal(pairAttempts, 2);
+  assert.ok(h.calls.begin.slice(1).every(request => request.artistOnly === true && request.reuse && !request.originalFile));
+  assert.equal(h.workflow.operation.artistOnly, true);
+  assert.equal(h.workflow.operation.allowReuse, true);
+  assert.equal(h.elements.get("decline-reuse").checked, true, "pool changes and receipts retain the next-photo consent draft");
+  assert.equal(h.calls.start.length, 1);
 });
 
 test("either sharing answer enables either picker, and cancelling preserves the answer", async () => {
@@ -1228,7 +1351,7 @@ test("either sharing answer enables either picker, and cancelling preserves the 
     await h.select(input, makeFile());
     assert.equal(h.calls.start[0].choice.allowReuse, allowReuse);
     assert.equal(h.elements.get("output-options").hidden, false);
-    assert.equal(h.elements.get("exposure-controls").hidden, true);
+    assert.equal(h.elements.get("exposure-controls").hidden, false);
     h.click("reset-button");
     assert.equal(h.elements.get("allow-reuse").checked, false, "a new contribution requires a fresh opt-in");
     assert.equal(h.elements.get("decline-reuse").checked, false);
@@ -1374,7 +1497,7 @@ test("a pending save retries the same operation without re-reading the original 
   assert.equal(h.elements.get("status").textContent, "");
 });
 
-test("a second pairing does not reupload the original and Start over clears consent", async () => {
+test("a second pairing does not reupload the original or answer the next-photo question", async () => {
   const h = harness();
   await flush();
   h.chooseSharing(true);
