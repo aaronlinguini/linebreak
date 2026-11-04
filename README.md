@@ -88,7 +88,7 @@ The initial archive connection also retries transient failures automatically, sh
 
 Before public use, check both library selection and native camera capture on an actual iPhone/iPad and Android device, including cancellation and a portrait photograph. Desktop viewport checks verify layout, not a physical device's camera chooser or HEIC conversion.
 
-1. Keep the selected artist files in `assets/base-photos/` and their existing matching originals in [My_photos](https://drive.google.com/drive/folders/1KTwgNyGgTgv8HwT1MrBaJeWk-JJIupKY). Version 7 supplies artist image paths for direct website loading; Google retains the source index and exact-original duplicate checks. See the artist-file steps below before changing the collection. Do not delete the retained Drive copies.
+1. Manage the selected artist files in `assets/base-photos/` using the artist-file steps below. The website-backed deployment reads its artist list from the published manifest.
 2. Set **Black and white** and explicitly select **Yes** or **No** to retaining the submitted original for future double exposures. Neither answer is selected initially. Then choose **Upload a photo** or **Take a photo**. Development starts automatically, with both choices fixed for this exposure.
 3. The rendered double exposure can appear before its archive finishes. Wait for the saving message to clear and the result controls to unlock before continuing or leaving the page. Saving a personal copy is optional. After confirmation, changing **Black and white / Original colour** creates or reuses the corresponding JPEG for the same two photographs; all result controls lock again while a new variant saves. Another pairing and **Create a double exposure using a new image** are available only after the current saves finish. Identical originals and finished JPEGs retain the existing duplicate checks.
 
@@ -100,9 +100,9 @@ The [Photo archive Apps Script project](https://script.google.com/home/projects/
 
 The final collection refresh verified all **113 artist bases**, with no deferred files, skipped files, or issues. Chrome and a fresh in-app-browser page connected successfully from the local port-5500 site after service activation. The earlier zero-base result concerned an old two-file upload; consult [GOOGLE-SETUP.md](GOOGLE-SETUP.md) for the current details. User photographs have not been altered. Around **9:09 PM on October 30**, the user reported that manual double-exposure generation succeeded. Archive-folder contents, consent-based moves, duplicate reuse, another pairing, and real mobile-camera behaviour have not been independently verified. Earlier browser automation could not select a local file because the Chrome extension lacked local-file access.
 
-The delivery path has one authoritative artist library: the assets listed in `assets/base-photos.json` and the matching private `AssetCatalog.gs`. Only artist source-index entries with matching SHA-256, MIME type, and byte length can be selected. The browser encodes each raw filename, downloads it from the same website, and verifies its size and SHA-256 before using the unchanged renderer. It caches the two most recently loaded assets. A missing or mismatched mapped artist asset fails; Google does not silently return another artist pool or base64 fallback. Opted-in participant bases stay dynamic in the existing Google pool.
+With the website-backed library deployed, Google uses the published `assets/base-photos.json` to select artist photos and caches the list between requests. The browser encodes each raw filename, downloads the photo from the website, and verifies its size and SHA-256 before rendering. It caches the two most recently loaded assets. The shared pool includes eligible opted-in participant photos from Drive and gives each distinct eligible hash one chance.
 
-Drive permissions and archive safeguards remain unchanged. Google still scans retained originals using metadata and bounded header checks, and fully verifies existing original bytes when a duplicate upload must be reused. Archive writes remain restricted to app-created, app-marked files through `drive.file`; `PROJECT_OWNER_EMAIL` must match the dedicated account. Retained Drive artist copies are still needed for the index and original verification. No account-wide write/delete scope, OAuth grant, or folder-ID change is required.
+Google verifies retained participant originals when it reuses them. An upload identical to a published artist photo can reuse its website reference. Archive writes use `drive.file` and are restricted to app-created, app-marked files. `PROJECT_OWNER_EMAIL` must match the dedicated account.
 
 Open `double-exposure.html` through Live Server at `http://127.0.0.1:5500/`, or serve this folder on the same allowed port with the command below. Use one local server at a time. The live archive needs the deployed Google service and an allowed origin; **a published website or GitHub Pages bridge asset is no longer required**.
 
@@ -135,10 +135,10 @@ python3 -m http.server 5500 --bind 127.0.0.1
 - `vendor/heic-to/`: the separate heic-to 1.6.7 decoder, its LGPL-3.0 license and notices, and the bundled corresponding sources in `SOURCES.tar.gz`.
 - `assets/base-photos/` and `assets/base-photos.json`: selected artist image files and their generated public manifest.
 - `artist-import.js` and `artist-import.css`: external assets for the owner-only import page; they contain no Google access credentials.
-- `google-apps-script/`: backend Code.gs workflow, Drive/Sheets adapters in Storage.gs, generated Client.gs and AssetCatalog.gs, Bridge.html, optional owner-only Artist.html, personal-save OwnerStudio.gs, generated owner-only Studio.html, and the dedicated-account manifest; none are Pages assets.
+- `google-apps-script/` contains the backend workflow in Code.gs, the published artist list reader in WebsiteLibrary.gs, Drive/Sheets adapters in Storage.gs, the generated Client.gs and rollback AssetCatalog.gs, and private Apps Script pages.
 - `scripts/build-owner-studio.cjs`: generates/checks the private Studio.html template from the comparison page and final hashed public dependencies.
 - `scripts/build-google-client.cjs`: rebuilds `Client.gs` from `drive-bridge.js`; use `--check` to confirm they match without writing.
-- `scripts/build-base-assets.cjs`: validates selected photo files and regenerates the public manifest and private Google catalog without changing the images.
+- `scripts/build-base-assets.cjs` validates selected photo files and regenerates the public manifest and private rollback catalog.
 - `scripts/vendor/es-module-lexer/`: a small MIT-licensed parser used only during preparation to identify real JavaScript imports. It is not included in the website and needs no installation.
 - `tests/`: numerical, archive workflow, backend persistence, and transport checks.
 
@@ -148,10 +148,11 @@ There are no inline styles, executable script bodies, or inline event handlers i
 
 1. Copy selected JPEG, PNG, WebP, or AVIF files, up to 30 MiB each, directly into `assets/base-photos/`. Keep their raw filenames. The folder accepts no subfolders or unrelated files apart from `.DS_Store`.
 2. Run `node scripts/build-base-assets.cjs`, then `node scripts/build-base-assets.cjs --check`. The builder hashes and validates every file, keeps one manifest entry per identical byte sequence, and does not delete, rename, resize, or re-encode photographs.
-3. Keep the corresponding byte-identical Drive originals for the current source index and duplicate checks. New or changed local assets must match indexed artist originals; adding only an unmapped local file does not make it eligible.
-4. Save the generated `google-apps-script/AssetCatalog.gs` in the existing Google project. Save `Code.gs` too only when its code changed, then deploy a new version of that existing endpoint. No new authorization or setup is needed. Refresh the owner collection check and confirm the catalog has no unmatched assets.
+3. Publish the selected files and rebuilt manifest through the normal Pages workflow. The Google cache may take a little time to pick up the published list.
 
-The public manifest, `base-assets.js`, and selected image files are included in the generated website package. The Google catalog and backend are excluded from the deployed artifact. A local build prepares the package; pushing to `main` starts the Actions deployment.
+The first switch to the website library requires deploying `Code.gs` and `WebsiteLibrary.gs` in the existing Google project. After that, artist photo updates use the Pages workflow alone. The builder still generates `AssetCatalog.gs` for the older Drive-backed mode. [Installation and verification](GOOGLE-SETUP.md#add-and-manage-artist-base-files)
+
+After the website-backed deployment is verified, Drive copies that match published artist files are optional. Preserve any legacy participant originals in `My_photos`, along with its folder and the archive index.
 
 ## Exposure treatment
 

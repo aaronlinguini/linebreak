@@ -22,7 +22,7 @@ Both application-level daily caps remain removed. Their initial Google Version 1
 
 The earlier consent-retention revision was installed as **Google Version 9**: Yes retains the original in `participant_uploads`; No archives only the finished result, with no original file or Sources row. Google Version 9 was deployed November 2 at 1:36 PM in the dedicated project account on the existing endpoint, with Anyone access and unchanged scopes, properties, and folder IDs. Saved Code.gs matched local bytes after editor reload (SHA-256 42067f2d67a72284e887bcd32df48727ab3c7f00a1c2602fa7932cab1791a5c9); Version 8 remains available for rollback. The same originals folder was renamed participant_uploads and its name was verified after reload. All 479 automated checks pass. No new live photo submission or physical-device check was performed in this revision.
 
-The dedicated account **aaron.double.exposure.project@gmail.com** holds the private photo archive and source index. Artist images are delivered from the website's selected static files; retained Drive originals still support index and duplicate verification. The [Apps Script project](https://script.google.com/home/projects/1gj7CIChAW6rMFOmP_Pb16TWSAwUKzZQxnOUOvvEUvDFOwQxKo65lYols/edit) uses these configured properties:
+The dedicated account **aaron.double.exposure.project@gmail.com** holds the private photo archive and source index. The website-backed library uses the published manifest for artist selection. Drive supplies eligible opted-in participant photos. These properties configure the existing [Apps Script project](https://script.google.com/home/projects/1gj7CIChAW6rMFOmP_Pb16TWSAwUKzZQxnOUOvvEUvDFOwQxKo65lYols/edit).
 
 | Property | Value / status |
 | --- | --- |
@@ -57,7 +57,7 @@ The approved frontend is live at [Ghost Images](https://aaronlinguini.github.io/
 
 Historical setup: the user approved the dedicated account's Google permissions, and `setupProject` created its folders and index on October 30 at **2:18:51 PM**. Version 1 deployed at **2:27 PM**; Version 3 added the consent-folder/duplicate handling revision at **3:25 PM**; Version 4 added the Google-served bridge; Version 5 added faster base-photo intake. The old **3:10:49–3:11:01 PM** scan's zero-base result concerned two earlier files only: accidentalselfie.jpeg had an unrecognized content signature and balcony.jpeg exceeded 30 MB. Those files were later replaced, so that result does not describe the current collection. The optional owner page previously showed correct folder links, and a real Incognito check denied owner access while signed out. Do not repeat initial authorization/setup, clear working IDs, or create another initial deployment.
 
-Keep the existing originals in [My_photos](https://drive.google.com/drive/folders/1KTwgNyGgTgv8HwT1MrBaJeWk-JJIupKY), signed into **aaron.double.exposure.project@gmail.com**. The selected static artist library must match their indexed exact hashes; Drive is not a separate fallback artist pool. Current archive links:
+Keep the existing Drive copies until the website-backed deployment is verified. Use these archive links while signed into **aaron.double.exposure.project@gmail.com**.
 
 | Project item | Link |
 | --- | --- |
@@ -69,7 +69,7 @@ Keep the existing originals in [My_photos](https://drive.google.com/drive/folder
 
 The [GitHub repository](https://github.com/aaronlinguini/double-exposure-online-project) is private and retains the last published frontend `949dc1`; the former Pages site is offline. Its project-account endpoint configuration is unchanged. The earlier personal-account deployment and its folders remain unchanged and paused as a rollback reference. Distinct new-account installation, folder-link, and deployment records are saved privately in the Git-ignored `secrets/` directory.
 
-No personal Drive-folder sharing, repeated authorization, or new setup is needed. The optional owner import page is not required to manage the selected static artist assets.
+Manage the website-backed artist library in the repository using the steps below.
 
 ## Private personal studio
 
@@ -152,11 +152,11 @@ The index contains **Sources**, **Submissions**, and **Usage** tabs. Setup does 
 
 The consent-folder revision uses the existing folders as follows:
 
-- **My_photos** keeps artist originals unchanged. Earlier retained participant files can remain here until a new authorized Yes completion moves that participant original to participant_uploads, preserving its file ID and bytes without a copy. Do not move newly retained Yes originals here, bulk-migrate existing files, or delete archives.
+- **My_photos** can contain both artist copies and earlier retained participant files. After verifying the website-backed deployment, artist copies that match published files are optional. Preserve the folder and participant files. An earlier retained participant original can move to `participant_uploads` on a new authorized Yes completion with the same file ID and bytes.
 - **participant_uploads** keeps the same private folder ID, configured property, and link. The new revision retains Yes originals here, including while pending; eligible participant use begins only after a completed result. Fresh No originals are never written here or to Sources. Older retained files are not bulk-migrated or deleted; a participant original can move here on a new authorized Yes completion. This folder holds live consented bases and must not be cleared wholesale. Owner cleanup must avoid pending saves and update dependent indexes; the name never triggers automatic deletion.
 - **Completed_double_exposures** holds completed JPEGs. Identical results from separate submissions, retries, or tests reuse one file; the index can record several exposures referring to that same file. Finished exposures never enter the base-photo pool.
 
-For a retained Yes submission that is a byte-identical copy of an artist base already in `My_photos`, the existing artist file is reused and keeps its name and location. A folder scan preserves participant provenance and consent; a filename alone never grants consent.
+In website mode, a Yes submission with the exact bytes of a published artist photo can reuse the website reference. A folder scan preserves legacy participant provenance and consent.
 
 ## Pairing history and pool filtering
 
@@ -172,16 +172,19 @@ Code.gs was installed in Version 13; Version 14 installed its regenerated Studio
 
 ## Add and manage artist base files
 
+Install `Code.gs` and `WebsiteLibrary.gs` once in the existing Google project, then update its existing deployment to a new version. Keep the same endpoint, account, access settings, scopes, properties and folder IDs. Confirm a live bootstrap reports the published artist count, and check both artist-only and shared draws before removing any verified artist copies from Drive. The older Drive-backed deployment still expects its matching originals.
+
 1. Copy selected JPEG, PNG, WebP, or AVIF files up to **30 MiB** each directly into local `assets/base-photos/`, preserving raw filenames. Do not include subfolders or unrelated files apart from `.DS_Store`.
-2. Run `node scripts/build-base-assets.cjs`, then `node scripts/build-base-assets.cjs --check`. The builder validates signatures and hashes, deduplicates manifest entries, and writes `assets/base-photos.json` plus private `google-apps-script/AssetCatalog.gs`. It never copies, renames, resizes, re-encodes, or deletes the input photos. Empty/invalid input leaves previous outputs intact.
-3. Retain the corresponding exact-byte Drive originals directly inside **My_photos** for the current metadata index and duplicate-original checks. New/changed assets must match indexed artist sources; a local file alone does not make an unmapped hash eligible.
-4. Save generated **AssetCatalog.gs** in the existing Google project, and save **Code.gs** only when its code changed. Deploy a new version of the existing endpoint. Refresh the owner collection and confirm `websiteAssetCount` and `websiteAssetCatalogCount` agree with zero `unmatchedWebsiteAssetCount`. No new scopes, IDs, or OAuth approval are needed.
+2. Run `node scripts/build-base-assets.cjs`, then `node scripts/build-base-assets.cjs --check`. The builder validates signatures and hashes, deduplicates manifest entries, and writes `assets/base-photos.json` plus the private rollback catalog `google-apps-script/AssetCatalog.gs`.
+3. Publish the selected files and rebuilt manifest through Pages. Allow time for the cache to refresh, then reload the tool. Future artist photo updates use the Pages workflow alone.
 
-With the static catalog installed, Google returns a pinned artist descriptor rather than image base64. `base-assets.js` loads only the same website's encoded single-filename path, validates byte length and SHA-256, and caches the two most recent assets. Only matching mapped artists are eligible; an unavailable artist file fails without silently downloading a Drive fallback or selecting another artist collection. Consented participant bases continue through the dynamic Google pool. The exposure calculation and input bytes stay unchanged.
+Google reads the public manifest from the configured `SITE_URL` and caches it between requests. For each artist selection it returns a pinned descriptor. `base-assets.js` loads the website image, validates byte length and SHA-256, and caches the two most recent assets. An unavailable artist image fails its pinned check. Consented participant bases come from Drive.
 
-No import app or scheduled trigger is needed for normal use. With visitor uploads enabled, the program checks for folder changes when the site connects and before a new pairing. A completed scan is reused for up to one minute. Reload the site or use Retry after adding photographs. While visitor uploads are paused, run **refreshArtistCollection** in the project account's Apps Script editor to check the collection; the optional owner page can also check it.
+Website mode accepts artist additions through Pages. The owner can run **refreshArtistCollection** in the Apps Script editor to check the collection.
 
 Owner refresh diagnostics report at most **50** file issues using private metadata such as the filename, declared/detected type, size, and a bounded reason code. They do not include image bytes, access tokens, or file IDs, and are not returned to visitor requests. These diagnostics distinguish unsupported content and oversize files from successful intake.
+
+### Legacy Drive scan
 
 The deployed faster scan uses Drive's output-only **SHA-256 checksum**, when available, plus a verified media-header read of at most **64 bytes** for new or changed JPEG, PNG, and WebP bases. Fresh metadata before and after the read must agree on checksum, size, type, modification time, version when supplied, parent folders, and download permission. Partial responses must have an exact `Content-Range` and the requested byte count. These checks do not alter the photograph. [Drive file metadata](https://developers.google.com/workspace/drive/api/reference/rest/v3/files), [partial media downloads](https://developers.google.com/workspace/drive/api/guides/manage-downloads).
 
@@ -191,11 +194,11 @@ Full Drive-byte verification remains for existing original reuse and dynamic par
 
 **Fast scan is installed as Version 5.** Google Version 4 and local checkpoint `89746ec` preserve the prior scan for rollback. The current counts and remaining live checks are recorded above. This performance edit changes no image treatment, original retention, consent, duplicate handling, scopes, or archive IDs. Public service activation was separately approved; further pause changes remain the user's choice.
 
-Byte-identical artist photos get only one eligible source-pool entry. Duplicate index records retain their metadata so later scans do not download them again. The program does not delete duplicate files that the user placed in Drive. Moving or deleting a base photo makes it ineligible after the next successful scan; already saved results remain archived. If a photo changes or disappears after it was assigned to a pending exposure, the pinned checksum prevents a retry from silently substituting different image content.
+In the legacy deployment, byte-identical artist photos get one pool entry. Duplicate index records retain their metadata so later scans can reuse it. Moving or deleting a legacy Drive base makes it ineligible after the next successful scan. In website mode, a successful manifest refresh determines eligibility for new artist draws. Saved JPEGs remain in the archive. A pending pairing uses its pinned hash.
 
 Base photos can be supplied to visitors for random pairings even though the Drive folders remain private. Photos displayed on future gallery pages are a separate selection; adding a base does not create a gallery page.
 
-The optional `/exec?view=artist` page remains owner-only. Its upload control does not build the static website catalog; use the local artist-file steps above.
+The optional `/exec?view=artist` page remains owner-only.
 
 ## Deployment and publication reference
 
@@ -230,7 +233,7 @@ Keep `SITE_URL` as the canonical HTTPS website base with a trailing slash; the c
 
 The visitor bridge HTML now points to the same Google deployment's fixed `?asset=bridge` route. That route serves only the generated JavaScript with a JavaScript MIME type; it reads no script properties or Google files and accepts no filename or caller-supplied code. The normal bridge page still checks the website origin, and the JavaScript still checks its top window, channel, message origin, and permitted operations. The route uses [Google's Content Service](https://developers.google.com/apps-script/guides/content), which redirects the static response to a Google content URL. HTML continues to contain only an external script reference.
 
-The bridge repair is installed in the existing Google project. Its generated **Client.gs** is separate from the new private artist **AssetCatalog.gs**. Bridge changes require rebuilding Client.gs; artist file changes require rebuilding the asset catalog. Save affected Google sources and update the existing deployment while preserving its `/exec` URL, account, Anyone access, permissions, properties, and folder IDs. Do not rerun setup or grant new scopes.
+The bridge is installed in the existing Google project. Bridge changes require rebuilding **Client.gs**, saving the affected Google sources and updating the existing deployment. The website-backed library reads the published manifest after a Pages update. Preserve the Google deployment's `/exec` URL, account, Anyone access, permissions, properties and folder IDs.
 
 While GitHub Pages is offline, the optional owner page's external assets remain unavailable. Direct Drive uploads, collection checks in the Apps Script editor, and `local-test.html` remain available. The visitor bridge is verified from an explicitly allowed local HTTP origin while the public website remains offline. **`UPLOADS_PAUSED=true` blocks visitor bootstrap, uploads, and completion**; the current value is **false**, explicitly approved for live testing. Publishing frontend files or changing the service's pause state requires the user's instruction.
 
@@ -242,7 +245,7 @@ The existing Google service is active as explicitly approved, and the frontend r
 2. After the consent-retention revision is deployed, open `double-exposure.html` in a genuinely signed-out/private browser. Confirm neither answer is selected and upload/camera controls are unavailable. Select No, set colour, and choose a fresh distinct photo. Verify that the preview can appear while all result controls remain locked; transient save failures retry without changing the original reference, base, consent, or JPEG.
 3. For that fresh No submission, verify there is no Drive original and no new Sources row, but a completed JPEG exists in Completed_double_exposures. Its Submissions originalId is the opaque `unretained:<sha256>` reference with allowReuse=false. The input must not join future pairings.
 4. Select Yes for a fresh distinct photo. Confirm its original is retained in participant_uploads, remains there after completion, and becomes participant-base eligible only after its result is saved. Nothing moves to My_photos and no duplicate original is created. A random draw need not select it immediately.
-5. For both Yes and No, use Create another double exposure using this photo and change the saved colour mode. Confirm the original reference and frozen browser File stay the same, consent is inherited, and no second original is sent. No must still have no Drive original or Sources entry. Test a renamed byte-identical retained input, an existing artist base, and repeated completed JPEGs without creating duplicate stored files or bulk-changing legacy archives. A previously retained participant original may move from My_photos to participant_uploads on a new Yes completion, keeping its ID and bytes; an artist-kind duplicate must keep its existing name and location.
+5. For both Yes and No, use Create another double exposure using this photo and change the saved colour mode. Confirm the original reference and frozen browser File stay the same and consent is inherited. Verify that No creates no Drive original or Sources entry. Check reuse of a renamed byte-identical retained input, the website reference for an identical published artist photo, and deduplication of repeated completed JPEGs. A previously retained participant original may move from My_photos to participant_uploads on a new authorized Yes completion, keeping its ID and bytes.
 6. Retry an interrupted save. Confirm that an unconfirmed preview remains with Retry saving and stable submission/base/result identity, without allowing a download or falsely reporting success. A changed or removed assigned artist photo must fail clearly rather than silently replace the base.
 7. Change **Black and white** on a saved result in both directions. Confirm a new submission ID with the same original, pinned base, and consent, no additional original copy, and an archived JPEG matching the displayed colour mode. The earlier result must remain unchanged. An identical JPEG should reuse its existing archived file. Retry a failed variant without selecting a new base or changing its JPEG/recipe.
 8. Verify `/exec?view=artist` denies signed-out and different-account visitors while the project owner can use it. Do not treat another signed-in browser as an anonymous test.
@@ -257,7 +260,7 @@ Fresh participant inputs are validated and SHA-256 hashed on the server. A Yes o
 
 This identity check covers identical file bytes. Cropping, resizing, re-exporting, changing embedded metadata, or camera-picker conversion can change those bytes; detecting every visually similar version cannot be guaranteed by exact hashing. The program does not trust a browser-supplied fingerprint to substitute a different archived original. Copies manually created by dragging the same file into Drive are detected and receive only one eligible pool entry, but are not silently deleted. No broader Drive write permission is added for cleanup.
 
-Finished exposures never join the source pool. Under the new policy, a Yes original stays in participant_uploads and becomes eligible as a participant base only after a completed result. No stores only the finished result and its Submissions metadata, with opaque `unretained:<sha256>` as originalId and no original Drive file or Sources row. Authenticated re-pairing and colour variants reuse that reference and the same frozen browser File; no second original is sent. There is no bulk migration or deletion of existing originals, including older No files. An earlier retained participant original can move from My_photos to participant_uploads on a new authorized Yes completion with the same ID and bytes; artist-kind originals stay in My_photos unchanged. Do not clear the participant folder wholesale or renumber/delete index rows; it also contains active consented bases.
+The source pool contains published artist photos and eligible originals. A Yes participant original stays in `participant_uploads` and becomes eligible only after a completed result. No stores only the finished result and its Submissions metadata, with opaque `unretained:<sha256>` as originalId. Authenticated re-pairing and colour variants reuse the same reference and frozen browser File. An earlier retained participant original can move from `My_photos` to `participant_uploads` on a new authorized Yes completion with the same ID and bytes. Preserve active consented bases and their index rows.
 
 Retry saving keeps the same submission, original reference, assigned base, rendered JPEG, consent, and settings in the open browser session. A No reference is `unretained:<sha256>`, not a Drive file ID; retain the same frozen File for that session. A preview does not prove saving finished. Keep the tab open until the saving message clears and controls unlock. Closing can interrupt a save; a Yes original may remain pending, while No has no retained original to recover from. The existing Sources/Submissions schemas and authenticated retry safeguards remain; do not manually edit hashes, consent, tokens, or the Usage ledger.
 

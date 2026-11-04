@@ -20,6 +20,35 @@ function assetFor(backend, sourceId, name = "base.jpg") {
     byteLength: Number(source.byteLength), name };
 }
 
+function websiteLibrary(backend, photos) {
+  const cache = new Map();
+  let fetches = 0;
+  backend.sandbox.CacheService = { getScriptCache: () => ({
+    get(key) {
+      const value = cache.get(key);
+      return value?.expires > backend.sandbox.Date.now() ? value.text : null;
+    },
+    put(key, text, seconds) {
+      cache.set(key, { text, expires: backend.sandbox.Date.now() + seconds * 1000 });
+    }
+  }) };
+  const library = { photos, responseCode: 200, get fetches() { return fetches; } };
+  backend.sandbox.UrlFetchApp = { fetch(url, options) {
+    assert.equal(url, "https://artist.example/exposures/assets/base-photos.json");
+    assert.equal(options.followRedirects, false);
+    assert.equal(backend.lock.held, false, "a website fetch must not hold the archive lock");
+    fetches++;
+    return { getResponseCode: () => library.responseCode, getContent: () =>
+      signed(Buffer.from(JSON.stringify({ version: 1, photos: library.photos }))) };
+  } };
+  vm.runInContext(fs.readFileSync(path.join(project, "google-apps-script", "WebsiteLibrary.gs"), "utf8"), backend.sandbox);
+  return library;
+}
+
+function websitePhoto(marker, name = `website-${marker}.jpg`) {
+  return { path: `assets/base-photos/${name}`, name, sha256: photoHash(marker), byteLength: jpeg(marker).length, mimeType: "image/jpeg" };
+}
+
 // In-memory fakes implement the Google service boundary. The application's
 // real Apps Script is executed unchanged, so persistence and retry assertions
 // exercise its actual public API rather than a second implementation of it.
@@ -607,6 +636,85 @@ test("trusted website artist assets replace base-byte downloads while keeping pi
   assert.equal(variant.originalId, first.originalId);
   assert.equal(backend.io.blobReads, reads);
   assert.equal(backend.records("Submissions")[1].baseSha256, asset.sha256);
+});
+
+test("website-only artist bases pair, retry, save and reuse without an artist Drive folder", () => {
+  const backend = makeBackend(); backend.setup();
+  backend.properties.delete("EXPOSURE_ARTIST_FOLDER_ID");
+  const first = websitePhoto(1), second = websitePhoto(2);
+  const library = websiteLibrary(backend, [first, second]);
+  const preview = backend.data("bootstrap", { artistOnly: true });
+  assert.equal(preview.artistCount, 2);
+  const payload = { submissionId: submissionId(1), original: original(1), allowReuse: true, preferredBaseSha256: second.sha256 };
+  const begun = backend.data("begin", payload);
+  assert.equal(begun.base.id, "website:" + second.sha256);
+  assert.equal(begun.originalId, "website:" + first.sha256);
+  assert.deepEqual(backend.data("begin", payload), begun);
+  assert.equal(backend.folder("Participant").files.length, 0);
+  assert.equal(backend.api("complete", backend.completePayload(begun, 2)).error.code, "RESULT_MATCHES_SOURCE");
+  const saved = backend.data("complete", backend.completePayload(begun));
+  assert.equal(saved.baseId, begun.base.id);
+  const variant = backend.data("begin", { submissionId: submissionId(2), reuse: { submissionId: begun.submissionId, token: begun.token, sameBase: true } });
+  assert.deepEqual(variant.base, begun.base);
+  assert.equal(variant.originalId, begun.originalId);
+  assert.equal(library.fetches, 1, "warm pairings and saves reuse the validated website list");
+});
+
+test("a website-backed pool draws uniformly across artist and opted-in participant hashes", () => {
+  const backend = makeBackend(); backend.setup();
+  const first = websitePhoto(1), second = websitePhoto(2);
+  const library = websiteLibrary(backend, [first]);
+  const participant = backend.begin(1, 22, true);
+  backend.data("complete", backend.completePayload(participant));
+  library.photos = [first, second];
+  backend.advance(61000);
+  const choices = [0, 0.34, 0.67].map(random => {
+    vm.runInContext(`Math.random = () => ${random}`, backend.sandbox);
+    const pool = backend.data("bootstrap");
+    assert.equal(pool.artistCount, 2);
+    assert.equal(pool.participantCount, 1);
+    return pool.previewBase.id;
+  });
+  assert.deepEqual(choices, ["website:" + first.sha256, "website:" + second.sha256, participant.originalId]);
+  const artistPool = backend.data("bootstrap", { artistOnly: true, excludedBaseHashes: [second.sha256] });
+  assert.equal(artistPool.totalEligible, 1);
+  assert.equal(artistPool.previewBase.sha256, first.sha256);
+  library.photos.push(websitePhoto(22));
+  backend.advance(61000);
+  assert.equal(backend.data("bootstrap").totalEligible, 3, "duplicate bytes in both libraries get one chance");
+});
+
+test("legacy Drive preview and pairing IDs survive removal of the artist copies", () => {
+  const backend = makeBackend(); backend.setup(); const artist = backend.seed(1); backend.refresh();
+  const asset = assetFor(backend, artist.getId());
+  backend.sandbox.artistAssetCatalog_ = () => ({ version: 1, photos: [asset] });
+  const preview = backend.data("bootstrap").previewBase;
+  const payload = { submissionId: submissionId(1), original: original(22), allowReuse: true, preferredBaseSha256: asset.sha256 };
+  const begun = backend.data("begin", payload);
+  backend.data("complete", backend.completePayload(begun));
+  const library = websiteLibrary(backend, [asset, websitePhoto(2)]);
+  artist.setTrashed(true);
+  backend.refresh();
+  assert.deepEqual(backend.data("begin", payload).base, preview);
+  const variant = backend.data("begin", { submissionId: submissionId(2), reuse: { submissionId: begun.submissionId, token: begun.token, sameBase: true } });
+  assert.deepEqual(variant.base, preview);
+  library.photos = [websitePhoto(2)];
+  backend.advance(61000);
+  const repair = backend.data("begin", { submissionId: submissionId(3), reuse: { submissionId: begun.submissionId, token: begun.token } });
+  assert.equal(repair.base.sha256, photoHash(2));
+});
+
+test("a temporary website failure uses the recent validated photo list", () => {
+  const backend = makeBackend(); backend.setup();
+  const library = websiteLibrary(backend, [websitePhoto(1)]);
+  assert.equal(backend.data("bootstrap").artistCount, 1);
+  library.responseCode = 503;
+  backend.advance(61000);
+  assert.equal(backend.data("bootstrap").artistCount, 1);
+  assert.equal(backend.data("bootstrap").artistCount, 1);
+  assert.equal(library.fetches, 2, "failed refreshes have a retry cooldown");
+  backend.advance(600000);
+  assert.equal(backend.api("bootstrap").error.code, "ARCHIVE_UNAVAILABLE");
 });
 
 test("website artist delivery retains full existing-file verification for duplicate original uploads", () => {

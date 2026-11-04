@@ -1,11 +1,10 @@
 /*
  * Private Drive archive + Sheets index for the double-exposure project.
- * Runs in a dedicated project account. My_photos contains artist bases.
+ * Runs in a dedicated project account. The website lists artist bases.
  * Opted-in originals stay in participant_uploads and join the pool only after
  * their result is saved. Opted-out originals are not retained. Completed
  * exposures have their own folder.
  * Archive writes remain limited to app-created files.
- * Run setupProject, then add base photographs directly in the Drive folder.
  * No operation changes Drive sharing settings.
  *
  * Script properties:
@@ -117,9 +116,10 @@ function exposureApi(request) {
     // Validate pairing choices before request accounting or archive setup can write.
     excludedBaseHashes_(payload.excludedBaseHashes);
     artistOnly_(payload.artistOnly);
+    var websiteAssets = typeof loadWebsiteArtistIndex_ === "function" ? loadWebsiteArtistIndex_(payload.preferredBaseSha256) : undefined;
     var data = withLock_(function () {
       guardVisitorRequest_();
-      var project = project_();
+      var project = project_(websiteAssets);
       if (request.action === "bootstrap") return bootstrap_(project, payload);
       if (request.action === "begin") return begin_(project, payload);
       return complete_(project, payload);
@@ -145,8 +145,9 @@ function artistApi(request) {
     }
     var payload = request.payload === undefined ? {} : request.payload;
     if (!isObject_(payload)) throw apiError_("INVALID_REQUEST", "The collection request is invalid.");
-    var data = request.action === "refresh" ? refreshArtistCollection_() : withLock_(function () {
-      var project = project_();
+    var websiteAssets = typeof loadWebsiteArtistIndex_ === "function" ? loadWebsiteArtistIndex_() : undefined;
+    var data = request.action === "refresh" ? refreshArtistCollection_(websiteAssets) : withLock_(function () {
+      var project = project_(websiteAssets);
       if (request.action === "status") {
         syncArtistSourcesIfDue_(project);
         return artistStatus_(project);
@@ -164,18 +165,19 @@ function artistApi(request) {
 
 function artistStatus_(project) {
   return {
-    artistCount: readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders).filter(function (source) {
+    artistCount: project.websiteArtist ? Object.keys(project.artistAssets).length : readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders).filter(function (source) {
       return source.kind === "artist" && isEligible_(source);
     }).length,
     maxOriginalBytes: EXPOSURE_CONFIG_.maxOriginalBytes,
     folders: {
       root: ArchiveDrive.getFolderById(PropertiesService.getScriptProperties().getProperty("EXPOSURE_ROOT_FOLDER_ID")).getUrl(),
-      artist: project.artist.getUrl(), originals: project.originals.getUrl(), results: project.results.getUrl()
+      artist: project.artist ? project.artist.getUrl() : null, originals: project.originals.getUrl(), results: project.results.getUrl()
     }
   };
 }
 
 function importArtist_(project, image) {
+  if (project.websiteArtist) throw apiError_("READ_ONLY_SOURCE", "Add artist photographs to the website's base photo library.");
   var scan = refreshArtistSources_(project);
   if (!scan.complete) throw apiError_("COLLECTION_REFRESHING", "The photograph collection is still being checked. Please retry in a moment.");
   var sources = readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders);
@@ -287,8 +289,9 @@ function setupProject_() {
   });
 }
 
-function refreshArtistCollection_() {
-  return withLock_(function () { return refreshArtistSources_(project_()); });
+function refreshArtistCollection_(websiteAssets) {
+  if (websiteAssets === undefined && typeof loadWebsiteArtistIndex_ === "function") websiteAssets = loadWebsiteArtistIndex_();
+  return withLock_(function () { return refreshArtistSources_(project_(websiteAssets)); });
 }
 
 function syncArtistSourcesIfDue_(project) {
@@ -334,7 +337,8 @@ function refreshArtistSources_(project) {
     issues.push(item);
   }
   var submissions = readRecords_(project.submissions, EXPOSURE_CONFIG_.submissionsHeaders);
-  var files = project.artist.getFiles(), participantFiles = project.originals.getFiles();
+  var files = project.artist ? project.artist.getFiles() : { hasNext: function () { return false; } };
+  var participantFiles = project.originals.getFiles();
   function preserve(fileId) {
     var previous = byId[fileId];
     if (!previous || previous.kind !== "artist") return;
@@ -356,6 +360,7 @@ function refreshArtistSources_(project) {
       if (invalidReason) { skipped++; issue(file, invalidReason, size, mimeType); continue; }
       var modifiedAt = file.getLastUpdated().toISOString();
       var previous = byId[fileId];
+      if (project.websiteArtist && (!previous || previous.kind !== "participant") && !file.isParticipantPhoto()) continue;
       // A private-folder file needs recorded participant provenance and consent.
       if (privateOriginal && (!previous || previous.kind !== "participant") && !file.isParticipantPhoto()) continue;
       // Moving a participant original into the pool never makes it an artist
@@ -446,6 +451,7 @@ function refreshArtistSources_(project) {
     }
   }
   existing.forEach(function (source) {
+    if (project.websiteArtist && source.kind === "artist") return;
     if (!retainedIds[source.sourceId] && isEligible_(source)) {
       source.eligible = false;
       updates.push(source);
@@ -454,7 +460,7 @@ function refreshArtistSources_(project) {
   writeRecordUpdates_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders, existing, updates);
   if (complete) PropertiesService.getScriptProperties().setProperty("EXPOSURE_ARTIST_REFRESHED_AT", now_());
   var summary = {
-    artistCount: readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders).filter(function (source) {
+    artistCount: project.websiteArtist ? Object.keys(project.artistAssets).length : readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders).filter(function (source) {
       return source.kind === "artist" && isEligible_(source);
     }).length,
     skipped: skipped, preserved: preserved, deferred: deferred, complete: complete,
@@ -558,8 +564,8 @@ function begin_(project, payload) {
       throw apiError_("SUBMISSION_CONFLICT", "This submission already belongs to a different photograph pairing. Retry the original choice.");
     }
     var pinned = Boolean(submission && submission.baseId);
-    preferred = findRecord_(eligibleSources_(project, originalHash, (!artistOnly || pinned) && includeParticipants_(), "",
-      pinned ? [] : excludedHashes), "sha256", preferredHash);
+    preferred = pinned ? pinnedBase_(project, submission)
+      : findRecord_(eligibleSources_(project, originalHash, !artistOnly && includeParticipants_(), "", excludedHashes), "sha256", preferredHash);
     if (!preferred) throw apiError_("BASE_UNAVAILABLE", "The chosen photograph is unavailable for this pairing. Please retry the same photo.", Boolean(submission) && !unretainedOriginal_(submission));
   }
   if (!submission) {
@@ -567,7 +573,7 @@ function begin_(project, payload) {
     if (!previous && !allowReuse) rejectArchivedResult_(project, original);
     var source = previous
       ? unretainedOriginal_(previous) ? { sourceId: previous.originalId, sha256: originalHash }
-        : findRecord_(readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders), "sourceId", previous.originalId)
+        : originalSource_(project, previous)
       : allowReuse ? saveOriginal_(project, original)
         : { sourceId: "unretained:" + originalHash, sha256: originalHash };
     if (!source || source.sha256 !== originalHash) throw apiError_("ARCHIVE_UNAVAILABLE", "The original photograph is unavailable. Please contact the artist.");
@@ -584,18 +590,13 @@ function begin_(project, payload) {
   try {
     var base, baseHash;
     if (submission.baseId) {
-      var assigned = findRecord_(readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders), "sourceId", submission.baseId);
-      if (!assigned || !submission.baseSha256 || assigned.sha256 !== submission.baseSha256) {
+      var assigned = pinnedBase_(project, submission);
+      if (!assigned) {
         throw apiError_("BASE_UNAVAILABLE", "The assigned photograph has changed or is unavailable. Please contact the artist.");
       }
       base = readBase_(project, assigned);
     } else {
-      var excludedBaseHash = "";
-      if (previous) {
-        var priorBase = findRecord_(readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders), "sourceId", previous.baseId);
-        if (!priorBase) throw apiError_("BASE_UNAVAILABLE", "The previous base photograph is unavailable. Please contact the artist.", true);
-        excludedBaseHash = previous.baseSha256 || priorBase.sha256;
-      }
+      var excludedBaseHash = previous ? previous.baseSha256 : "";
       var candidates = eligibleSources_(project, originalHash, !artistOnly && includeParticipants_(), excludedBaseHash, excludedHashes);
       var hadCandidates = candidates.length > 0;
       while (candidates.length && !base) {
@@ -642,11 +643,12 @@ function complete_(project, payload) {
     if (submission.resultSha256 && (submission.resultSha256 !== result.hash || Number(submission.width) !== dimensions.width || Number(submission.height) !== dimensions.height || submission.settingsJson !== settingsJson)) {
       throw apiError_("RESULT_CONFLICT", "This submission already has a different result. Start a new submission to save another result.", true);
     }
-    var sourceMatch = result.hash === submission.originalSha256 || readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders).some(function (source) {
-      return source.sha256 === result.hash;
-    });
-    if (sourceMatch) throw apiError_("RESULT_MATCHES_SOURCE", "The finished exposure is identical to an archived original. No additional copy was saved.");
     if (!submission.resultSha256) {
+      var sourceMatch = result.hash === submission.originalSha256 || result.hash === submission.baseSha256 ||
+        project.websiteArtist && project.artistAssets[result.hash] || readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders).some(function (source) {
+          return source.sha256 === result.hash;
+        });
+      if (sourceMatch) throw apiError_("RESULT_MATCHES_SOURCE", "The finished exposure is identical to an archived original. No additional copy was saved.");
       submission.resultSha256 = result.hash;
       submission.width = dimensions.width;
       submission.height = dimensions.height;
@@ -659,16 +661,14 @@ function complete_(project, payload) {
     submission.status = "complete";
     if (!submission.completedAt) submission.completedAt = now_();
     writeRecord_(project.submissions, EXPOSURE_CONFIG_.submissionsHeaders, submission);
-    var original = unretainedOriginal_(submission) ? null
-      : findRecord_(readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders), "sourceId", submission.originalId);
+    var original = unretainedOriginal_(submission) ? null : originalSource_(project, submission);
     if (!original && !unretainedOriginal_(submission)) throw apiError_("ARCHIVE_UNAVAILABLE", "The original's archive record is unavailable. Please retry.", true);
     // Eligibility follows the saved result and this photograph's consent.
     // A retry repairs an interrupted final update without another file write.
     if ((submission.allowReuse === true || submission.allowReuse === "true") && original && original.kind === "participant") {
       shareParticipantOriginal_(project, original);
     }
-    var currentBase = findRecord_(readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders), "sourceId", submission.baseId);
-    var alternatives = currentBase ? eligibleSources_(project, submission.originalSha256, !artistOnly && includeParticipants_(), submission.baseSha256 || currentBase.sha256, excludedHashes) : [];
+    var alternatives = eligibleSources_(project, submission.originalSha256, !artistOnly && includeParticipants_(), submission.baseSha256, excludedHashes);
     return { submissionId: submissionId, saved: true, resultId: file.getId(), originalId: submission.originalId,
       originalRetained: !unretainedOriginal_(submission),
       baseId: submission.baseId, canRePair: alternatives.length > 0 };
@@ -684,9 +684,21 @@ function unretainedOriginal_(submission) {
     submission.originalId === "unretained:" + submission.originalSha256;
 }
 
+function originalSource_(project, submission) {
+  if (project.websiteArtist && submission.originalId === "website:" + submission.originalSha256) {
+    return { sourceId: submission.originalId, sha256: submission.originalSha256, kind: "artist" };
+  }
+  return findRecord_(readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders), "sourceId", submission.originalId);
+}
+
 function saveOriginal_(project, image) {
+  if (project.websiteArtist && project.artistAssets[image.hash]) {
+    return { sourceId: "website:" + image.hash, sha256: image.hash, kind: "artist" };
+  }
   var sources = readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders);
-  var matches = sources.filter(function (source) { return source.sha256 === image.hash; });
+  var matches = sources.filter(function (source) {
+    return source.sha256 === image.hash && (!project.websiteArtist || source.kind === "participant");
+  });
   if (matches.length) {
     // Reuse an artist's existing photo too. Do not move it, rename it, or store
     // another participant copy of exactly the same original bytes.
@@ -777,14 +789,11 @@ function recoverOrCreate_(project, folder, filename, image) {
   return folder.createFile(Utilities.newBlob(image.bytes, image.mimeType, filename));
 }
 
-function artistAssetIndex_() {
-  if (typeof artistAssetCatalog_ === "undefined") return null;
-  if (typeof artistAssetCatalog_ !== "function") throw apiError_("ASSET_CONFIGURATION", "The website photo library needs attention.");
-  var catalog = artistAssetCatalog_();
+function artistAssetIndex_(catalog) {
   if (!isObject_(catalog) || catalog.version !== 1 || !Array.isArray(catalog.photos) || !catalog.photos.length) {
     throw apiError_("ASSET_CONFIGURATION", "The website photo library needs attention.");
   }
-  var index = Object.create(null);
+  var index = Object.create(null), paths = Object.create(null);
   catalog.photos.forEach(function (asset) {
     var prefix = "assets/base-photos/";
     var filename = isObject_(asset) && typeof asset.path === "string" && asset.path.indexOf(prefix) === 0 ? asset.path.slice(prefix.length) : "";
@@ -792,13 +801,25 @@ function artistAssetIndex_() {
         typeof asset.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(asset.sha256) ||
         typeof asset.mimeType !== "string" || !/^image\/(jpeg|png|webp|avif)$/.test(asset.mimeType) ||
         !Number.isSafeInteger(asset.byteLength) || asset.byteLength < 1 || asset.byteLength > EXPOSURE_CONFIG_.maxOriginalBytes ||
-        asset.name !== filename || index[asset.sha256]) {
+        asset.name !== filename || index[asset.sha256] || paths[asset.path]) {
       throw apiError_("ASSET_CONFIGURATION", "The website photo library needs attention.");
     }
     index[asset.sha256] = { path: asset.path, sha256: asset.sha256, mimeType: asset.mimeType,
       byteLength: asset.byteLength, name: filename };
+    paths[asset.path] = true;
   });
   return index;
+}
+
+function pinnedBase_(project, submission) {
+  var hash = submission.baseSha256;
+  if (!hash) return null;
+  var stored = findRecord_(readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders), "sourceId", submission.baseId);
+  if (project.websiteArtist && (submission.baseId === "website:" + hash || stored && stored.kind === "artist")) {
+    var asset = project.artistAssets[hash];
+    return asset ? Object.assign({}, asset, { sourceId: submission.baseId, kind: "artist" }) : null;
+  }
+  return stored && stored.sha256 === hash ? stored : null;
 }
 
 function matchesArtistAsset_(project, source) {
@@ -863,15 +884,29 @@ function excludedBaseHashes_(value) {
 function eligibleSources_(project, excludedHash, includeParticipants, excludedBaseHash, excludedBaseHashes) {
   var excluded = Object.create(null);
   (excludedBaseHashes || []).forEach(function (hash) { excluded[hash] = true; });
-  var candidates = readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders).filter(function (source) {
-    return isEligible_(source) && !excluded[source.sha256] && source.sha256 !== excludedHash && source.sha256 !== excludedBaseHash &&
+  function canPair(hash) {
+    return !excluded[hash] && hash !== excludedHash && hash !== excludedBaseHash;
+  }
+  var sources = readRecords_(project.sources, EXPOSURE_CONFIG_.sourcesHeaders);
+  var candidates = sources.filter(function (source) {
+    return isEligible_(source) && canPair(source.sha256) &&
       (!project.artistAssets || source.kind !== "artist" || matchesArtistAsset_(project, source)) &&
       (source.kind === "artist" || (includeParticipants && source.kind === "participant"));
   });
+  var artists = candidates.filter(function (source) { return source.kind === "artist"; });
+  if (project.websiteArtist) {
+    // Keep old preview IDs where the same asset already has an artist row.
+    var aliases = Object.create(null);
+    artists.forEach(function (source) {
+      if (!aliases[source.sha256]) aliases[source.sha256] = source.sourceId;
+    });
+    artists = Object.keys(project.artistAssets).filter(canPair).map(function (hash) {
+      return Object.assign({}, project.artistAssets[hash], { sourceId: aliases[hash] || "website:" + hash, kind: "artist" });
+    });
+  }
   // Archive roles remain separate, but byte-identical photographs get one
   // chance in the lottery. Prefer the artist's source when both roles exist.
-  var ordered = candidates.filter(function (source) { return source.kind === "artist"; })
-    .concat(candidates.filter(function (source) { return source.kind === "participant"; }));
+  var ordered = artists.concat(candidates.filter(function (source) { return source.kind === "participant"; }));
   var seen = {};
   return ordered.filter(function (source) {
     if (seen[source.sha256]) return false;
@@ -936,11 +971,14 @@ function settings_(value) {
   return { baseExposure: value.baseExposure, participantExposure: value.participantExposure, contrast: value.contrast, monochrome: value.monochrome };
 }
 
-function project_() {
+function project_(websiteAssets) {
   requireProjectOwner_();
   var properties = PropertiesService.getScriptProperties();
   var ids = ["EXPOSURE_ARTIST_FOLDER_ID", "EXPOSURE_ORIGINALS_FOLDER_ID", "EXPOSURE_RESULTS_FOLDER_ID", "EXPOSURE_SPREADSHEET_ID"].map(function (key) { return properties.getProperty(key); });
-  if (ids.some(function (id) { return !id; })) throw apiError_("NOT_CONFIGURED", "The artist has not connected the archive yet.");
+  var websiteArtist = websiteAssets !== undefined;
+  if ((!websiteArtist && !ids[0]) || ids.slice(1).some(function (id) { return !id; })) {
+    throw apiError_("NOT_CONFIGURED", "The artist has not connected the archive yet.");
+  }
   var spreadsheet = ArchiveSheets.openById(ids[3]);
   var sources = spreadsheet.getSheetByName("Sources");
   var submissions = spreadsheet.getSheetByName("Submissions");
@@ -949,8 +987,22 @@ function project_() {
   ensureSubmissionHeaders_(submissions);
   // Add the ledger when an older deployment first opens its existing index.
   var usage = setupSheet_(spreadsheet, "Usage", EXPOSURE_CONFIG_.usageHeaders);
-  var project = { artist: ArchiveDrive.getArtistFolderById(ids[0]), originals: ArchiveDrive.getFolderById(ids[1]), results: ArchiveDrive.getFolderById(ids[2]), sources: sources, submissions: submissions, usage: usage,
-    artistAssets: artistAssetIndex_() };
+  var artist = null;
+  if (ids[0]) {
+    try { artist = ArchiveDrive.getArtistFolderById(ids[0]); }
+    catch (error) {
+      if (!websiteArtist || error.exposureCode_ !== "BASE_UNAVAILABLE") throw error;
+    }
+  }
+  var artistAssets = websiteAssets;
+  if (!websiteArtist) {
+    if (typeof artistAssetCatalog_ !== "undefined" && typeof artistAssetCatalog_ !== "function") {
+      throw apiError_("ASSET_CONFIGURATION", "The website photo library needs attention.");
+    }
+    artistAssets = typeof artistAssetCatalog_ === "function" ? artistAssetIndex_(artistAssetCatalog_()) : null;
+  }
+  var project = { artist: artist, originals: ArchiveDrive.getFolderById(ids[1]), results: ArchiveDrive.getFolderById(ids[2]), sources: sources, submissions: submissions, usage: usage,
+    artistAssets: artistAssets, websiteArtist: websiteArtist };
   // Pin old assignments before a refresh can replace an artist source hash,
   // including requests that skip the scan because its freshness window is open.
   pinLegacyBases_(project, readRecords_(sources, EXPOSURE_CONFIG_.sourcesHeaders));
