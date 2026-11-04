@@ -987,13 +987,7 @@ function project_(websiteAssets) {
   ensureSubmissionHeaders_(submissions);
   // Add the ledger when an older deployment first opens its existing index.
   var usage = setupSheet_(spreadsheet, "Usage", EXPOSURE_CONFIG_.usageHeaders);
-  var artist = null;
-  if (ids[0]) {
-    try { artist = ArchiveDrive.getArtistFolderById(ids[0]); }
-    catch (error) {
-      if (!websiteArtist || error.exposureCode_ !== "BASE_UNAVAILABLE") throw error;
-    }
-  }
+  var artist = websiteArtist ? null : ArchiveDrive.getArtistFolderById(ids[0]);
   var artistAssets = websiteAssets;
   if (!websiteArtist) {
     if (typeof artistAssetCatalog_ !== "undefined" && typeof artistAssetCatalog_ !== "function") {

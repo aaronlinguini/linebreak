@@ -152,7 +152,7 @@ There are no inline styles, executable script bodies, or inline event handlers i
 
 The first switch to the website library requires deploying `Code.gs` and `WebsiteLibrary.gs` in the existing Google project. After that, artist photo updates use the Pages workflow alone. The builder still generates `AssetCatalog.gs` for the older Drive-backed mode. [Installation and verification](GOOGLE-SETUP.md#add-and-manage-artist-base-files)
 
-After the website-backed deployment is verified, Drive copies that match published artist files are optional. Preserve any legacy participant originals in `My_photos`, along with its folder and the archive index.
+The website-backed deployment uses `assets/base-photos.json` for artist photos and `participant_uploads` for contributed photos. The archive index remains in Drive.
 
 ## Exposure treatment
 

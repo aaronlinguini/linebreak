@@ -152,11 +152,11 @@ The index contains **Sources**, **Submissions**, and **Usage** tabs. Setup does 
 
 The consent-folder revision uses the existing folders as follows:
 
-- **My_photos** can contain both artist copies and earlier retained participant files. After verifying the website-backed deployment, artist copies that match published files are optional. Preserve the folder and participant files. An earlier retained participant original can move to `participant_uploads` on a new authorized Yes completion with the same file ID and bytes.
+- **My_photos** is the legacy artist folder. In website mode, artist selection, pairing and saving work without that folder.
 - **participant_uploads** keeps the same private folder ID, configured property, and link. The new revision retains Yes originals here, including while pending; eligible participant use begins only after a completed result. Fresh No originals are never written here or to Sources. Older retained files are not bulk-migrated or deleted; a participant original can move here on a new authorized Yes completion. This folder holds live consented bases and must not be cleared wholesale. Owner cleanup must avoid pending saves and update dependent indexes; the name never triggers automatic deletion.
 - **Completed_double_exposures** holds completed JPEGs. Identical results from separate submissions, retries, or tests reuse one file; the index can record several exposures referring to that same file. Finished exposures never enter the base-photo pool.
 
-In website mode, a Yes submission with the exact bytes of a published artist photo can reuse the website reference. A folder scan preserves legacy participant provenance and consent.
+In website mode, a Yes submission with the exact bytes of a published artist photo can reuse the website reference. The participant folder scan verifies provenance and consent.
 
 ## Pairing history and pool filtering
 

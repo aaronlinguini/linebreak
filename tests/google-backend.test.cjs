@@ -640,7 +640,9 @@ test("trusted website artist assets replace base-byte downloads while keeping pi
 
 test("website-only artist bases pair, retry, save and reuse without an artist Drive folder", () => {
   const backend = makeBackend(); backend.setup();
-  backend.properties.delete("EXPOSURE_ARTIST_FOLDER_ID");
+  backend.sandbox.ArchiveDrive.getArtistFolderById = () => {
+    assert.fail("the visitor workflow must never look up the configured artist Drive folder");
+  };
   const first = websitePhoto(1), second = websitePhoto(2);
   const library = websiteLibrary(backend, [first, second]);
   const preview = backend.data("bootstrap", { artistOnly: true });
@@ -652,11 +654,19 @@ test("website-only artist bases pair, retry, save and reuse without an artist Dr
   assert.deepEqual(backend.data("begin", payload), begun);
   assert.equal(backend.folder("Participant").files.length, 0);
   assert.equal(backend.api("complete", backend.completePayload(begun, 2)).error.code, "RESULT_MATCHES_SOURCE");
-  const saved = backend.data("complete", backend.completePayload(begun));
+  const firstResult = backend.completePayload(begun);
+  firstResult.settings.monochrome = true;
+  const saved = backend.data("complete", firstResult);
   assert.equal(saved.baseId, begun.base.id);
   const variant = backend.data("begin", { submissionId: submissionId(2), reuse: { submissionId: begun.submissionId, token: begun.token, sameBase: true } });
   assert.deepEqual(variant.base, begun.base);
   assert.equal(variant.originalId, begun.originalId);
+  const colourResult = backend.completePayload(variant, 91);
+  const colourSave = backend.data("complete", colourResult);
+  assert.equal(colourSave.saved, true);
+  assert.notEqual(colourSave.resultId, saved.resultId);
+  assert.equal(backend.folder("Double exposure").files.length, 2);
+  assert.deepEqual(backend.data("complete", colourResult), colourSave);
   assert.equal(library.fetches, 1, "warm pairings and saves reuse the validated website list");
 });
 
