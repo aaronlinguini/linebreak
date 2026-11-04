@@ -26,7 +26,7 @@ function receipt(request, extra = {}) {
     folderUrl, fileUrl: "https://drive.google.com/file/d/saved-result_123/view", ...extra };
 }
 
-function harness({ owner = "true", initial = {}, status = statusResponse, autoStatus = true } = {}) {
+function harness({ owner = "true", initial = {}, status = statusResponse, autoStatus = true, fallback = false } = {}) {
   const calls = [];
   const reads = [];
   const writes = [];
@@ -38,7 +38,8 @@ function harness({ owner = "true", initial = {}, status = statusResponse, autoSt
   let nextTimer = 0;
   let subscriptions = 0;
   let unsubscriptions = 0;
-  const ids = ["studio-save-feedback", "studio-save-status", "studio-save-error", "studio-save-retry", "studio-save-folder"];
+  const ids = ["studio-save-feedback", "studio-save-status", "studio-save-error", "studio-save-retry", "studio-save-folder",
+    ...(fallback ? ["studio-save-fallback"] : [])];
   const elements = new Map(ids.map(id => {
     const listeners = new Map();
     const element = new Proxy({ hidden: true, disabled: false, href: "", textContent: "",
@@ -87,12 +88,14 @@ function harness({ owner = "true", initial = {}, status = statusResponse, autoSt
     Blob, FileReader, Error, crypto: webcrypto,
     document: { body: { dataset: owner === null ? {} : { ownerStudio: owner } },
       getElementById(id) {
+        if (id === "studio-save-fallback" && !fallback) return null;
         reads.push(id);
         assert.ok(elements.has(id), `The save adapter must not touch editor/download controls: ${id}`);
         return elements.get(id);
       } },
     window: { LocalExposureTest: localEditor, addEventListener(type, callback) { events.set(type, callback); } },
     google: { script: { get run() { return run(); } } },
+    EXPOSURE_CONFIG: { googleScriptUrl: "https://script.google.com/macros/s/test/exec" },
     setTimeout(callback, delay) {
       const id = ++nextTimer;
       timers.set(id, { callback, at: clock + delay, delay });
@@ -164,6 +167,17 @@ test("owner initialization requests only status and displays its verified folder
   assert.equal(h.elements.get("studio-save-folder").hidden, false);
   assert.equal(h.status, "");
   assert.equal(h.elements.get("studio-save-error").hidden, true);
+});
+
+test("a failed website connection offers the direct Google studio without losing the page", async () => {
+  const h = harness({ fallback: true, autoStatus: false });
+  assert.equal(h.elements.get("studio-save-fallback").hidden, true);
+  h.fail(h.calls[0], "CONNECTION_TIMEOUT");
+  await flush();
+  assert.equal(h.elements.get("studio-save-fallback").href,
+    "https://script.google.com/macros/s/test/exec?view=studio");
+  assert.equal(h.elements.get("studio-save-fallback").hidden, false);
+  assert.match(h.elements.get("studio-save-error").textContent, /choose the photos again/);
 });
 
 test("an existing completed result waits for verified status and then saves without another editor event", async () => {

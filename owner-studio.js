@@ -7,7 +7,9 @@
     ? new GoogleDriveStorage(EXPOSURE_CONFIG) : null;
   const byId = id => document.getElementById(id);
   const ui = { feedback: byId("studio-save-feedback"), status: byId("studio-save-status"),
-    error: byId("studio-save-error"), retry: byId("studio-save-retry"), folder: byId("studio-save-folder") };
+    error: byId("studio-save-error"), retry: byId("studio-save-retry"), folder: byId("studio-save-folder"),
+    fallback: byId("studio-save-fallback") };
+  if (ui.fallback) ui.fallback.href = `${EXPOSURE_CONFIG.googleScriptUrl}?view=studio`;
   const state = { disposed: false, ready: false, connecting: false, running: false,
     active: null, queue: new Map(), candidates: new Map(), saved: new WeakSet(),
     settleTimer: null, retryTimer: null, error: null, connectAttempts: 0, maximum: 0 };
@@ -23,9 +25,12 @@
     ui.status.textContent = pending() ? "Saving to your folder…"
       : state.candidates.size ? "Saved to your folder." : "";
     ui.error.hidden = !state.error;
-    ui.error.textContent = state.error ? "The save could not be confirmed. Retry saving." : "";
+    ui.error.textContent = state.error ? ui.fallback
+      ? "Google saving did not connect here. Retry, or open the Google studio and choose the photos again."
+      : "The save could not be confirmed. Retry saving." : "";
     ui.retry.hidden = !state.error;
     ui.retry.disabled = state.running || state.connecting;
+    if (ui.fallback) ui.fallback.hidden = !state.error;
   }
   function rpc(action, payload) {
     if (storage) return storage.studio(action, payload);
