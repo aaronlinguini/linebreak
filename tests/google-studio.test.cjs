@@ -68,6 +68,10 @@ function makeStudio({ activeEmail = "owner@example.test", effectiveEmail = "owne
   }
   const sandbox = {
     console,
+    ContentService: {
+      MimeType: { JSON: "application/json", JAVASCRIPT: "text/javascript" },
+      createTextOutput: content => ({ content, setMimeType(type) { this.mimeType = type; return this; } })
+    },
     HtmlService: {
       XFrameOptionsMode: { ALLOWALL: "ALLOWALL" },
       createHtmlOutput: content => new HtmlOutput(content),
@@ -476,4 +480,51 @@ test("public studio rejects other folders, caller-supplied destinations, and non
   assert.equal(studio.io.folderWrites, 0);
   assert.equal(studio.io.fileWrites, 0);
   assert.equal(studio.io.indexCalls, 0);
+});
+
+function studioPost(body, type = "text/plain;charset=UTF-8") {
+  const length = Buffer.byteLength(body);
+  return { queryString: "api=studio", contentLength: length, postData: { type, contents: body, length } };
+}
+
+test("anonymous studio POST uses the same status and save contracts as the bridge", () => {
+  const studio = makeStudio({ activeEmail: "" });
+  const status = studio.sandbox.doPost(studioPost(JSON.stringify({ action: "status" })));
+  assert.equal(status.mimeType, "application/json");
+  assert.deepEqual(JSON.parse(status.content), { ok: true, data: { maxResultBytes: 12 * 1024 * 1024 } });
+  assert.equal(studio.io.driveReads, 0);
+
+  const body = JSON.stringify({ action: "save", payload: payload() });
+  const save = studio.sandbox.doPost(studioPost(body, 'Text/Plain; Charset = "utf-8"'));
+  assert.equal(save.mimeType, "application/json");
+  const receipt = JSON.parse(save.content);
+  assert.deepEqual(receipt, { ok: true, data: {
+    saved: true, duplicate: false, sha256: crypto.createHash("sha256").update(jpeg()).digest("hex"),
+    byteLength: jpeg().length, width: 1200, height: 800
+  } });
+  assert.equal(studio.publicApi("save", payload()).data.duplicate, true);
+  assert.equal(studio.io.fileWrites, 1);
+  assert.equal(studio.api("save", payload()).error.code, "OWNER_REQUIRED");
+});
+
+test("studio POST rejects other routes and actions, invalid types, malformed JSON and oversized bodies", () => {
+  const studio = makeStudio({ activeEmail: "" });
+  const event = studioPost('{"action":"status"}', "text/plain");
+  const tooLong = Math.ceil(12 * 1024 * 1024 / 3) * 4 + 4097;
+  for (const input of [
+    null, {}, { ...event, queryString: null }, { ...event, queryString: "api=studio&api=owner" },
+    { ...event, queryString: "api=owner" }, { ...event, pathInfo: "studio" },
+    studioPost('{"action":"status"}', "application/json"), studioPost('{"action":"status"}', "text/plain;charset=us-ascii"),
+    studioPost(""), studioPost("{"), studioPost("null"), studioPost("[]"),
+    studioPost('{"action":"studioApi"}'), studioPost('{"action":"complete"}'),
+    { ...event, contentLength: tooLong }, { ...event, postData: { ...event.postData, length: tooLong } },
+    { ...event, postData: { ...event.postData, contents: event.postData.contents.padEnd(tooLong) } }
+  ]) {
+    const response = studio.sandbox.doPost(input);
+    assert.equal(response.mimeType, "application/json");
+    assert.equal(JSON.parse(response.content).error.code, "INVALID_REQUEST");
+  }
+  assert.equal(studio.io.driveReads, 0);
+  assert.equal(studio.io.propertyWrites, 0);
+  assert.equal(studio.lock.acquired, 0);
 });

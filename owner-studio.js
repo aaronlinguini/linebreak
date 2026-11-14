@@ -4,7 +4,7 @@
   if (document.body.dataset.ownerStudio !== "true") return;
   const editor = window.LocalExposureTest;
   const publicStudio = typeof google === "undefined" || !google.script?.run;
-  const storage = publicStudio ? new GoogleDriveStorage(EXPOSURE_CONFIG) : null;
+  let storage = null;
   const byId = id => document.getElementById(id);
   const ui = { feedback: byId("studio-save-feedback"), status: byId("studio-save-status"),
     error: byId("studio-save-error"), retry: byId("studio-save-retry"), folder: byId("studio-save-folder") };
@@ -34,7 +34,10 @@
     ui.retry.disabled = state.running || state.connecting;
   }
   function rpc(action, payload) {
-    if (storage) return storage.studio(action, payload);
+    if (publicStudio) {
+      storage ??= new GoogleDriveStorage(EXPOSURE_CONFIG);
+      return storage.studio(action, payload);
+    }
     return new Promise((resolve, reject) => {
       let finished = false;
       const timer = setTimeout(() => finish(false, Object.assign(new Error("Request timed out."), { code: "REQUEST_TIMEOUT" })), 60000);
@@ -56,7 +59,7 @@
     });
   }
   function retryable(error) {
-    return ["RPC_FAILURE", "REQUEST_TIMEOUT", "ARCHIVE_UNAVAILABLE", "BUSY", "SAVE_NOT_CONFIRMED"].includes(error.code);
+    return ["RPC_FAILURE", "REQUEST_TIMEOUT", "INVALID_RESPONSE", "ARCHIVE_UNAVAILABLE", "BUSY", "SAVE_NOT_CONFIRMED"].includes(error.code);
   }
   function handleFailure(error, attempts, resume) {
     if (state.disposed) return;
@@ -113,7 +116,11 @@
     return { hash, payload: { program, image: { name: filename, mimeType: "image/jpeg", base64 }, width, height } };
   }
   async function saveNext() {
-    if (state.disposed || !state.ready || state.running || state.error || state.retryTimer !== null) return;
+    if (state.disposed || state.running || state.error || state.retryTimer !== null) return;
+    if (!state.ready) {
+      if (publicStudio && state.queue.size) void connect();
+      return;
+    }
     if (!state.active) {
       const next = state.queue.entries().next().value;
       if (!next) return updateStatus();
@@ -188,5 +195,5 @@
     state.active = null;
     storage?.dispose();
   });
-  void connect();
+  if (!publicStudio) void connect();
 })();

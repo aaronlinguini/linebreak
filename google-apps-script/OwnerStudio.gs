@@ -16,6 +16,22 @@ function publicStudioApi(request) {
   return runStudioRequest_(request, true);
 }
 
+function doPost(e) {
+  var response = { ok: false, error: { code: "INVALID_REQUEST", message: "The studio request is invalid." } };
+  var post = e && e.postData;
+  var maximum = Math.ceil(EXPOSURE_CONFIG_.maxResultBytes / 3) * 4 + 4096;
+  if (e && e.queryString === "api=studio" && !e.pathInfo && post &&
+      typeof post.type === "string" && /^text\/plain(?:\s*;\s*charset\s*=\s*(?:utf-8|"utf-8"))?\s*$/i.test(post.type) &&
+      typeof post.contents === "string" && post.contents.length > 0 && post.contents.length <= maximum &&
+      !(e.contentLength > maximum || post.length > maximum)) {
+    var request;
+    try { request = JSON.parse(post.contents); }
+    catch (error) { /* Keep the invalid request response. */ }
+    if (request !== undefined) response = publicStudioApi(request);
+  }
+  return ContentService.createTextOutput(JSON.stringify(response)).setMimeType(ContentService.MimeType.JSON);
+}
+
 function runStudioRequest_(request, publicArchive) {
   try {
     if (!publicArchive) requireOwner_();

@@ -83,10 +83,11 @@ function makeTransport(options = {}) {
       }
     }
   };
-  const sandbox = vm.createContext({ window, document, location: window.location, crypto: crypto.webcrypto, URL, FileReader: Reader, setTimeout, clearTimeout, console });
+  const sandbox = vm.createContext({ window, document, location: window.location, crypto: crypto.webcrypto, URL,
+    FileReader: Reader, AbortController, fetch: options.fetch, setTimeout, clearTimeout, console });
   const source = fs.readFileSync(path.join(project, "drive-storage.js"), "utf8");
   vm.runInContext(source, sandbox, { timeout: 1000 });
-  const storage = new sandbox.GoogleDriveStorage({ googleScriptUrl: endpoint, connectionTimeoutMs: 100, requestTimeoutMs: 100 });
+  const storage = new sandbox.GoogleDriveStorage({ googleScriptUrl: endpoint, connectionTimeoutMs: 100, requestTimeoutMs: options.requestTimeoutMs ?? 100 });
   const channel = () => new URL(iframes.at(-1).src).searchParams.get("channel");
   const ready = (overrides = {}, origin, source) => emit({ protocol, channel: channel(), type: "ready", ...overrides }, origin, source);
   async function connect(options) {
@@ -506,20 +507,65 @@ test("reconnecting a healthy frame refreshes the collection without rebuilding i
   harness.storage.dispose();
 });
 
-test("studio status and save use the existing frame without visitor bootstrap", async () => {
-  const harness = makeTransport();
-  const status = harness.storage.studio("status", {});
-  await tick();
-  harness.ready();
-  assert.deepEqual(plain(await status), { accepted: {} });
-  const image = { name: "personal-result.jpg", mimeType: "image/jpeg", base64: "abc=" };
-  assert.deepEqual(plain(await harness.storage.studio("save", { image, width: 10, height: 10 })),
-    { accepted: { image, width: 10, height: 10 } });
-  assert.deepEqual(harness.messages.filter(({ message }) => message.type === "request")
-    .map(({ message }) => message.request.action), ["publicStudioStatus", "publicStudioSave"]);
-  assert.equal(harness.iframes.length, 1);
-  await assert.rejects(harness.storage.studio("begin", {}), error => error.code === "INVALID_SUBMISSION");
-  harness.storage.dispose();
+test("studio status and save send simple POSTs without cookies or a visitor iframe", async () => {
+  const requests = [];
+  const h = makeTransport({ async fetch(url, init) {
+    assert.equal(url, `${endpoint}?api=studio`);
+    assert.equal(init.method, "POST");
+    assert.equal(init.credentials, "omit");
+    assert.equal(init.headers, undefined);
+    assert.equal(init.signal.aborted, false);
+    const request = JSON.parse(init.body);
+    requests.push(request);
+    return { ok: true, async json() { return { ok: true, data: { accepted: request.payload } }; } };
+  } });
+  try {
+    assert.deepEqual(await h.storage.studio("status", {}), { accepted: {} });
+    const payload = { image: { name: "studio-result.jpg", mimeType: "image/jpeg", base64: "abc=" }, width: 10, height: 10 };
+    assert.deepEqual(await h.storage.studio("save", payload), { accepted: payload });
+    assert.deepEqual(requests, [{ action: "status", payload: {} }, { action: "save", payload }]);
+    assert.equal(h.iframes.length, 0);
+    assert.equal(h.messages.length, 0);
+    await assert.rejects(h.storage.studio("begin", {}), { code: "INVALID_SUBMISSION" });
+    assert.equal(requests.length, 2);
+
+    await h.connect();
+    assert.equal(h.iframes.length, 1);
+    assert.equal(h.messages.find(({ message }) => message.type === "request").message.request.action, "bootstrap");
+    assert.equal(requests.length, 2, "visitor bootstrap still uses the message bridge");
+  } finally { h.storage.dispose(); }
+});
+
+test("studio POST errors preserve archive error codes and reject unreadable or unavailable responses", async () => {
+  for (const [reply, code] of [
+    [{ ok: false }, "RPC_FAILURE"],
+    [new Error("Network unavailable"), "RPC_FAILURE"],
+    [{ ok: true, async json() { throw new SyntaxError("Not JSON"); } }, "INVALID_RESPONSE"],
+    [{ ok: true, async json() { return { ok: true, data: null }; } }, "INVALID_RESPONSE"],
+    [{ ok: true, async json() { return { ok: false, error: { code: "UPLOADS_PAUSED", message: "Uploads are paused." } }; } }, "UPLOADS_PAUSED"]
+  ]) {
+    const h = makeTransport({ async fetch() { if (reply instanceof Error) throw reply; return reply; } });
+    try {
+      await assert.rejects(h.storage.studio("status", {}), { code });
+      assert.equal(h.iframes.length, 0);
+    } finally { h.storage.dispose(); }
+  }
+});
+
+test("studio POST timeout and disposal abort in-flight work", async () => {
+  for (const earlyDispose of [false, true]) {
+    let signal;
+    const h = makeTransport({ requestTimeoutMs: 10, fetch(_url, init) {
+      signal = init.signal;
+      return new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason)));
+    } });
+    try {
+      const pending = h.storage.studio("status", {});
+      if (earlyDispose) h.storage.dispose();
+      await assert.rejects(pending, { code: earlyDispose ? "DISPOSED" : "REQUEST_TIMEOUT" });
+      assert.equal(signal.aborted, true);
+    } finally { h.storage.dispose(); }
+  }
 });
 
 test("configuration accepts only actual deployed Google Apps Script URLs", async () => {
@@ -528,6 +574,7 @@ test("configuration accepts only actual deployed Google Apps Script URLs", async
     const invalid = new harness.sandbox.GoogleDriveStorage({ googleScriptUrl: url });
     assert.equal(invalid.configured, false);
     await assert.rejects(invalid.connect(), (error) => ["INVALID_ENDPOINT", "ARCHIVE_NOT_CONFIGURED"].includes(error.code));
+    await assert.rejects(invalid.studio("status", {}), (error) => ["INVALID_ENDPOINT", "ARCHIVE_NOT_CONFIGURED"].includes(error.code));
     assert.equal(harness.iframes.length, 0);
     invalid.dispose(); harness.storage.dispose();
   }

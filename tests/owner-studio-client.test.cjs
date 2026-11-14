@@ -190,8 +190,21 @@ test("owner initialization requests only status and displays its verified folder
 
 test("the website saves a rendered JPEG without a Google account or revealing a Drive link", async () => {
   const trial = output("website-result");
-  const h = harness({ website: true, autoStatus: false, initial: { trial } });
+  const h = harness({ website: true, autoStatus: false });
+  assert.equal(h.calls.length, 0);
+  await h.advance(30000);
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.elements.get("studio-save-error").hidden, true);
+  h.publish({ trial: output("superseded") });
+  await h.advance(799);
+  h.publish({});
   await h.advance(800);
+  assert.equal(h.calls.length, 0);
+
+  h.publish({ trial });
+  await h.advance(799);
+  assert.equal(h.calls.length, 0);
+  await h.advance(1);
   assert.deepEqual(h.calls.map(call => call.request), [{ action: "status", payload: {} }]);
   assert.equal(h.saves.length, 0);
   h.success(h.calls[0], websiteStatus);
@@ -207,10 +220,20 @@ test("the website saves a rendered JPEG without a Google account or revealing a 
   assert.ok(h.writes.every(write => write.property !== "href"));
 });
 
-test("a website connection timeout offers retry and preserves the queued result", async () => {
+test("website connection failures retry with backoff and offer manual retry without losing the queued result", async () => {
   const h = harness({ website: true, autoStatus: false, initial: { trial: output("keep-this-result") } });
-  h.fail(h.calls[0], "CONNECTION_TIMEOUT");
-  await h.advance(8000);
+  await h.advance(800);
+  const failures = ["RPC_FAILURE", "REQUEST_TIMEOUT", "INVALID_RESPONSE", "RPC_FAILURE"];
+  for (let attempt = 0; attempt < failures.length; attempt++) {
+    assert.equal(h.calls.length, attempt + 1);
+    h.fail(h.calls[attempt], failures[attempt]);
+    await flush();
+    if (attempt === failures.length - 1) break;
+    await h.advance(1000 * 2 ** attempt - 1);
+    assert.equal(h.calls.length, attempt + 1);
+    assert.equal(h.elements.get("studio-save-error").hidden, true);
+    await h.advance(1);
+  }
   const error = h.elements.get("studio-save-error");
   assert.equal(error.hidden, false);
   assert.match(error.textContent, /could not connect/i);
@@ -219,10 +242,13 @@ test("a website connection timeout offers retry and preserves the queued result"
   assert.equal(h.event("beforeunload").prevented, true);
   assert.equal(h.saves.length, 0);
 
+  await h.advance(8000);
+  assert.equal(h.calls.length, failures.length);
   h.clickRetry();
-  await h.until(() => h.calls.length === 2);
-  assert.deepEqual(h.calls[1].request, { action: "status", payload: {} });
-  h.success(h.calls[1], websiteStatus);
+  await h.until(() => h.calls.length === failures.length + 1);
+  const retry = h.calls.at(-1);
+  assert.deepEqual(retry.request, { action: "status", payload: {} });
+  h.success(retry, websiteStatus);
   await h.until(() => h.saves.length === 1);
   assert.equal(h.saves[0].request.payload.image.name, "keep-this-result.jpg");
   h.success(h.saves[0], websiteReceipt(h.saves[0].request));

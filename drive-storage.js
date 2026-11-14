@@ -81,6 +81,7 @@
       this._requestSerial = 0;
       this._pending = new Map();
       this._readers = new Set();
+      this._studioRequests = new Set();
     }
 
     get configured() {
@@ -89,14 +90,50 @@
 
     async studio(action, payload) {
       this._assertActive();
-      if (!["status", "save"].includes(action) || !payload || typeof payload !== "object") {
-        throw storageError("INVALID_SUBMISSION", "The personal archive request is invalid.");
+      if (!["status", "save"].includes(action) || !payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw storageError("INVALID_SUBMISSION", "The studio archive request is invalid.");
       }
-      if (!this._source) {
-        try { await this._open(); }
-        catch (error) { this._disconnect(error); throw error; }
+      const url = endpoint(this.config.googleScriptUrl);
+      if (!url) {
+        throw storageError(this.config.googleScriptUrl ? "INVALID_ENDPOINT" : "ARCHIVE_NOT_CONFIGURED",
+          "Configure a Google Apps Script deployment URL ending in /exec.");
       }
-      return this._request(action === "status" ? "publicStudioStatus" : "publicStudioSave", payload);
+      url.searchParams.set("api", "studio");
+
+      const controller = new AbortController();
+      this._studioRequests.add(controller);
+      const timer = setTimeout(() => controller.abort(storageError("REQUEST_TIMEOUT",
+        "Google Drive did not respond in time. Retry the same result.")), this.config.requestTimeoutMs);
+      try {
+        let response;
+        try {
+          // A text body avoids preflight and omitting cookies avoids Google account redirects.
+          response = await fetch(url.href, {
+            method: "POST", credentials: "omit", body: JSON.stringify({ action, payload }), signal: controller.signal
+          });
+        } catch {
+          throw controller.signal.reason || storageError("RPC_FAILURE", "The studio archive could not be reached.");
+        }
+        if (controller.signal.aborted) throw controller.signal.reason;
+        if (!response.ok) throw storageError("RPC_FAILURE", "The studio archive could not be reached.");
+
+        const invalidResponse = () => storageError("INVALID_RESPONSE", "The studio archive returned an unreadable response.");
+        let envelope;
+        try { envelope = await response.json(); }
+        catch { throw controller.signal.reason || invalidResponse(); }
+        if (controller.signal.aborted) throw controller.signal.reason;
+        if (!envelope || typeof envelope !== "object" || typeof envelope.ok !== "boolean") throw invalidResponse();
+        if (envelope.ok) {
+          if (!envelope.data || typeof envelope.data !== "object" || Array.isArray(envelope.data)) throw invalidResponse();
+          return envelope.data;
+        }
+        const detail = envelope.error;
+        if (typeof detail?.code !== "string" || typeof detail.message !== "string") throw invalidResponse();
+        throw storageError(detail.code, detail.message);
+      } finally {
+        clearTimeout(timer);
+        this._studioRequests.delete(controller);
+      }
     }
 
     connect({ excludedBaseHashes = [], artistOnly = false } = {}) {
@@ -168,6 +205,7 @@
       this._disposed = true;
       const error = storageError("DISPOSED", "The archive connection is closed.");
       for (const reader of [...this._readers]) reader.cancel(error);
+      for (const controller of this._studioRequests) controller.abort(error);
       this._disconnect(error);
     }
 
