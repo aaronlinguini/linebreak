@@ -207,6 +207,38 @@
   cursor: wait;
 }
 
+@media (width > 1100px) {
+  @supports (grid-template-rows: subgrid) {
+    .editor-layout {
+      /* The last row lets the controls extend below the previews. */
+      grid-template-rows: repeat(3, max-content) 1fr;
+      row-gap: 0;
+    }
+
+    .trial-editor {
+      grid-row: 1 / -1;
+      grid-template-rows: subgrid;
+      row-gap: 0;
+    }
+
+    .comparison-panel {
+      grid-column: 1;
+      grid-row: 1 / 4;
+      display: grid;
+      grid-template-rows: subgrid;
+    }
+
+    .reference-panel > .save-button {
+      justify-self: start;
+    }
+
+    .editor-controls {
+      grid-column: 2;
+      grid-row: 1 / -1;
+    }
+  }
+}
+
 @media (max-width: 1100px) {
   .editor-layout {
     display: flex;
@@ -290,6 +322,7 @@
   }
 
   .renderer-control select {
+    min-width: 0;
     font-size: 16px;
   }
 }
