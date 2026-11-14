@@ -15,7 +15,8 @@
   // Send messages to the website, outside Google's extra frames.
   const host = window.top;
   if (!host || host === window) return;
-  const allowedActions = new Set(["bootstrap", "begin", "complete", "status", "save"]);
+  const studioActions = new Map([["publicStudioStatus", "status"], ["publicStudioSave", "save"]]);
+  const visitorActions = new Set(["bootstrap", "begin", "complete"]);
   const seen = new Set();
   let acknowledged = false;
   let readyTimer;
@@ -51,7 +52,8 @@
     seen.add(message.id);
     if (seen.size > 256) seen.delete(seen.values().next().value);
     const request = message.request;
-    if (!request || !allowedActions.has(request.action) || !request.payload || typeof request.payload !== "object") {
+    if (!request || !(visitorActions.has(request.action) || studioActions.has(request.action)) ||
+        !request.payload || typeof request.payload !== "object") {
       failure(message.id, "INVALID_REQUEST", "This archive request is not supported.");
       return;
     }
@@ -70,8 +72,8 @@
         })
         .withFailureHandler((error) => failure(message.id, "RPC_FAILURE",
           error && typeof error.message === "string" ? error.message : "The archive could not finish this request."));
-      if (request.action === "status" || request.action === "save") {
-        runner.studioApi({ action: request.action, payload: request.payload });
+      if (studioActions.has(request.action)) {
+        runner.publicStudioApi({ action: studioActions.get(request.action), payload: request.payload });
       } else {
         runner.exposureApi({ action: request.action, payload: request.payload });
       }

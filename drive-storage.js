@@ -96,7 +96,7 @@
         try { await this._open(); }
         catch (error) { this._disconnect(error); throw error; }
       }
-      return this._request(action, payload);
+      return this._request(action === "status" ? "publicStudioStatus" : "publicStudioSave", payload);
     }
 
     connect({ excludedBaseHashes = [], artistOnly = false } = {}) {

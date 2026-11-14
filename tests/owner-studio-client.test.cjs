@@ -11,6 +11,7 @@ const { createHash, webcrypto } = require("node:crypto");
 const source = fs.readFileSync(path.join(__dirname, "..", "owner-studio.js"), "utf8");
 const folderUrl = "https://drive.google.com/drive/folders/owner-results_123";
 const statusResponse = { folderUrl, maxResultBytes: 12 * 1024 * 1024 };
+const websiteStatus = { maxResultBytes: statusResponse.maxResultBytes };
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const clone = value => JSON.parse(JSON.stringify(value));
 
@@ -19,14 +20,17 @@ function output(label, extra = {}) {
     filename: `${label}.jpg`, width: 640, height: 480, ...extra };
 }
 
-function receipt(request, extra = {}) {
+function websiteReceipt(request, extra = {}) {
   const bytes = Buffer.from(request.payload.image.base64, "base64");
   return { saved: true, sha256: createHash("sha256").update(bytes).digest("hex"),
-    byteLength: bytes.length, width: request.payload.width, height: request.payload.height,
-    folderUrl, fileUrl: "https://drive.google.com/file/d/saved-result_123/view", ...extra };
+    byteLength: bytes.length, width: request.payload.width, height: request.payload.height, ...extra };
 }
 
-function harness({ owner = "true", initial = {}, status = statusResponse, autoStatus = true, fallback = false } = {}) {
+function receipt(request, extra = {}) {
+  return { ...websiteReceipt(request), folderUrl, fileUrl: "https://drive.google.com/file/d/saved-result_123/view", ...extra };
+}
+
+function harness({ owner = "true", initial = {}, website = false, status = website ? websiteStatus : statusResponse, autoStatus = true } = {}) {
   const calls = [];
   const reads = [];
   const writes = [];
@@ -38,8 +42,8 @@ function harness({ owner = "true", initial = {}, status = statusResponse, autoSt
   let nextTimer = 0;
   let subscriptions = 0;
   let unsubscriptions = 0;
-  const ids = ["studio-save-feedback", "studio-save-status", "studio-save-error", "studio-save-retry", "studio-save-folder",
-    ...(fallback ? ["studio-save-fallback"] : [])];
+  const ids = ["studio-save-feedback", "studio-save-status", "studio-save-error", "studio-save-retry",
+    ...(website ? [] : ["studio-save-folder"])];
   const elements = new Map(ids.map(id => {
     const listeners = new Map();
     const element = new Proxy({ hidden: true, disabled: false, href: "", textContent: "",
@@ -84,17 +88,32 @@ function harness({ owner = "true", initial = {}, status = statusResponse, autoSt
       }
     };
   };
+  class GoogleDriveStorage {
+    dispose() { this.disposed = true; }
+    studio(action, payload) {
+      assert.equal(this.disposed, undefined);
+      return new Promise((resolve, reject) => {
+        calls.push({ request: clone({ action, payload }),
+          success(response) {
+            if (response.ok) resolve(response.data);
+            else reject(Object.assign(new Error(response.error.code), response.error));
+          },
+          failure: reject });
+        if (action === "status" && autoStatus) resolve(clone(status));
+      });
+    }
+  }
   const sandbox = vm.createContext({
     Blob, FileReader, Error, crypto: webcrypto,
     document: { body: { dataset: owner === null ? {} : { ownerStudio: owner } },
       getElementById(id) {
-        if (id === "studio-save-fallback" && !fallback) return null;
+        if (website && id === "studio-save-folder") return null;
         reads.push(id);
         assert.ok(elements.has(id), `The save adapter must not touch editor/download controls: ${id}`);
         return elements.get(id);
       } },
     window: { LocalExposureTest: localEditor, addEventListener(type, callback) { events.set(type, callback); } },
-    google: { script: { get run() { return run(); } } },
+    ...(website ? { GoogleDriveStorage } : { google: { script: { get run() { return run(); } } } }),
     EXPOSURE_CONFIG: { googleScriptUrl: "https://script.google.com/macros/s/test/exec" },
     setTimeout(callback, delay) {
       const id = ++nextTimer;
@@ -169,15 +188,63 @@ test("owner initialization requests only status and displays its verified folder
   assert.equal(h.elements.get("studio-save-error").hidden, true);
 });
 
-test("a failed website connection offers the direct Google studio without losing the page", async () => {
-  const h = harness({ fallback: true, autoStatus: false });
-  assert.equal(h.elements.get("studio-save-fallback").hidden, true);
+test("the website saves a rendered JPEG without a Google account or revealing a Drive link", async () => {
+  const trial = output("website-result");
+  const h = harness({ website: true, autoStatus: false, initial: { trial } });
+  await h.advance(800);
+  assert.deepEqual(h.calls.map(call => call.request), [{ action: "status", payload: {} }]);
+  assert.equal(h.saves.length, 0);
+  h.success(h.calls[0], websiteStatus);
+  await h.until(() => h.saves.length === 1);
+  const request = h.saves[0].request;
+  assert.deepEqual(request.payload, {
+    image: { name: trial.filename, mimeType: "image/jpeg", base64: Buffer.from(await trial.blob.arrayBuffer()).toString("base64") },
+    width: trial.width,
+    height: trial.height
+  });
+  h.success(h.saves[0], websiteReceipt(request));
+  await h.until(() => h.status === "Saved to Google Drive.");
+  assert.ok(h.writes.every(write => write.property !== "href"));
+});
+
+test("a website connection timeout offers retry and preserves the queued result", async () => {
+  const h = harness({ website: true, autoStatus: false, initial: { trial: output("keep-this-result") } });
   h.fail(h.calls[0], "CONNECTION_TIMEOUT");
+  await h.advance(8000);
+  const error = h.elements.get("studio-save-error");
+  assert.equal(error.hidden, false);
+  assert.match(error.textContent, /could not connect/i);
+  assert.doesNotMatch(error.textContent, /sign in|Google account/i);
+  assert.equal(h.elements.get("studio-save-retry").hidden, false);
+  assert.equal(h.event("beforeunload").prevented, true);
+  assert.equal(h.saves.length, 0);
+
+  h.clickRetry();
+  await h.until(() => h.calls.length === 2);
+  assert.deepEqual(h.calls[1].request, { action: "status", payload: {} });
+  h.success(h.calls[1], websiteStatus);
+  await h.until(() => h.saves.length === 1);
+  assert.equal(h.saves[0].request.payload.image.name, "keep-this-result.jpg");
+  h.success(h.saves[0], websiteReceipt(h.saves[0].request));
+  await h.until(() => h.status === "Saved to Google Drive.");
+  assert.equal(error.hidden, true);
+});
+
+test("the website only reports success after receiving a matching JPEG receipt and retries the same bytes", async () => {
+  const h = harness({ website: true });
   await flush();
-  assert.equal(h.elements.get("studio-save-fallback").href,
-    "https://script.google.com/macros/s/test/exec?view=studio");
-  assert.equal(h.elements.get("studio-save-fallback").hidden, false);
-  assert.match(h.elements.get("studio-save-error").textContent, /choose the photos again/);
+  h.publish({ trial: output("website-retry") });
+  await h.advance(800);
+  await h.until(() => h.saves.length === 1);
+  h.success(h.saves[0], websiteReceipt(h.saves[0].request, { sha256: "0".repeat(64) }));
+  await flush();
+  assert.notEqual(h.status, "Saved to Google Drive.");
+  assert.equal(h.event("beforeunload").prevented, true);
+  await h.advance(1000);
+  await h.until(() => h.saves.length === 2);
+  assert.deepEqual(h.saves[1].request, h.saves[0].request);
+  h.success(h.saves[1], websiteReceipt(h.saves[1].request));
+  await h.until(() => h.status === "Saved to Google Drive.");
 });
 
 test("an existing completed result waits for verified status and then saves without another editor event", async () => {

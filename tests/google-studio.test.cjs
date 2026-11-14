@@ -106,8 +106,10 @@ function makeStudio({ activeEmail = "owner@example.test", effectiveEmail = "owne
   vm.runInContext(fs.readFileSync(path.join(root, "google-apps-script", "OwnerStudio.gs"), "utf8"), sandbox);
   return {
     api: (action, body) => clone(sandbox.studioApi({ action, ...(body === undefined ? {} : { payload: body }) })),
+    publicApi: (action, body) => clone(sandbox.publicStudioApi({ action, ...(body === undefined ? {} : { payload: body }) })),
     request: request => clone(sandbox.studioApi(request)), sandbox, properties, folders, files, io, failures, lock,
     folder: () => folders.get(properties.get("EXPOSURE_OWNER_RESULTS_FOLDER_ID")),
+    publicFolder: () => folders.get(properties.get("EXPOSURE_PUBLIC_STUDIO_RESULTS_FOLDER_ID")),
     seedFolder: (id, name, parent = archiveRoot, managed = true) => new Folder(id, name, parent, managed)
   };
 }
@@ -397,4 +399,81 @@ test("missing setup and lock contention do not create a new root or any files", 
   assert.equal(busy.io.driveReads, 0);
   assert.equal(busy.io.folderWrites, 0);
   assert.equal(busy.io.fileWrites, 0);
+});
+
+test("website studio status and saving work without a Google sign-in or access to the owner's files", () => {
+  const studio = makeStudio({ activeEmail: "" });
+  const personalFolder = studio.seedFolder("personal-results", "Personal_double_exposures");
+  studio.properties.set("EXPOSURE_OWNER_RESULTS_FOLDER_ID", personalFolder.id);
+  assert.deepEqual(studio.publicApi("status"), { ok: true, data: { maxResultBytes: 12 * 1024 * 1024 } });
+  assert.equal(studio.io.driveReads, 0);
+  assert.equal(studio.io.folderWrites, 0);
+  assert.equal(studio.api("status").error.code, "OWNER_REQUIRED");
+  const result = studio.publicApi("save", payload(23, "experimental-film-sim"));
+  const hash = crypto.createHash("sha256").update(jpeg(23)).digest("hex");
+  assert.deepEqual(result, { ok: true, data: {
+    saved: true, duplicate: false, sha256: hash, byteLength: jpeg(23).length, width: 1200, height: 800
+  } });
+  assert.equal(studio.publicFolder().name, "Studio_double_exposures");
+  assert.equal(studio.publicFolder().parent.id, "managed-root");
+  assert.deepEqual(studio.publicFolder().files[0].blob.bytes, jpeg(23));
+  assert.equal(studio.publicFolder().files[0].blob.name, `studio-result-${hash}.jpg`);
+  assert.equal(studio.publicFolder().files[0].blob.type, "image/jpeg");
+  for (const id of ["personal-results", "managed-artist", "managed-originals", "managed-results"]) {
+    assert.equal(studio.folders.get(id).files.length, 0);
+  }
+  assert.equal(studio.properties.get("EXPOSURE_OWNER_RESULTS_FOLDER_ID"), personalFolder.id);
+  assert.equal(studio.io.indexCalls, 0);
+});
+
+test("public studio saves use the visitor pause and rate limit under the existing script lock", () => {
+  const studio = makeStudio({ activeEmail: "" });
+  studio.properties.set("UPLOADS_PAUSED", "true");
+  assert.equal(studio.publicApi("status").error.code, "UPLOADS_PAUSED");
+  assert.equal(studio.publicApi("save", payload()).error.code, "UPLOADS_PAUSED");
+  studio.properties.set("UPLOADS_PAUSED", "false");
+  studio.properties.set("REQUESTS_PER_MINUTE", "1");
+  assert.equal(studio.publicApi("status").ok, true);
+  assert.equal(studio.publicApi("save", payload()).error.code, "RATE_LIMITED");
+  assert.equal(studio.io.driveReads, 0);
+  assert.equal(studio.io.folderWrites, 0);
+  assert.equal(studio.io.fileWrites, 0);
+  assert.equal(studio.lock.acquired, 4);
+  assert.equal(studio.lock.released, 4);
+  assert.equal(makeStudio({ activeEmail: "", effectiveEmail: "other@example.test" })
+    .publicApi("save", payload()).error.code, "OWNER_ACCOUNT_MISMATCH");
+});
+
+test("public studio retries a lost write by content without revealing any Drive link", () => {
+  const studio = makeStudio({ activeEmail: "visitor@example.test" });
+  studio.failures.afterCreate = true;
+  const failed = studio.publicApi("save", payload(7, "original-current"));
+  assert.equal(failed.error.code, "ARCHIVE_UNAVAILABLE");
+  assert.doesNotMatch(JSON.stringify(failed), /private-token|private\.example/);
+  const resumed = studio.publicApi("save", { ...payload(7, "experimental-film-sim"), image: image(7, "renamed.jpg") });
+  assert.equal(resumed.ok, true);
+  assert.equal(resumed.data.duplicate, true);
+  assert.doesNotMatch(JSON.stringify(resumed), /drive\.google|folderUrl|fileUrl/);
+  assert.equal(studio.io.fileWrites, 1);
+  assert.equal(studio.io.folderWrites, 1);
+  assert.equal(studio.lock.acquired, studio.lock.released);
+});
+
+test("public studio rejects other folders, caller-supplied destinations, and non-JPEG payloads", () => {
+  const studio = makeStudio({ activeEmail: "" });
+  const personalFolder = studio.seedFolder("personal-results", "Personal_double_exposures");
+  const unrelatedFolder = studio.seedFolder("unrelated-results", "Other archive");
+  const misplacedFolder = studio.seedFolder("misplaced-public-results", "Studio_double_exposures", unrelatedFolder);
+  studio.properties.set("EXPOSURE_OWNER_RESULTS_FOLDER_ID", personalFolder.id);
+  for (const id of ["managed-root", "managed-artist", "managed-originals", "managed-results", personalFolder.id, unrelatedFolder.id, misplacedFolder.id]) {
+    studio.properties.set("EXPOSURE_PUBLIC_STUDIO_RESULTS_FOLDER_ID", id);
+    assert.equal(studio.publicApi("save", payload()).error.code, "STUDIO_CONFIGURATION");
+  }
+  assert.equal(studio.publicApi("save", { ...payload(), folderId: personalFolder.id }).error.code, "INVALID_REQUEST");
+  const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const pngImage = { name: "other.png", mimeType: "image/png", base64: png.toString("base64") };
+  assert.equal(studio.publicApi("save", { ...payload(), image: pngImage }).error.code, "UNSUPPORTED_IMAGE");
+  assert.equal(studio.io.folderWrites, 0);
+  assert.equal(studio.io.fileWrites, 0);
+  assert.equal(studio.io.indexCalls, 0);
 });

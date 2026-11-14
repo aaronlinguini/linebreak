@@ -3,13 +3,11 @@
 (() => {
   if (document.body.dataset.ownerStudio !== "true") return;
   const editor = window.LocalExposureTest;
-  const storage = typeof google === "undefined" || !google.script?.run
-    ? new GoogleDriveStorage(EXPOSURE_CONFIG) : null;
+  const publicStudio = typeof google === "undefined" || !google.script?.run;
+  const storage = publicStudio ? new GoogleDriveStorage(EXPOSURE_CONFIG) : null;
   const byId = id => document.getElementById(id);
   const ui = { feedback: byId("studio-save-feedback"), status: byId("studio-save-status"),
-    error: byId("studio-save-error"), retry: byId("studio-save-retry"), folder: byId("studio-save-folder"),
-    fallback: byId("studio-save-fallback") };
-  if (ui.fallback) ui.fallback.href = `${EXPOSURE_CONFIG.googleScriptUrl}?view=studio`;
+    error: byId("studio-save-error"), retry: byId("studio-save-retry"), folder: byId("studio-save-folder") };
   const state = { disposed: false, ready: false, connecting: false, running: false,
     active: null, queue: new Map(), candidates: new Map(), saved: new WeakSet(),
     settleTimer: null, retryTimer: null, error: null, connectAttempts: 0, maximum: 0 };
@@ -22,15 +20,18 @@
   }
   function updateStatus() {
     if (state.disposed) return;
-    ui.status.textContent = pending() ? "Saving to your folder…"
-      : state.candidates.size ? "Saved to your folder." : "";
+    if (publicStudio) {
+      ui.status.textContent = pending() ? state.error ? "Waiting to save to Google Drive." : "Saving to Google Drive…"
+        : state.candidates.size ? "Saved to Google Drive." : "";
+    } else {
+      ui.status.textContent = pending() ? "Saving to your folder…" : state.candidates.size ? "Saved to your folder." : "";
+    }
     ui.error.hidden = !state.error;
-    ui.error.textContent = state.error ? ui.fallback
-      ? "Google saving did not connect here. Retry, or open the Google studio and choose the photos again."
+    ui.error.textContent = state.error ? publicStudio && !state.ready
+      ? "Could not connect to Google Drive. Retry saving or save to your device."
       : "The save could not be confirmed. Retry saving." : "";
     ui.retry.hidden = !state.error;
     ui.retry.disabled = state.running || state.connecting;
-    if (ui.fallback) ui.fallback.hidden = !state.error;
   }
   function rpc(action, payload) {
     if (storage) return storage.studio(action, payload);
@@ -74,14 +75,16 @@
     try {
       const status = await rpc("status", {});
       if (state.disposed) return;
-      if (!status || !folderPattern.test(status.folderUrl) || !Number.isSafeInteger(status.maxResultBytes)
+      if (!status || (!publicStudio && !folderPattern.test(status.folderUrl)) || !Number.isSafeInteger(status.maxResultBytes)
           || status.maxResultBytes < 1 || status.maxResultBytes > 12 * 1024 * 1024) {
         throw Object.assign(new Error("The folder could not be verified."), { code: "INVALID_RECEIPT" });
       }
       state.maximum = status.maxResultBytes;
       state.ready = true;
-      ui.folder.href = status.folderUrl;
-      ui.folder.hidden = false;
+      if (!publicStudio) {
+        ui.folder.href = status.folderUrl;
+        ui.folder.hidden = false;
+      }
     } catch (error) {
       handleFailure(error, state.connectAttempts, connect);
     } finally {
@@ -128,8 +131,8 @@
       if (state.disposed) return;
       if (!receipt || receipt.saved !== true || receipt.sha256 !== job.prepared.hash
           || receipt.byteLength !== job.snapshot.blob.size || receipt.width !== job.snapshot.width
-          || receipt.height !== job.snapshot.height || !filePattern.test(receipt.fileUrl)
-          || receipt.folderUrl !== ui.folder.href) {
+          || receipt.height !== job.snapshot.height || (!publicStudio && (!filePattern.test(receipt.fileUrl)
+          || receipt.folderUrl !== ui.folder.href))) {
         throw Object.assign(new Error("The saved JPEG could not be verified."), { code: "SAVE_NOT_CONFIRMED" });
       }
       state.saved.add(job.snapshot.blob);

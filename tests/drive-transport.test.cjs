@@ -516,7 +516,7 @@ test("studio status and save use the existing frame without visitor bootstrap", 
   assert.deepEqual(plain(await harness.storage.studio("save", { image, width: 10, height: 10 })),
     { accepted: { image, width: 10, height: 10 } });
   assert.deepEqual(harness.messages.filter(({ message }) => message.type === "request")
-    .map(({ message }) => message.request.action), ["status", "save"]);
+    .map(({ message }) => message.request.action), ["publicStudioStatus", "publicStudioSave"]);
   assert.equal(harness.iframes.length, 1);
   await assert.rejects(harness.storage.studio("begin", {}), error => error.code === "INVALID_SUBMISSION");
   harness.storage.dispose();
@@ -553,7 +553,7 @@ function makeBridge(source = websiteBridgeSource) {
       withSuccessHandler(success) {
         return { withFailureHandler(failure) { return {
           exposureApi(request) { calls.push({ method: "exposureApi", request: plain(request), success, failure }); },
-          studioApi(request) { calls.push({ method: "studioApi", request: plain(request), success, failure }); }
+          publicStudioApi(request) { calls.push({ method: "publicStudioApi", request: plain(request), success, failure }); }
         }; } };
       }
     } } },
@@ -606,13 +606,16 @@ test(`${variant}: the bridge limits actions and returns RPC responses to their o
   assert.deepEqual(response.message.response, { ok: true, data: { originalId: "source-one" } });
 });
 
-test(`${variant}: studio requests go to the owner-checked API`, () => {
+test(`${variant}: website studio requests reach only the public studio API`, () => {
   const bridge = makeBridge(source); bridge.emit({ type: "ack" });
-  bridge.emit({ type: "request", id: "studio-status", request: { action: "status", payload: {} } });
-  bridge.emit({ type: "request", id: "studio-save", request: { action: "save", payload: { width: 10, height: 10 } } });
-  assert.deepEqual(bridge.calls.map(call => call.method), ["studioApi", "studioApi"]);
-  bridge.calls[0].success({ ok: false, error: { code: "OWNER_REQUIRED" } });
-  assert.equal(bridge.messages.at(-1).message.response.error.code, "OWNER_REQUIRED");
+  bridge.emit({ type: "request", id: "owner-status", request: { action: "status", payload: {} } });
+  assert.equal(bridge.messages.at(-1).message.response.error.code, "INVALID_REQUEST");
+  bridge.emit({ type: "request", id: "studio-status", request: { action: "publicStudioStatus", payload: {} } });
+  bridge.emit({ type: "request", id: "studio-save", request: { action: "publicStudioSave", payload: { width: 10, height: 10 } } });
+  assert.deepEqual(bridge.calls.map(({ method, request }) => ({ method, request })), [
+    { method: "publicStudioApi", request: { action: "status", payload: {} } },
+    { method: "publicStudioApi", request: { action: "save", payload: { width: 10, height: 10 } } }
+  ]);
 });
 
 test(`${variant}: Google RPC failure produces an error response and never a saved acknowledgement`, () => {
